@@ -1,0 +1,33 @@
+---
+import type Dockerode from 'dockerode';
+
+interface Props {
+  ports: Dockerode.Port[];
+}
+
+const { ports } = Astro.props;
+---
+<h2 class="font-bold px-2 pb-2 pt-4">Ports</h2>
+<div class="overflow-x-auto">
+  <table class="table table-xs">
+    <!-- head -->
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>IP</th>
+        <th>Host</th>
+        <th>Container</th>
+      </tr>
+    </thead>
+    <tbody>
+      {ports.map(port => (
+        <tr>
+          <td>{port.Type}</td>
+          <td>{port.IP}</td>
+          <td>{port.PublicPort}</td>
+          <td>{port.PrivatePort}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>

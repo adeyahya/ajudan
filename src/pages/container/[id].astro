@@ -1,0 +1,19 @@
+---
+import Layout from "@/layouts/Layout.astro"
+import ContainerPorts from "@/components/container_ports.astro"
+import docker from "@/lib/docker"
+
+const {id} = Astro.params
+const info = (await docker.getContainerInfoById(id!))!
+const name = info.Names[0].replace('/', '')
+---
+
+<Layout title={name}>
+  <div class="breadcrumbs text-sm">
+    <ul>
+      <li><a href="/container">Container</a></li>
+      <li>{name}</li>
+    </ul>
+  </div>
+  <ContainerPorts ports={info.Ports} />
+</Layout>

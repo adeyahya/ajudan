@@ -11,11 +11,15 @@
   },
   "dependencies": {
     "@astrojs/check": "^0.9.3",
+    "@astrojs/node": "^8.3.3",
     "@astrojs/tailwind": "^5.1.0",
+    "@types/lodash": "^4.17.7",
     "astro": "^4.14.2",
     "better-sqlite3": "^11.1.2",
     "dockerode": "^4.0.2",
     "drizzle-orm": "^0.33.0",
+    "hono": "^4.5.6",
+    "lodash": "^4.17.21",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",
     "zod": "^3.23.8"

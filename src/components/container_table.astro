@@ -17,9 +17,24 @@ const containerList = await docker.getContainerList()
     <tbody>
       {containerList.map(container => (
         <tr>
-          <td>{container.Names[0].replace(/\//, '')}</td>
+          <td>
+            <a class="link" href={`/container/${container.Id}`}>
+              {container.Names[0].replace(/\//, '')}
+            </a>
+          </td>
           <td>{container.State}</td>
-          <td>{container.Ports.map(port => `${port.Type} ${port.PublicPort}:${port.PrivatePort}`)}</td>
+          <td>{
+            container.Ports
+              .filter(item => item.Type === "tcp" && item.PublicPort)
+              .map(port => `${port.PrivatePort}:${port.PublicPort}`)
+              .reduce((acc, val) => {
+                if (acc.includes(val)) return acc
+
+                return [...acc, val]
+              }, [] as string[])
+              .join(' ')
+            }
+          </td>
           <td>{container.Image}</td>
         </tr>
       ))}
