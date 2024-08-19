@@ -1,0 +1,107 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import Docker from "dockerode";
+import express, { type Request, type Response } from "express";
+import dotenv from "dotenv";
+import path from "node:path";
+import fs from "node:fs";
+import { minimatch } from "minimatch";
+
+dotenv.config();
+if (!process.env.SECRET) throw new Error("SECRET is required");
+
+// resolving config and checking if it's a valid config
+const config = (() => {
+  const fileString = fs.readFileSync(path.resolve(process.cwd(), "configs/config.json"), "utf-8");
+  const _config = JSON.parse(fileString);
+
+  Object.keys(_config).forEach((key) => {
+    const configItem = _config[key];
+    if (!configItem.username || typeof configItem.username !== "string") {
+      throw new Error(`Invalid username for ${key}`);
+    }
+    if (!configItem.password || typeof configItem.password !== "string") {
+      throw new Error(`Invalid password for ${key}`);
+    }
+    if (!configItem.email || typeof configItem.email !== "string") {
+      throw new Error(`Invalid email for ${key}`);
+    }
+    if (!configItem.serveraddress || typeof configItem.serveraddress !== "string") {
+      throw new Error(`Invalid serveraddress for ${key}`);
+    }
+  });
+
+  return _config;
+})();
+
+const PORT = parseInt(process.env.PORT || "3000", 10);
+const app = express();
+const docker = new Docker();
+
+const resolveAuthConfig = async (imageName: string): Promise<object> => {
+  const configKey = Object.keys(config).find(key => minimatch(imageName, key));
+  if (configKey) {
+    return { authconfig: config[configKey] };
+  }
+  return {};
+};
+
+const pullImage = async (imageName: string, tag: string) => {
+  const config = await resolveAuthConfig(imageName);
+  return new Promise((resolve, reject) => {
+    docker.pull(`${imageName}:${tag}`, config, (err: any, stream: NodeJS.ReadableStream) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      stream.pipe(process.stdout);
+      docker.modem.followProgress(stream, (err, output) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(output);
+      });
+    });
+  });
+};
+
+// Upgrade docker container
+const recreateContainer = async (containerId: string, tag: string) => {
+  const container = docker.getContainer(containerId);
+  const { Config, HostConfig } = await container.inspect();
+  await pullImage(Config.Image.replace(/:.+$/, ""), tag);
+  console.log("Stopping container");
+  await container.stop();
+  console.log("Removing container");
+  await container.remove();
+  console.log("Creating new container");
+  const newContainer = await docker.createContainer({
+    ...Config,
+    Image: `${Config.Image.replace(/:.+$/, ":" + tag)}`,
+    HostConfig,
+    name: containerId
+  });
+  console.log("Starting new container");
+  await newContainer.start();
+};
+
+app.post("/deploy/:containerId/:tag?", async (req: Request, res: Response) => {
+  const secret = req.headers["x-secret"];
+
+  if (secret !== process.env.SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { containerId, tag = "latest" } = req.params;
+  try {
+    recreateContainer(containerId, tag);
+    return res.json({ status: "OK" });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ error: "Deployment Error" });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});

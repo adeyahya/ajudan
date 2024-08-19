@@ -1,4 +1,4 @@
-import tailwind from "@astrojs/tailwind";
+import daisyui from "daisyui"
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -7,6 +7,8 @@ export default {
 		extend: {},
 	},
 	plugins: [
-		daisyui,
+		daisyui: {
+			themes: true
+		},
 	],
 }
