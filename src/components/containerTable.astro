@@ -35,7 +35,7 @@ const containerList = await docker.getContainerList()
               .join(' ')
             }
           </td>
-          <td>{container.Image}</td>
+          <td><span class="break-all">{container.Image}</span></td>
         </tr>
       ))}
     </tbody>
