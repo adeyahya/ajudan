@@ -1,4 +1,4 @@
-import React, { Fragment } from "react";
+import { Fragment } from "react";
 import Ansi from "ansi-to-react";
 
 const TerminalOutput = ({ children }: { children?: string }) => {

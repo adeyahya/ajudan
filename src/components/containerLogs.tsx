@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import Terminal, { ColorMode } from "@/components/Terminal";
-import { client } from "@/api/client";
 
 type Props = {
   name: string;
