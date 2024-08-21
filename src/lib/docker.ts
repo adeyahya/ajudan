@@ -1,10 +1,65 @@
 import Dockerode from "dockerode"
+import db from "./db"
 
 class Docker {
   private client = new Dockerode()
+  private db = db
 
   public async getContainerList() {
     return await this.client.listContainers()
+  }
+
+  public async getIdByName(name: string) {
+    const containerList = await this.getContainerList()
+    return containerList.find(item => item.Names[0] === name || item.Names[0] === '/' + name)?.Id ?? ''
+  }
+
+  public async redeploy(name: string, cb: (data: any) => void): Promise<any> {
+    const id = await this.getIdByName(name)
+    return new Promise(async (resolve, reject) => {
+      const container = this.getContainerById(id)
+      const inspect = await container.inspect()
+      const { Config, HostConfig } = inspect
+      const registryList = await this.db.query.registries.findMany({});
+      const registry = registryList.find(item => inspect.Config.Image.includes(item.registryUrl))
+      const auth = registry ? {
+        username: registry.username,
+        password: registry.password,
+        serveraddress: registry.registryUrl
+      } : {};
+      this.client.pull(inspect.Config.Image, {
+        'authconfig': auth
+      }, (err, stream) => {
+        if (err) return reject(err);
+        if (!stream) return reject({});
+        stream.on("data", data => {
+          if (data instanceof Buffer) {
+            cb(data.toString())
+          } else if (typeof data === "string") {
+            cb(data)
+          } else {
+            cb('' + data)
+          }
+        })
+
+        this.client.modem.followProgress(stream, async (streamErr, streamOutput) => {
+          if (streamErr) return reject(streamErr)
+          cb(`{"text": "Stopping Container"}\n`)
+          await container.stop();
+          cb(`{"text": "Removing Container"}\n`)
+          await container.remove();
+          cb(`{"text": "Creating Container"}\n`)
+          const newContainer = await this.client.createContainer({
+            ...Config,
+            HostConfig,
+            name
+          });
+          cb(`{"text": "Starting Container"}\n`)
+          await newContainer.start();
+          return resolve(streamOutput)
+        })
+      })
+    })
   }
 
   public getContainerById(id: string) {

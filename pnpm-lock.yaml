@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 dependencies:
+  '@adeyahya/bigbox':
+    specifier: npm:@jsr/adeyahya__bigbox@^0.1.0
+    version: /@jsr/adeyahya__bigbox@0.1.0
   '@astrojs/check':
     specifier: ^0.9.3
     version: 0.9.3(typescript@5.5.4)
@@ -53,6 +56,9 @@ dependencies:
   lodash:
     specifier: ^4.17.21
     version: 4.17.21
+  minimatch:
+    specifier: ^10.0.1
+    version: 10.0.1
   nanoid:
     specifier: ^5.0.7
     version: 5.0.7
@@ -1400,6 +1406,10 @@ packages:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.0
+    dev: false
+
+  /@jsr/adeyahya__bigbox@0.1.0:
+    resolution: {integrity: sha512-MNq+WNJUdpDk52xyIZKV65tuoj5QjdEYBeDTjb3YT+DsqHas9BO2gygUi4hrMYFwSNk54Vak0P/qsTUQcxOIig==, tarball: https://npm.jsr.io/~/11/@jsr/adeyahya__bigbox/0.1.0.tgz}
     dev: false
 
   /@nodelib/fs.scandir@2.1.5:
@@ -3837,6 +3847,13 @@ packages:
   /mimic-response@3.1.0:
     resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
     engines: {node: '>=10'}
+    dev: false
+
+  /minimatch@10.0.1:
+    resolution: {integrity: sha512-ethXTt3SGGR+95gudmqJ1eNhRO7eGEGIgYA9vnPatK4/etz2MEVDno5GMCibdMTuBMyElzIlgxMna3K94XDIDQ==}
+    engines: {node: 20 || >=22}
+    dependencies:
+      brace-expansion: 2.0.1
     dev: false
 
   /minimatch@9.0.5:

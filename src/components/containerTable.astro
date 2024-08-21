@@ -18,7 +18,7 @@ const containerList = await docker.getContainerList()
       {containerList.map(container => (
         <tr>
           <td>
-            <a class="link" href={`/container/${container.Id}`}>
+            <a class="link" href={`/container/${container.Names[0].replace(/\//, '')}`}>
               {container.Names[0].replace(/\//, '')}
             </a>
           </td>

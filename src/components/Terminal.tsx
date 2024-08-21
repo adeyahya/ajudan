@@ -18,6 +18,7 @@ export interface Props {
   prompt?: string;
   height?: string;
   colorMode?: ColorMode;
+  className?: string;
   data: string[];
   onInput?: ((input: string) => void) | null | undefined;
   startingInputValue?: string;
@@ -28,6 +29,7 @@ const Terminal = ({
   prompt,
   colorMode,
   onInput,
+  className,
   data,
   startingInputValue = "",
   scrollToPosition = true,
@@ -154,7 +156,7 @@ const Terminal = ({
     };
   }, [onInput]);
 
-  const classes = ["react-terminal-wrapper"];
+  const classes = ["react-terminal-wrapper", className];
   if (colorMode === ColorMode.Light) {
     classes.push("react-terminal-light");
   }
@@ -163,7 +165,8 @@ const Terminal = ({
     <div ref={wrapperRef} className={classes.join(" ")}>
       <div className="react-terminal">
         <VList
-          className="p-2"
+          className="p-2 pb-4"
+          overscan={20}
           ref={virtualizer}
           count={data.length}
           style={{ height: `${wrapperRef.current?.clientHeight ?? 100}px` }}

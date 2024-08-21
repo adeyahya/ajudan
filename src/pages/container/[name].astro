@@ -6,22 +6,23 @@ import docker from "@/lib/docker"
 import { ContainerLogs } from "@/components/containerLogs"
 import { ContainerControls } from "@/components/containerControls"
 
-const {id} = Astro.params
+const {name = ''} = Astro.params
+const id = await docker.getIdByName(name)
 const info = (await docker.getContainerInfoById(id!))!
 const container = docker.getContainerById(id!)
 const inspect = await container.inspect()
-const name = info.Names[0].replace('/', '')
 ---
 
 <Layout title={name}>
-  <div class="breadcrumbs text-sm">
+  <div class="breadcrumbs bg-white z-50 text-sm sticky top-0">
     <ul>
       <li><a href="/container">Container</a></li>
       <li>{name}</li>
     </ul>
   </div>
-  <ContainerControls />
-  <ContainerLogs id={id!} client:load />
+  <ContainerControls name={name} client:load />
+  <ContainerLogs name={name} client:load />
   <ContainerPorts ports={info.Ports} />
   <ContainerEnv data={inspect.Config.Env} />
+  <div class="h-24"></div>
 </Layout>

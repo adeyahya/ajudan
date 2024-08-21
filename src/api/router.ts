@@ -1,13 +1,20 @@
 import docker from '@/lib/docker';
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import { streamSSE } from 'hono/streaming'
+import { streamSSE, streamText } from 'hono/streaming'
 
 const api = new Hono()
   .use(logger())
   .get('/health', async (c) => c.json({ message: "ok" }))
-  .get('/container/:id/logs', async (c) => {
-    const container = docker.getContainerById(c.req.param().id ?? '')
+  .post('/container/:name/redeploy', async (c) => {
+    return streamText(c, async (stream) => {
+      await docker.redeploy(c.req.param().name ?? '', data => {
+        stream.write(data)
+      })
+    })
+  })
+  .get('/container/:name/logs', async (c) => {
+    const container = docker.getContainerById(c.req.param().name ?? '')
     const logStream = await container.logs({
       stderr: true,
       stdout: true,
