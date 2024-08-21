@@ -1,10 +1,15 @@
 ---
 import Layout from "@/layouts/Layout.astro"
-import ContainerPorts from "@/components/container_ports.astro"
+import ContainerPorts from "@/components/containerPorts.astro"
+import {ContainerEnv} from "@/components/containerEnv"
 import docker from "@/lib/docker"
+import { ContainerLogs } from "@/components/containerLogs"
+import { ContainerControls } from "@/components/containerControls"
 
 const {id} = Astro.params
 const info = (await docker.getContainerInfoById(id!))!
+const container = docker.getContainerById(id!)
+const inspect = await container.inspect()
 const name = info.Names[0].replace('/', '')
 ---
 
@@ -15,5 +20,8 @@ const name = info.Names[0].replace('/', '')
       <li>{name}</li>
     </ul>
   </div>
+  <ContainerControls />
+  <ContainerLogs id={id!} client:load />
   <ContainerPorts ports={info.Ports} />
+  <ContainerEnv data={inspect.Config.Env} />
 </Layout>

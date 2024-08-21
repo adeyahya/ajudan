@@ -1,30 +1,34 @@
 import docker from '@/lib/docker';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import { streamText } from 'hono/streaming'
+import { streamSSE } from 'hono/streaming'
 
 const api = new Hono()
   .use(logger())
   .get('/health', async (c) => c.json({ message: "ok" }))
   .get('/container/:id/logs', async (c) => {
     const container = docker.getContainerById(c.req.param().id ?? '')
-    const readableStream = await container.logs({
+    const logStream = await container.logs({
       stderr: true,
       stdout: true,
-      follow: true
+      follow: true,
+      tail: 500,
     })
 
-    return streamText(c, async (stream) => {
-      readableStream.on("data", async (buffer) => {
-        if (buffer instanceof Buffer) {
-          await stream.write(buffer.toString())
-        }
+    return streamSSE(c, async (stream) => {
+      let id = 0
+      logStream.addListener("data", async data => {
+        await stream.writeSSE({
+          data: data.toString(),
+          event: 'message',
+          id: String(id++),
+        })
       })
-
-      // TODO: proper stream
-      await stream.sleep(60000 * 5)
+      while (true) {
+        await stream.sleep(1000)
+      }
     })
-  })
+  });
 
 const app = api.route('/api', api);
 
