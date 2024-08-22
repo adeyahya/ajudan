@@ -1,43 +1,33 @@
 ---
 import docker from "@/lib/docker";
+import ContainerRow from "./containerRow.astro";
 
-const containerList = await docker.getContainerList()
+const containerGroupList = await docker.getContainerGroupList()
 ---
-<div class="overflow-x-auto">
-  <table class="table table-sm">
-    <!-- head -->
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>State</th>
-        <th>Ports</th>
-        <th>Image</th>
-      </tr>
-    </thead>
-    <tbody>
-      {containerList.map(container => (
-        <tr>
-          <td>
-            <a class="link" href={`/container/${container.Names[0].replace(/\//, '')}`}>
-              {container.Names[0].replace(/\//, '')}
-            </a>
-          </td>
-          <td>{container.State}</td>
-          <td>{
-            container.Ports
-              .filter(item => item.Type === "tcp" && item.PublicPort)
-              .map(port => `${port.PrivatePort}:${port.PublicPort}`)
-              .reduce((acc, val) => {
-                if (acc.includes(val)) return acc
+<table class="table table-sm">
+  <!-- head -->
+  <thead class="sticky top-0 bg-gray-200">
+    <tr>
+      <th>Name</th>
+      <th>State</th>
+      <th>Ports</th>
+      <th>Image</th>
+    </tr>
+  </thead>
+  <tbody>
+    {containerGroupList.map(group => {
+      if (group.type === "container") {
+        return (<ContainerRow data={group.data} />)
+      }
 
-                return [...acc, val]
-              }, [] as string[])
-              .join(' ')
-            }
-          </td>
-          <td><span class="break-all">{container.Image}</span></td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
-</div>
+      if (group.type === "group") {
+        return (
+          <>
+            <tr class="bg-gray-200"><th class="text-xs" colspan="4">{group.name}({group.data.length})</th></tr>
+            {group.data.map(container => (<ContainerRow data={container} />))}
+          </>  
+        )
+      }
+    })}
+  </tbody>
+</table>

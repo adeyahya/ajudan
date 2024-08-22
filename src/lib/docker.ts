@@ -1,5 +1,14 @@
-import Dockerode from "dockerode"
+import Dockerode, { type ContainerInfo } from "dockerode"
 import db from "./db"
+
+export type ContainerGroup = {
+  type: "group",
+  name: string,
+  data: ContainerInfo[]
+} | {
+  type: "container",
+  data: ContainerInfo
+}
 
 class Docker {
   private client = new Dockerode()
@@ -7,6 +16,26 @@ class Docker {
 
   public async getContainerList() {
     return await this.client.listContainers()
+  }
+
+  public async getContainerGroupList(): Promise<ContainerGroup[]> {
+    const groupMap = new Map<string, ContainerInfo[]>([])
+    const plainContainerList: ContainerInfo[] = []
+    const containerList = await this.getContainerList()
+    containerList.forEach(item => {
+      const groupName = item.Labels['com.docker.compose.project']
+      if (groupName) {
+        if (!groupMap.has(groupName)) groupMap.set(groupName, []);
+        groupMap.get(groupName)!.push(item)
+      } else {
+        plainContainerList.push(item)
+      }
+    })
+
+    return [
+      ...plainContainerList.map(item => ({ type: "container", data: item } as const)),
+      ...Array.from(groupMap).map(([groupName, groupList]) => ({ type: "group", name: groupName, data: groupList } as const)),
+    ]
   }
 
   public async getIdByName(name: string) {

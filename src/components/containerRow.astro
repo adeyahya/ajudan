@@ -1,0 +1,32 @@
+---
+import type { ContainerInfo } from 'dockerode';
+
+interface Props {
+  data: ContainerInfo;
+  className?: string
+}
+
+const { data, className } = Astro.props;
+const container = data
+---
+<tr class={className}>
+  <td>
+    <a class="link" href={`/container/${container.Names[0].replace(/\//, '')}`}>
+      {container.Names[0].replace(/\//, '')}
+    </a>
+  </td>
+  <td>{container.State}</td>
+  <td class="text-xs">{
+    container.Ports
+      .filter(item => item.Type === "tcp" && item.PublicPort)
+      .map(port => `${port.PrivatePort}:${port.PublicPort}`)
+      .reduce((acc, val) => {
+        if (acc.includes(val)) return acc
+
+        return [...acc, val]
+      }, [] as string[])
+      .join(' ')
+    }
+  </td>
+  <td><span class="line-clamp-1 break-all">{container.Image}</span></td>
+</tr>
