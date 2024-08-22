@@ -48,7 +48,7 @@ class Docker {
     return new Promise(async (resolve, reject) => {
       const container = this.getContainerById(id)
       const inspect = await container.inspect()
-      const { Config, HostConfig } = inspect
+      const { Config, HostConfig, NetworkSettings } = inspect
       const registryList = await this.db.query.registries.findMany({});
       const registry = registryList.find(item => inspect.Config.Image.includes(item.registryUrl))
       const auth = registry ? {
@@ -85,6 +85,20 @@ class Docker {
           });
           cb(`{"text": "Starting Container"}\n`)
           await newContainer.start();
+
+          const newlyCreatedContainerId = await this.getIdByName(name)
+          for (const networkName in NetworkSettings.Networks) {
+            if (networkName === "bridge") continue
+            const networkConfig = NetworkSettings.Networks[networkName]
+            cb(`{"text": "Connecting to network ${networkName}"}\n`)
+            if (!networkConfig) continue
+            const network = this.client.getNetwork(networkConfig.NetworkID)
+            network.connect({
+              Container: newlyCreatedContainerId,
+              EndpointConfig: networkConfig
+            })
+          }
+
           return resolve(streamOutput)
         })
       })
