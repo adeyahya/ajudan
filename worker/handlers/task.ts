@@ -279,15 +279,16 @@ function isInside(p: string, dir: string) {
 
 function summarizeOutward(toolName: string, input: Record<string, unknown>, who: string) {
   const s = (v: unknown, n = 80) => String(v ?? "").replace(/\s+/g, " ").slice(0, n);
-  if (toolName.endsWith("__send_message")) {
-    const channel = s(input.channel, 30);
-    return `${who} wants to send ${/^[aeiou]/i.test(channel) ? "an" : "a"} ${channel} message to ${s(input.to, 60)}: "${s(input.subject)}"`;
-  }
+  // WhatsApp first: its send_message also ends with "__send_message".
   if (toolName === "mcp__whatsapp__send_message") {
     return `${who} wants to post in WhatsApp "${s(input.chat, 40)}": "${s(input.message, 100)}"`;
   }
   if (toolName === "mcp__whatsapp__send_file") {
     return `${who} wants to post ${s(input.file, 40)} in WhatsApp "${s(input.chat, 40)}"`;
+  }
+  if (toolName.endsWith("__send_message")) {
+    const channel = s(input.channel, 30);
+    return `${who} wants to send ${/^[aeiou]/i.test(channel) ? "an" : "a"} ${channel} message to ${s(input.to, 60)}: "${s(input.subject)}"`;
   }
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;

@@ -122,17 +122,7 @@ async function Content({ params }: Params) {
 function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<string, Deliverable> }) {
   const i = a.input as Record<string, unknown>;
   const str = (v: unknown) => (v == null ? "" : String(v));
-  if (a.toolName.endsWith("__send_message")) {
-    return (
-      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
-        <div className="text-xs text-muted-foreground">
-          {str(i.channel)} → <span className="text-foreground">{str(i.to)}</span>
-        </div>
-        <div className="font-medium">{str(i.subject)}</div>
-        <Prose>{str(i.body)}</Prose>
-      </div>
-    );
-  }
+  // Check WhatsApp first: its send_message would also match the generic rule below.
   if (a.toolName.startsWith("mcp__whatsapp__send_")) {
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
@@ -141,6 +131,17 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
           {i.file ? ` · file ${str(i.file)}` : ""}
         </div>
         <Prose>{str(i.message ?? i.caption ?? "")}</Prose>
+      </div>
+    );
+  }
+  if (a.toolName.endsWith("__send_message")) {
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+        <div className="text-xs text-muted-foreground">
+          {str(i.channel)} → <span className="text-foreground">{str(i.to)}</span>
+        </div>
+        <div className="font-medium">{str(i.subject)}</div>
+        <Prose>{str(i.body)}</Prose>
       </div>
     );
   }
