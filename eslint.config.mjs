@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // App data (SQLite, teammate workspaces, business Chrome profiles) and test data.
+    "data/**",
+    ".test-data/**",
+    ".next-*/**",
   ]),
 ]);
 

@@ -39,7 +39,8 @@
     ".next-office/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    ".test-data"
+    ".test-data",
+    "data",
+    "node_modules"
   ]
 }
