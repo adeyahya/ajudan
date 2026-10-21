@@ -41,7 +41,7 @@ export async function browserStatus(): Promise<BrowserStatus> {
   }
 }
 
-const CHROME_PATH =
+export const CHROME_PATH =
   process.env.AJUDAN_CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 /** Start this business's Chrome (visible window) if it isn't running. Returns its CDP endpoint. */

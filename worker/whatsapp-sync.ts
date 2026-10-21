@@ -42,7 +42,7 @@ async function ensure() {
     fs.rmSync(flag, { force: true });
     return;
   }
-  if (child) return;
+  if (child || paused) return;
   if (!fs.existsSync(dir) || !(await isLinked())) return;
   const c = spawn(
     WACLI,
@@ -82,6 +82,28 @@ async function ensure() {
     writeStatus({ running: false, error: code ? (lastError ?? `wacli sync exited with ${code}`) : undefined });
     console.log(`[whatsapp] sync stopped${code ? ` (${lastError ?? code})` : ""}`);
   });
+}
+
+let paused = 0;
+
+/**
+ * Run a wacli command that needs the store lock the sync holds (e.g. creating a
+ * group). Stops the sync, runs `fn`, and lets the next check restart it.
+ */
+export async function withSyncPaused<T>(fn: () => Promise<T>): Promise<T> {
+  paused++;
+  try {
+    const c = child;
+    if (c) {
+      const exited = new Promise((r) => c.once("exit", r));
+      c.kill("SIGTERM");
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+    }
+    return await fn();
+  } finally {
+    paused--;
+    if (!paused) void ensure();
+  }
 }
 
 /** Start syncing the open folder's WhatsApp (if linked); re-checks every 30s. */

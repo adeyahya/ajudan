@@ -2,6 +2,7 @@ import type { Deliverable, DeliverableStatus } from "@/db/schema";
 import { Avatar, Badge, Button, Prose } from "@/components/kit";
 import { setDeliverableStatus } from "./actions";
 import { CopyButton } from "./copy-button";
+import { ImageStrip } from "@/components/image-strip";
 
 export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "blue" | "red"> = {
   draft: "neutral",
@@ -41,10 +42,14 @@ export function DeliverableCard({
             {teammate ? ` · ${teammate.name}` : ""} · {d.createdAt.toLocaleString()}
           </div>
         </div>
+        {d.attachments.length > 0 && (
+          <span className="font-pixel text-xs text-muted-foreground">🖼 {d.attachments.length}</span>
+        )}
         <Badge tone={DELIVERABLE_TONE[d.status]}>{d.status}</Badge>
         <span className="text-muted-foreground text-xs transition group-open:rotate-90">▶</span>
       </summary>
       <div className="border-t border-border p-3 space-y-3">
+        <ImageStrip businessId={d.businessId} images={d.attachments} size={120} />
         <Prose className="max-h-[28rem] overflow-y-auto">{d.content}</Prose>
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton text={d.content} />

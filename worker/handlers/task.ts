@@ -58,7 +58,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     const delegationRoster = canDelegate ? roster : [];
 
     const useBrowser = teammate.browserAccess;
-    const useWhatsapp = teammate.whatsappAccess && business.whatsappChats.length > 0;
+    const useWhatsapp = teammate.whatsappAccess;
     const outward = [...OUTWARD_BIZ_TOOLS, ...(useWhatsapp ? OUTWARD_WA_TOOLS : [])];
     const biz = createBizServer({
       businessId: business.id,
@@ -66,6 +66,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       taskId: task.id,
       roster: delegationRoster,
       browser: useBrowser,
+      cwd,
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
@@ -283,6 +284,13 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   if (toolName === "mcp__whatsapp__send_message") {
     return `${who} wants to post in WhatsApp "${s(input.chat, 40)}": "${s(input.message, 100)}"`;
   }
+  if (toolName === "mcp__whatsapp__create_group") {
+    return `${who} wants to create the WhatsApp group "${s(input.name, 60)}"${input.announce_only ? " (only admins can post)" : ""}`;
+  }
+  if (toolName === "mcp__whatsapp__update_group") {
+    const what = [input.name && `rename to "${s(input.name, 50)}"`, input.description !== undefined && "change the description", input.admins_only !== undefined && (input.admins_only ? "make it admins-only" : "let everyone post")].filter(Boolean).join(", ");
+    return `${who} wants to update WhatsApp group "${s(input.chat, 40)}": ${what}`;
+  }
   if (toolName === "mcp__whatsapp__send_file") {
     return `${who} wants to post ${s(input.file, 40)} in WhatsApp "${s(input.chat, 40)}"`;
   }
@@ -365,6 +373,20 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.
 - At the end, append any durable learnings (decisions, what worked, owner preferences) to memory.md with Edit. Keep it short.
 - Finish with a concise summary for the owner: what you did, what you saved, and what's next.
+
+## Making images
+You can make real images (social posts, carousel slides, posters, banners) with render_image: design each one as a self-contained HTML page (inline CSS, Google Fonts, product photos by URL from the business's website), usually 1080×1350 for Instagram/TikTok portrait or 1080×1080 square. Big readable text, the brand's colors and voice, one idea per slide. Read each PNG afterwards to check it looks right, fix and re-render if needed, then attach the images in order with save_deliverable(images=[…]) so the owner can see them on the Work page.
+
+## What you can't do here
+${[
+  useBrowser ? null : "- The business browser: if a task needs a website the owner is logged into (Shopee, TikTok…), say so and ask the owner to turn on “Can use the business browser” for you on the Team page.",
+  useWhatsapp
+    ? null
+    : "- WhatsApp: if a task needs WhatsApp, say so and ask the owner to turn on “Can use WhatsApp” for you on the Team page (and allow the chats on Business → WhatsApp).",
+]
+  .filter(Boolean)
+  .join("\n") || "- (nothing extra)"}
+- A permission given in chat (“I give you access”) doesn't change your tools; only those switches do.
 ${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }

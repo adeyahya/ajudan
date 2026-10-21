@@ -1,0 +1,1 @@
+ALTER TABLE `deliverables` ADD `attachments` text DEFAULT '[]' NOT NULL;

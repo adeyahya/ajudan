@@ -10,7 +10,7 @@
  * worker aborts what's running, puts those jobs back in the old folder's queue
  * (they run again when it's reopened), stops its schedules and moves on.
  */
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
 import { readConfig } from "@/lib/folders";
@@ -62,6 +62,8 @@ function activate(dir: string | null) {
     return;
   }
   requeueStaleJobs();
+  // Approvals left waiting by interrupted tasks: those tasks run again and ask afresh.
+  db.delete(schema.approvals).where(eq(schema.approvals.status, "pending")).run();
   db.update(schema.teammates)
     .set({ state: "idle", currentActivity: null })
     .where(inArray(schema.teammates.state, ["working", "waiting"]))

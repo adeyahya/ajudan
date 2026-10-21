@@ -149,6 +149,8 @@ export const deliverables = sqliteTable("deliverables", {
   /** Free-form channel, e.g. "instagram", "newsletter", "website". */
   channel: text("channel"),
   status: text("status").$type<DeliverableStatus>().notNull().default("draft"),
+  /** Files that belong to this work (e.g. carousel slides), relative to the business folder: work/images/… */
+  attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
 });
 

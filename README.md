@@ -46,8 +46,10 @@ Open http://localhost:3000, add your business and website, and do the interview.
 - **WhatsApp** (via [wacli](https://wacli.sh), `brew install openclaw/tap/wacli`): link the business's WhatsApp on **Business → WhatsApp** by scanning a QR code. The session and message store live in `<folder>/whatsapp/`.
   - Tick the groups or communities teammates may use (e.g. the reseller community); every other chat stays invisible to them.
   - Turn on "Can use WhatsApp" for a teammate on the Team page. They can read and search those chats for context and post updates; posting follows their freedom setting (approvals for "ask first", never for "draft only").
+  - Teammates can also create a group (`create_group`), rename it, set its description or make it admins-only (`update_group`), and fetch its invite link. Changes go through approvals like posts. A group's picture can't be set via wacli, so set it on the phone.
   - While the folder is open, the worker keeps `wacli sync --follow` running and spaces sends 2–6s apart.
   - wacli uses the unofficial WhatsApp Web protocol, so keep volume human-sized.
+- **Images**: teammates design social posts and carousel slides as HTML and render them to PNG (`render_image`, headless Chrome via `playwright-core`). Images are saved to `<folder>/work/images/` and attached to the work. See them on the Work page and under the teammate's reply; click a thumbnail to view it large or download it.
 - **Data**: SQLite at `<business folder>/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands

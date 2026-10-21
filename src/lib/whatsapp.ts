@@ -110,6 +110,30 @@ export async function sendFile(chatJid: string, file: string, caption?: string) 
   });
 }
 
+/** Create a group on the business's WhatsApp. Needs the store lock (see worker withSyncPaused). */
+export async function createGroup(name: string, opts: { description?: string; announceOnly?: boolean } = {}) {
+  const g = await wacli<{ JID: string; Name: string }>(
+    ["groups", "create", "--name", name, ...(opts.announceOnly ? ["--announce-only"] : [])],
+    { timeoutMs: 120_000 },
+  );
+  if (opts.description) {
+    await wacli(["groups", "description", "--jid", g.JID, "--text", opts.description], { timeoutMs: 60_000 });
+  }
+  const invite = await wacli<{ link: string }>(["groups", "invite", "link", "get", "--jid", g.JID], { timeoutMs: 60_000 });
+  return { jid: g.JID, name: g.Name, inviteLink: invite.link };
+}
+
+/** Rename / describe / admins-only a group. Needs the store lock (see worker withSyncPaused). */
+export async function updateGroup(jid: string, opts: { name?: string; description?: string; adminsOnly?: boolean }) {
+  if (opts.name) await wacli(["groups", "rename", "--jid", jid, "--name", opts.name]);
+  if (opts.description !== undefined) await wacli(["groups", "description", "--jid", jid, "--text", opts.description]);
+  if (opts.adminsOnly !== undefined) await wacli(["groups", "announce-only", "--jid", jid, opts.adminsOnly ? "--on" : "--off"]);
+}
+
+export async function inviteLink(jid: string) {
+  return (await wacli<{ link: string }>(["groups", "invite", "link", "get", "--jid", jid])).link;
+}
+
 export async function unlink() {
   return wacli(["auth", "logout"], { timeoutMs: 30_000 });
 }

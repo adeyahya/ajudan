@@ -180,6 +180,12 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Reading WhatsApp: ${short(input.chat, 40)}`;
     case "mcp__whatsapp__search_messages":
       return `Searching WhatsApp: ${short(input.query, 40)}`;
+    case "mcp__whatsapp__update_group":
+      return `Updating WhatsApp group: ${short(input.chat, 40)}`;
+    case "mcp__whatsapp__invite_link":
+      return `Getting invite link: ${short(input.chat, 40)}`;
+    case "mcp__whatsapp__create_group":
+      return `Creating WhatsApp group: ${short(input.name, 40)}`;
     case "mcp__whatsapp__send_message":
     case "mcp__whatsapp__send_file":
       return `Posting in WhatsApp: ${short(input.chat, 40)}`;

@@ -123,6 +123,29 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
   const i = a.input as Record<string, unknown>;
   const str = (v: unknown) => (v == null ? "" : String(v));
   // Check WhatsApp first: its send_message would also match the generic rule below.
+  if (a.toolName === "mcp__whatsapp__update_group") {
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+        <div className="text-xs text-muted-foreground">
+          Update WhatsApp group <span className="text-foreground">{str(i.chat)}</span>
+        </div>
+        {i.name ? <div>New name: <b>{str(i.name)}</b></div> : null}
+        {i.admins_only !== undefined ? <div>{i.admins_only ? "Only admins can post" : "Everyone can post"}</div> : null}
+        {i.description !== undefined ? <Prose>{str(i.description)}</Prose> : null}
+      </div>
+    );
+  }
+  if (a.toolName === "mcp__whatsapp__create_group") {
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+        <div className="text-xs text-muted-foreground">
+          New WhatsApp group{i.announce_only ? " · only admins can post" : ""}
+        </div>
+        <div className="font-medium">{str(i.name)}</div>
+        {i.description ? <Prose>{str(i.description)}</Prose> : null}
+      </div>
+    );
+  }
   if (a.toolName.startsWith("mcp__whatsapp__send_")) {
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">

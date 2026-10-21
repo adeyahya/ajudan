@@ -30,5 +30,7 @@ export function syncDeliverableFile(deliverableId: string) {
     `created: ${d.createdAt.toISOString()}`,
     `id: ${d.id}`,
   ].filter(Boolean);
-  fs.writeFileSync(file, `---\n${meta.join("\n")}\n---\n\n# ${d.title}\n\n${d.content}\n`);
+  // Images live in work/images/, so links from work/*.md are relative to it.
+  const images = d.attachments.map((p, i) => `![${d.title} ${i + 1}](${path.relative("work", p)})`).join("\n\n");
+  fs.writeFileSync(file, `---\n${meta.join("\n")}\n---\n\n# ${d.title}\n\n${images ? `${images}\n\n` : ""}${d.content}\n`);
 }

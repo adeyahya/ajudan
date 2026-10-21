@@ -3,19 +3,24 @@
  * with the team and (simulated) act on the outside world. Built per task so every
  * handler knows which business, teammate and task it is acting for.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
+import { slugify } from "@/lib/folders";
+import { renderHtmlToPng } from "@/lib/images";
+import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
 
 export const BIZ_SERVER = "biz";
 
 /** Tools that act inside Ajudan only: always allowed. */
-export const SAFE_BIZ_TOOLS = ["save_deliverable", "list_deliverables", "assign_task", "set_status"].map(
+export const SAFE_BIZ_TOOLS = ["save_deliverable", "list_deliverables", "assign_task", "set_status", "render_image"].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
 /** Tools that reach the outside world: gated by the teammate's autonomy. */
@@ -31,6 +36,8 @@ export type BizContext = {
   roster: Pick<Teammate, "id" | "name" | "title">[];
   /** The teammate has the business browser this task (adds confirm_browser_action). */
   browser?: boolean;
+  /** The teammate's working folder (rendered images go to its work/images/). */
+  cwd: string;
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -56,8 +63,17 @@ export function createBizServer(ctx: BizContext) {
         title: z.string().describe("Short descriptive title"),
         content: z.string().describe("The full content, ready to use"),
         channel: z.string().optional().describe('Where it is meant to go, e.g. "instagram", "newsletter"'),
+        images: z
+          .array(z.string())
+          .optional()
+          .describe("Images that belong to this work, in order (paths returned by render_image), e.g. carousel slides"),
       },
       async (a) => {
+        const attachments = (a.images ?? []).map((p: string) => p.replace(/^\.?\//, ""));
+        const missing = attachments.filter(
+          (p: string) => !p.startsWith("work/images/") || !fs.existsSync(path.join(dataDir(), p)),
+        );
+        if (missing.length) return fail(`Unknown image(s): ${missing.join(", ")}. Use the paths render_image returned.`);
         const d = db
           .insert(schema.deliverables)
           .values({
@@ -69,12 +85,37 @@ export function createBizServer(ctx: BizContext) {
             content: a.content,
             channel: a.channel ?? null,
             status: "draft",
+            attachments,
           })
           .returning({ id: schema.deliverables.id })
           .get();
         syncDeliverableFile(d.id);
         ev("deliverable_saved", `${teammate.name} saved "${a.title}"`, { deliverableId: d.id, kind: a.kind });
         return ok(`Saved as draft. deliverable_id: ${d.id}`);
+      },
+    ),
+
+    tool(
+      "render_image",
+      "Design an image (social post, carousel slide, poster, banner) as one self-contained HTML page and render it to PNG. Use inline CSS; Google Fonts and image URLs are fine. Then Read the PNG to check it, and attach it to your work with save_deliverable(images=[…]).",
+      {
+        name: z.string().describe('Short file name, e.g. "carousel-1-cover"'),
+        html: z.string().describe("Complete HTML document sized exactly to width × height"),
+        width: z.number().int().min(200).max(4096).optional().describe("Pixels (default 1080)"),
+        height: z.number().int().min(200).max(4096).optional().describe("Pixels (default 1350, Instagram portrait)"),
+      },
+      async (a) => {
+        const width = a.width ?? 1080;
+        const height = a.height ?? 1350;
+        const file = `${new Date().toISOString().slice(0, 10)}-${slugify(a.name)}-${taskId.slice(0, 4)}.png`;
+        const inWorkspace = path.join(ctx.cwd, "work", "images", file);
+        await renderHtmlToPng({ html: a.html, width, height, outPath: inWorkspace });
+        // The business folder keeps a copy next to the .md files of the work.
+        const rel = path.join("work", "images", file);
+        fs.mkdirSync(path.join(dataDir(), "work", "images"), { recursive: true });
+        fs.copyFileSync(inWorkspace, path.join(dataDir(), rel));
+        ev("image_rendered", `${teammate.name} designed ${file}`, { path: rel });
+        return ok(`Rendered ${width}×${height}. Check it with Read("${path.relative(ctx.cwd, inWorkspace)}"). Attach it as "${rel}".`);
       },
     ),
 

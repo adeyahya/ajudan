@@ -8,6 +8,7 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { Task, TaskStatus, TeammateState } from "@/db/schema";
 import { Chat, type ChatMessage } from "@/components/chat";
+import { ImageStrip } from "@/components/image-strip";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Button, Card, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
@@ -74,6 +75,22 @@ async function loadTeammate(businessId: string, teammateId: string) {
         .orderBy(asc(schema.activityEvents.id))
         .all()
     : [];
+  // Images each task produced, shown under its reply.
+  const taskImages = new Map<string, string[]>();
+  if (tasks.length) {
+    for (const d of db
+      .select({ taskId: schema.deliverables.taskId, attachments: schema.deliverables.attachments })
+      .from(schema.deliverables)
+      .where(
+        inArray(
+          schema.deliverables.taskId,
+          tasks.map((t) => t.id),
+        ),
+      )
+      .all()) {
+      if (d.taskId && d.attachments.length) taskImages.set(d.taskId, [...(taskImages.get(d.taskId) ?? []), ...d.attachments]);
+    }
+  }
   const deliverableCount = db
     .select({ id: schema.deliverables.id })
     .from(schema.deliverables)
@@ -92,7 +109,7 @@ async function loadTeammate(businessId: string, teammateId: string) {
       memory = null;
     }
   }
-  return { teammate, tasks, steps, deliverableCount, mates, memory };
+  return { teammate, tasks, steps, deliverableCount, mates, memory, taskImages };
 }
 
 function createdByLabel(createdBy: string, mates: { id: string; name: string }[]) {
@@ -112,6 +129,7 @@ function toMessages(
   tasks: Task[],
   steps: { taskId: string | null; message: string }[],
   mates: { id: string; name: string }[],
+  taskImages: Map<string, string[]>,
 ): ChatMessage[] {
   const stepsByTask = new Map<string, string[]>();
   for (const s of steps) if (s.taskId) stepsByTask.set(s.taskId, [...(stepsByTask.get(s.taskId) ?? []), s.message]);
@@ -150,6 +168,9 @@ function toMessages(
         meta: task.finishedAt ? time(task.finishedAt) : undefined,
         footer: (
           <>
+            {(taskImages.get(task.id)?.length ?? 0) > 0 && (
+              <ImageStrip businessId={businessId} images={taskImages.get(task.id)!} className="w-full pb-1" />
+            )}
             <Badge tone={TASK_TONE[task.status]}>{task.status.replace("_", " ")}</Badge>
             {task.costUsd > 0 && <span className="text-xs text-muted-foreground">${task.costUsd.toFixed(2)}</span>}
             <Link href={`/b/${businessId}/deliverables`} className="text-xs text-muted-foreground hover:text-foreground">
@@ -166,7 +187,7 @@ async function Content({ params }: Params) {
   const { id, tid } = await params;
   const [biz, data] = await Promise.all([getBusiness(id), loadTeammate(id, tid)]);
   if (!biz || !data) notFound();
-  const { teammate: t, tasks, steps, deliverableCount, mates, memory } = data;
+  const { teammate: t, tasks, steps, deliverableCount, mates, memory, taskImages } = data;
   const waiting = tasks.some((task) => task.status === "waiting_approval");
 
   return (
@@ -197,7 +218,7 @@ async function Content({ params }: Params) {
         <Chat
           className="flex-1"
           agent={{ id: t.id, name: t.name, color: t.color }}
-          messages={toMessages(id, tasks, steps, mates)}
+          messages={toMessages(id, tasks, steps, mates, taskImages)}
           busy={false}
           sendAction={sendTaskMessage.bind(null, id, t.id)}
           placeholder={`Ask ${t.name} to work on something…`}
