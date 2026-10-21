@@ -1,8 +1,12 @@
 "use server";
 
+import fs from "node:fs";
+import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
+import { isServablePath } from "@/lib/media";
+import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 
 function findTeammate(businessId: string, teammateId: string) {
@@ -39,10 +43,17 @@ export async function runScheduledNow(formData: FormData) {
   refresh();
 }
 
-/** Chat entry point: the typed message becomes a task. */
-export async function sendTaskMessage(businessId: string, teammateId: string, instructions: string) {
-  if (!instructions.trim()) return;
+/** Chat entry point: the typed message (and any files dropped in) becomes a task. */
+export async function sendTaskMessage(businessId: string, teammateId: string, instructions: string, attachments: string[] = []) {
+  const files = attachments.filter((f) => isServablePath(f) && fs.existsSync(path.join(dataDir(), f)));
+  if (!instructions.trim() && !files.length) return;
   findTeammate(businessId, teammateId);
-  createTask({ businessId, teammateId, instructions: instructions.trim(), createdBy: "user" });
+  createTask({
+    businessId,
+    teammateId,
+    instructions: instructions.trim() || "(See the attached files.)",
+    createdBy: "user",
+    attachments: files,
+  });
   refresh();
 }

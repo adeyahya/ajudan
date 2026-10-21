@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `attachments` text DEFAULT '[]' NOT NULL;

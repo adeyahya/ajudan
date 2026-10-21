@@ -115,6 +115,8 @@ export const tasks = sqliteTable("tasks", {
    * request). When all children finish, the manager reports back. See src/lib/manager.ts.
    */
   parentTaskId: text("parent_task_id"),
+  /** Files the owner (or the delegating teammate) attached: "media/…" or "work/…" paths. */
+  attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),

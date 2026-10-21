@@ -13,9 +13,11 @@ import type { DeliverableStatus, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { slugify } from "@/lib/folders";
 import { renderHtmlToPng } from "@/lib/images";
+import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
+import { renderVideo } from "./video";
 
 export const BIZ_SERVER = "biz";
 
@@ -26,6 +28,10 @@ export const SAFE_BIZ_TOOLS = [
   "assign_task",
   "set_status",
   "render_image",
+  "list_media",
+  "inspect_media",
+  "extract_frames",
+  "render_video",
   "team_status",
   "task_results",
   "pending_approvals",
@@ -49,6 +55,8 @@ export type BizContext = {
   cwd: string;
   /** The manager gets team-overview tools, and its delegations link back to this task. */
   isManager?: boolean;
+  /** Aborted when the folder closes (stops a render). */
+  signal?: AbortSignal;
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -77,14 +85,16 @@ export function createBizServer(ctx: BizContext) {
         images: z
           .array(z.string())
           .optional()
-          .describe("Images that belong to this work, in order (paths returned by render_image), e.g. carousel slides"),
+          .describe(
+            "Images and videos that belong to this work, in order: paths returned by render_image or render_video (e.g. carousel slides, the final video), or media/… files",
+          ),
       },
       async (a) => {
         const attachments = (a.images ?? []).map((p: string) => p.replace(/^\.?\//, ""));
-        const missing = attachments.filter(
-          (p: string) => !p.startsWith("work/images/") || !fs.existsSync(path.join(dataDir(), p)),
-        );
-        if (missing.length) return fail(`Unknown image(s): ${missing.join(", ")}. Use the paths render_image returned.`);
+        const missing = attachments.filter((p: string) => !isServablePath(p) || !fs.existsSync(path.join(dataDir(), p)));
+        if (missing.length) {
+          return fail(`Unknown file(s): ${missing.join(", ")}. Use the paths render_image or render_video returned, or media/… files.`);
+        }
         const d = db
           .insert(schema.deliverables)
           .values({
@@ -127,6 +137,105 @@ export function createBizServer(ctx: BizContext) {
         fs.copyFileSync(inWorkspace, path.join(dataDir(), rel));
         ev("image_rendered", `${teammate.name} designed ${file}`, { path: rel });
         return ok(`Rendered ${width}×${height}. Check it with Read("${path.relative(ctx.cwd, inWorkspace)}"). Attach it as "${rel}".`);
+      },
+    ),
+
+    tool(
+      "list_media",
+      "List the business's media library: footage, photos and audio the owner uploaded (newest first). Listing makes them readable in your folder at the same path.",
+      { kind: z.enum(["video", "image", "audio", "file"]).optional() },
+      async (a) => {
+        const dir = mediaDir();
+        if (!fs.existsSync(dir)) return ok("The media library is empty. Ask the owner to drop files into the chat.");
+        const files = fs
+          .readdirSync(dir)
+          .filter((f) => !f.startsWith(".") && (!a.kind || mediaKind(f) === a.kind))
+          .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+          .sort((x, y) => y.t - x.t)
+          .slice(0, 40)
+          .map((x) => path.join("media", x.f));
+        if (!files.length) return ok("No matching files in the media library.");
+        linkIntoWorkspace(files, ctx.cwd);
+        const lines = await Promise.all(files.map(async (rel) => `- ${describeMedia(rel, await mediaInfo(path.join(dataDir(), rel)))}`));
+        return ok(lines.join("\n"));
+      },
+    ),
+
+    tool(
+      "inspect_media",
+      "Duration, size, frame rate and whether there is sound, for a video, image or audio file (media/… or work/…).",
+      { file: z.string().describe('e.g. "media/2026-10-22-unboxing-a1b2c3.mp4"') },
+      async (a) => {
+        const rel = a.file.replace(/^\.?\//, "");
+        const abs = path.join(dataDir(), rel);
+        if (!isServablePath(rel) || !fs.existsSync(abs)) return fail(`No file ${a.file}. Use paths from your task or list_media.`);
+        return ok(describeMedia(rel, await mediaInfo(abs)));
+      },
+    ),
+
+    tool(
+      "extract_frames",
+      "Take still frames from a video (owner footage or your own render) as JPGs in work/frames/, so you can Read them and see what's in it. Evenly spread by default, or at the given seconds.",
+      {
+        file: z.string().describe("media/… or work/videos/… video"),
+        count: z.number().int().min(1).max(24).optional().describe("How many evenly spread frames (default 6)"),
+        at_seconds: z.array(z.number().min(0)).max(24).optional().describe("Exact timestamps instead"),
+      },
+      async (a) => {
+        const rel = a.file.replace(/^\.?\//, "");
+        const abs = path.join(dataDir(), rel);
+        if (!isServablePath(rel) || !fs.existsSync(abs)) return fail(`No file ${a.file}.`);
+        if (mediaKind(rel) !== "video") return fail(`${a.file} is not a video. Read images directly.`);
+        const frames = await extractFrames(abs, path.join(ctx.cwd, "work", "frames"), { count: a.count, at: a.at_seconds });
+        return ok(
+          `Read these to look at the video:\n${frames.map((f) => `- ${path.relative(ctx.cwd, f.file)} (at ${f.atSec}s)`).join("\n")}`,
+        );
+      },
+    ),
+
+    tool(
+      "render_video",
+      "Render your Remotion video to MP4. The file (a .tsx in your folder, usually work/video/<name>/Video.tsx) must `export const video = { width, height, fps, durationInFrames }` and default-export the component. Use staticFile(\"media/…\") for the owner's footage. Takes a minute or more. Returns the path to attach, or the build or render error to fix.",
+      {
+        file: z.string().describe('e.g. "work/video/promo-nama/Video.tsx"'),
+        name: z.string().describe('Output name, e.g. "promo-nama-tiktok"'),
+      },
+      async (a) => {
+        const source = path.resolve(ctx.cwd, a.file);
+        if (!source.startsWith(ctx.cwd + path.sep) || !/\.tsx?$/.test(source) || !fs.existsSync(source)) {
+          return fail(`No .tsx file ${a.file} in your folder.`);
+        }
+        const file = `${new Date().toISOString().slice(0, 10)}-${slugify(a.name)}-${taskId.slice(0, 4)}.mp4`;
+        const inWorkspace = path.join(ctx.cwd, "work", "videos", file);
+        let shown = -1;
+        const setActivity = (text: string) =>
+          db.update(schema.teammates).set({ currentActivity: text }).where(eq(schema.teammates.id, teammate.id)).run();
+        setActivity("Rendering video…");
+        try {
+          const r = await renderVideo({
+            source,
+            outPath: inWorkspace,
+            workDir: path.join(ctx.cwd, "work", ".render", taskId.slice(0, 8)),
+            signal: ctx.signal,
+            onProgress: (p) => {
+              const pct = Math.floor(p * 10) * 10;
+              if (pct !== shown) {
+                shown = pct;
+                setActivity(`Rendering video ${pct}%`);
+              }
+            },
+          });
+          const rel = path.join("work", "videos", file);
+          linkFile(inWorkspace, path.join(dataDir(), rel));
+          ev("video_rendered", `${teammate.name} rendered ${file}`, { path: rel });
+          const info = await mediaInfo(inWorkspace);
+          return ok(
+            `Rendered ${describeMedia(rel, info)} (${r.width}×${r.height}, ${r.fps} fps). Check it with extract_frames("${rel}") and Read the frames. Attach it as "${rel}".`,
+          );
+        } catch (err) {
+          const msg = (err as Error).message ?? String(err);
+          return fail(`Render failed. Fix ${a.file} and try again:\n${msg.slice(0, 4000)}`);
+        }
       },
     ),
 
@@ -265,6 +374,10 @@ export function createBizServer(ctx: BizContext) {
         {
           teammate_name: z.string().describe("First name of the teammate"),
           instructions: z.string().describe("What to do, with all context they need"),
+          files: z
+            .array(z.string())
+            .optional()
+            .describe("Files they need (the owner's footage and photos from your task, media/… or work/… paths)"),
         },
         async (a) => {
           const target = ctx.roster.find((r) => r.name.toLowerCase() === a.teammate_name.trim().toLowerCase());
@@ -273,10 +386,14 @@ export function createBizServer(ctx: BizContext) {
               return fail("You can't assign a task to yourself; just do the work.");
             return fail(`No teammate named "${a.teammate_name}". Available: ${ctx.roster.map((r) => r.name).join(", ")}.`);
           }
+          const files = (a.files ?? []).map((f: string) => f.replace(/^\.?\//, ""));
+          const unknown = files.filter((f: string) => !isServablePath(f) || !fs.existsSync(path.join(dataDir(), f)));
+          if (unknown.length) return fail(`Unknown file(s): ${unknown.join(", ")}. Use media/… or work/… paths.`);
           const task = createTask({
             businessId,
             teammateId: target.id,
             instructions: a.instructions,
+            attachments: files,
             createdBy: `teammate:${teammate.id}`,
             // The manager's report-back waits for everything delegated from this task.
             parentTaskId: ctx.isManager ? taskId : null,
@@ -286,7 +403,9 @@ export function createBizServer(ctx: BizContext) {
             to: target.id,
             delegatedTaskId: task.id,
           });
-          return ok(`Assigned to ${target.name} (task ${task.id}). They'll work on it after you; check later with list_deliverables.`);
+          return ok(
+            `Assigned to ${target.name} (task ${task.id})${files.length ? ` with ${files.length} file(s)` : ""}. They'll work on it after you; check later with list_deliverables.`,
+          );
         },
       ),
     );

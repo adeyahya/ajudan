@@ -1,17 +1,51 @@
 "use client";
 
-import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, FileIcon, MusicIcon, PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { mediaKind } from "@/lib/media-types";
 import { cn } from "@/lib/utils";
 
 /** URL for a file in the open business folder, e.g. "work/images/slide-1.png". */
 export const fileUrl = (businessId: string, rel: string) =>
   `/api/b/${businessId}/files/${rel.split("/").map(encodeURIComponent).join("/")}`;
 
+const fileName = (rel: string) => rel.split("/").pop() ?? rel;
+
+/** Small preview of one file: image, first video frame, or an icon. */
+function Thumb({ businessId, file, label }: { businessId: string; file: string; label?: string }) {
+  const kind = mediaKind(file);
+  const url = fileUrl(businessId, file);
+  return (
+    <>
+      {kind === "image" && (
+        // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+        <img src={url} alt={fileName(file)} className="size-full object-cover" loading="lazy" />
+      )}
+      {kind === "video" && (
+        <>
+          <video src={`${url}#t=0.5`} preload="metadata" muted playsInline className="size-full object-cover" />
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex size-8 items-center justify-center bg-ink/70 text-parchment">
+              <PlayIcon className="size-4" />
+            </span>
+          </span>
+        </>
+      )}
+      {(kind === "audio" || kind === "file") && (
+        <span className="flex size-full flex-col items-center justify-center gap-1 p-1 text-muted-foreground">
+          {kind === "audio" ? <MusicIcon className="size-6" /> : <FileIcon className="size-6" />}
+          <span className="line-clamp-2 break-all text-center text-[10px]">{fileName(file)}</span>
+        </span>
+      )}
+      {label && <span className="font-pixel absolute bottom-0 left-0 bg-ink/80 px-1 text-[10px] text-parchment">{label}</span>}
+    </>
+  );
+}
+
 /**
- * Thumbnails of a piece of work's images (e.g. carousel slides). Click one to view it
- * large, flip through with ← →, or download it.
+ * Thumbnails of a piece of work's files (carousel slides, videos, footage). Click one
+ * to view it large (videos play), flip through with ← →, or download it.
  */
 export function ImageStrip({
   businessId,
@@ -20,6 +54,7 @@ export function ImageStrip({
   className,
 }: {
   businessId: string;
+  /** Folder-relative paths ("work/images/…", "work/videos/…", "media/…"). */
   images: string[];
   size?: number;
   className?: string;
@@ -37,6 +72,7 @@ export function ImageStrip({
   }, [open, images.length]);
 
   if (!images.length) return null;
+  const current = open === null ? null : images[open];
   return (
     <>
       <div className={cn("flex flex-wrap gap-2", className)}>
@@ -47,29 +83,22 @@ export function ImageStrip({
             onClick={() => setOpen(i)}
             className="pixel-frame relative m-[3px] overflow-hidden bg-muted transition hover:-translate-y-0.5"
             style={{ width: size, height: Math.round(size * 1.25) }}
-            title={img.split("/").pop()}
+            title={fileName(img)}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- local files from the business folder */}
-            <img src={fileUrl(businessId, img)} alt={`Image ${i + 1}`} className="size-full object-cover" loading="lazy" />
-            <span className="font-pixel absolute bottom-0 left-0 bg-ink/80 px-1 text-[10px] text-parchment">{i + 1}</span>
+            <Thumb businessId={businessId} file={img} label={String(i + 1)} />
           </button>
         ))}
       </div>
 
-      {open !== null && (
+      {open !== null && current && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
           onClick={() => setOpen(null)}
           role="dialog"
-          aria-label="Image viewer"
+          aria-label="Media viewer"
         >
           <div className="relative flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- local files from the business folder */}
-            <img
-              src={fileUrl(businessId, images[open])}
-              alt={`Image ${open + 1}`}
-              className="pixel-frame max-h-[80dvh] max-w-[90vw] object-contain"
-            />
+            <Viewer businessId={businessId} file={current} />
             <div className="flex items-center gap-2">
               {images.length > 1 && (
                 <Button variant="outline" size="icon" onClick={() => setOpen((open - 1 + images.length) % images.length)} aria-label="Previous">
@@ -85,7 +114,7 @@ export function ImageStrip({
                 </Button>
               )}
               <Button asChild variant="outline" size="icon" aria-label="Download">
-                <a href={fileUrl(businessId, images[open])} download={images[open].split("/").pop()}>
+                <a href={fileUrl(businessId, current)} download={fileName(current)}>
                   <DownloadIcon />
                 </a>
               </Button>
@@ -97,5 +126,32 @@ export function ImageStrip({
         </div>
       )}
     </>
+  );
+}
+
+function Viewer({ businessId, file }: { businessId: string; file: string }) {
+  const url = fileUrl(businessId, file);
+  const kind = mediaKind(file);
+  if (kind === "image") {
+    // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+    return <img src={url} alt={fileName(file)} className="pixel-frame max-h-[80dvh] max-w-[90vw] object-contain" />;
+  }
+  if (kind === "video") {
+    return <video key={url} src={url} controls autoPlay playsInline className="pixel-frame max-h-[80dvh] max-w-[90vw] bg-black" />;
+  }
+  if (kind === "audio") {
+    return (
+      <div className="pixel-panel flex flex-col items-center gap-3 p-6">
+        <MusicIcon className="size-10 text-muted-foreground" />
+        <span className="text-sm">{fileName(file)}</span>
+        <audio key={url} src={url} controls autoPlay />
+      </div>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="pixel-panel flex flex-col items-center gap-3 p-6 text-sm hover:underline">
+      <FileIcon className="size-10 text-muted-foreground" />
+      {fileName(file)}
+    </a>
   );
 }

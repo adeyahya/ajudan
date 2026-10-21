@@ -25,6 +25,8 @@ export function createTask(p: {
   createdBy: string;
   /** The task this was delegated from (manager requests). */
   parentTaskId?: string | null;
+  /** Folder-relative files to work with ("media/…", "work/…"). */
+  attachments?: string[];
 }) {
   const instructions = p.instructions.trim();
   if (!instructions) throw new Error("Instructions are required");
@@ -38,6 +40,7 @@ export function createTask(p: {
       instructions,
       createdBy: p.createdBy,
       parentTaskId: p.parentTaskId ?? null,
+      attachments: p.attachments ?? [],
     })
     .returning()
     .get();

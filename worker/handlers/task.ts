@@ -8,8 +8,9 @@ import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
+import { describeMedia, linkIntoWorkspace, mediaInfo, mediaKind } from "@/lib/media";
 import { getRole, MANAGER_ROLE } from "@/lib/roles";
-import { resolveWorkspace } from "@/lib/paths";
+import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
@@ -17,9 +18,15 @@ import { PausedError, runAbortController } from "../session";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SERVER, createWhatsappServer, whatsappRules } from "../whatsapp-tools";
 import { BIZ_SERVER, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
-const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep"];
+const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
 const BUDGET_USD = Number(process.env.AJUDAN_TASK_BUDGET_USD ?? 3) || 3;
+/** Video work takes more rounds (edit, render, look, fix). */
+const VIDEO_BUDGET_USD = Number(process.env.AJUDAN_VIDEO_BUDGET_USD ?? 6) || 6;
+
+/** Skills teammates can load (agent-plugins/ in this repo; ~/.claude is never read). */
+const PLUGIN_DIR = path.resolve(import.meta.dirname, "..", "..", "agent-plugins", "ajudan-video");
+const SKILLS = ["ajudan-video:campaign-video", "ajudan-video:remotion-best-practices"];
 const APPROVAL_POLL_MS = 1000;
 
 export async function runTask({ taskId }: JobPayloads["run_task"]) {
@@ -43,6 +50,10 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
   try {
     const cwd = prepareWorkspace(teammate, business);
+    // The owner's files for this task, readable in the teammate's folder at the same path.
+    const attachments = linkIntoWorkspace(task.attachments, cwd);
+    const videoWork =
+      teammate.roleKey === "video_editor" || attachments.some((f) => mediaKind(f) === "video") || /\b(video|reel|tiktok)\b/i.test(task.instructions);
     const isManager = teammate.roleKey === MANAGER_ROLE.key;
     const roster = db
       .select()
@@ -73,10 +84,12 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       browser: useBrowser,
       cwd,
       isManager,
+      signal: ac.signal,
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
-      if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath);
+      if (toolName === "Skill") return { behavior: "allow", updatedInput: input };
+      if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR]);
       if (useBrowser && toolName.startsWith(`mcp__${browserProvider.server}__`)) {
         const url = browserProvider.targetUrl(toolName, input);
         if (url && !isAllowedUrl(url, business.browserSites)) {
@@ -150,7 +163,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
     const run = async () => {
       const mcpServers: Record<string, McpServerConfig> = { [BIZ_SERVER]: biz };
-      const allowedTools = ["WebSearch", "WebFetch", ...SAFE_BIZ_TOOLS];
+      const allowedTools = ["WebSearch", "WebFetch", "Skill", ...SAFE_BIZ_TOOLS];
       const disallowedTools = ["Bash", ...(teammate.autonomy === "draft" ? outward : [])];
       if (useWhatsapp) {
         mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd });
@@ -174,15 +187,17 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       return runAgent({
         cwd,
         systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp),
-        prompt: buildPrompt(task, isManager ? managerHistory(teammate.id, task) : ""),
+        prompt: buildPrompt(task, isManager ? managerHistory(teammate.id, task) : "", await describeAttachments(attachments)),
         tools: BUILTIN_TOOLS,
+        plugins: [PLUGIN_DIR],
+        skills: SKILLS,
         allowedTools,
         disallowedTools,
         mcpServers,
         canUseTool,
         onMessage,
-        maxTurns: useBrowser ? 80 : 40,
-        maxBudgetUsd: BUDGET_USD,
+        maxTurns: useBrowser || videoWork ? 80 : 40,
+        maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
         abortController: ac,
       });
     };
@@ -248,7 +263,10 @@ export function checkFileAccess(
   input: Record<string, unknown>,
   cwd: string,
   blockedPath?: string,
+  /** Extra folders that may be read but not written (the skills). */
+  readOnly: string[] = [],
 ): PermissionResult {
+  const readable = toolName === "Read" || toolName === "Glob" || toolName === "Grep" ? readOnly : [];
   const candidates: string[] = [];
   if (blockedPath) candidates.push(blockedPath);
   for (const key of ["file_path", "path", "notebook_path"]) {
@@ -262,7 +280,8 @@ export function checkFileAccess(
   }
   if (!candidates.length) candidates.push(cwd); // Glob/Grep default to cwd
   for (const c of candidates) {
-    if (!isInside(resolveReal(path.resolve(cwd, c)), cwd)) {
+    const real = resolveReal(path.resolve(cwd, c));
+    if (!isInside(real, cwd) && !readable.some((d) => isInside(real, d))) {
       return { behavior: "deny", message: `Access outside your workspace is not allowed (${c}).` };
     }
   }
@@ -325,9 +344,9 @@ function managerRules() {
 The owner talks to you instead of to each teammate, in a chat. Each message:
 1. Understand what they want (ask one short question back only if you truly can't act).
 2. Quick questions, status ("what is Sinta doing?"), advice or decisions: answer yourself. Use team_status, task_results and pending_approvals instead of guessing.
-3. Real work (content, images, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Don't do specialist work yourself.
+3. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
 4. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
-When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines.
+When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
 If nobody on the team can do something (missing permission), say exactly which switch on the Team page would allow it.`;
 }
 
@@ -396,6 +415,10 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 ## Making images
 You can make real images (social posts, carousel slides, posters, banners) with render_image: design each one as a self-contained HTML page (inline CSS, Google Fonts, product photos by URL from the business's website), usually 1080×1350 for Instagram/TikTok portrait or 1080×1080 square. Big readable text, the brand's colors and voice, one idea per slide. Read each PNG afterwards to check it looks right, fix and re-render if needed, then attach the images in order with save_deliverable(images=[…]) so the owner can see them on the Work page.
 
+## Making videos
+You can edit real videos (TikTok, Reels, Shorts, ads) from the owner's footage and photos with Remotion: load the campaign-video skill first (Skill tool), then follow it. The owner's uploads are in the media library (list_media; files attached to a task are listed in it). Look at footage with inspect_media and extract_frames, write the video as one TSX file, render_video, check frames of the result, fix, and attach the MP4 with save_deliverable(images=[…]).
+If the work needs footage you don't have, ask the owner for it with a precise shot list (what to film, how long, vertical) instead of inventing it, and say they can drop the clips into the chat.
+
 ## What you can't do here
 ${[
   useBrowser ? null : "- The business browser: if a task needs a website the owner is logged into (Shopee, TikTok…), say so and ask the owner to turn on “Can use the business browser” for you on the Team page.",
@@ -410,7 +433,13 @@ ${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrow
 ${languageInstruction(business.language)}`;
 }
 
-function buildPrompt(task: Task, history = "") {
+/** One line per attached file: path, kind, size, duration. */
+async function describeAttachments(files: string[]) {
+  const lines = await Promise.all(files.map(async (f) => `- ${describeMedia(f, await mediaInfo(path.join(dataDir(), f)))}`));
+  return lines.join("\n");
+}
+
+function buildPrompt(task: Task, history = "", files = "") {
   const from =
     task.createdBy === REPORT
       ? "Your team finished work you delegated. Report back to the owner in this chat."
@@ -420,7 +449,10 @@ function buildPrompt(task: Task, history = "") {
           ? `This task was delegated to you by a teammate (${teammateName(task.createdBy.slice(9))}).`
           : "This is a message from the business owner.";
   const past = history ? `## Your recent conversation with the owner\n${history}\n\n` : "";
-  return `${past}${from}\n\nTask: ${task.title}\n\n${task.instructions}`;
+  const attached = files
+    ? `\n\n## Attached files\nThese are in your folder at these paths (Read images; use inspect_media and extract_frames for videos; staticFile("<path>") in a video):\n${files}`
+    : "";
+  return `${past}${from}\n\nTask: ${task.title}\n\n${task.instructions}${attached}`;
 }
 
 function teammateName(id: string) {

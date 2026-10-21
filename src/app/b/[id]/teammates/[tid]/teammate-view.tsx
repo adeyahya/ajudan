@@ -183,6 +183,7 @@ function toMessages(
       id: `${task.id}-q`,
       role: "user",
       content: task.instructions,
+      attachments: task.attachments,
       meta: `${createdByLabel(task.createdBy, mates)} · ${time(task.createdAt)}`,
     };
     if (task.status === "queued" || task.status === "running" || task.status === "waiting_approval") {
@@ -274,6 +275,7 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
           messages={toMessages(id, tasks, steps, mates, taskImages, children)}
           busy={false}
           sendAction={sendTaskMessage.bind(null, id, t.id)}
+          uploadBusinessId={id}
           placeholder={manager ? `Ask ${t.name} anything; the team will handle it…` : `Ask ${t.name} to work on something…`}
           suggestions={tasks.length === 0 ? (manager ? managerSuggestions : t.responsibilities.slice(0, 3)) : []}
           emptyState={
@@ -284,8 +286,8 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
               </p>
               <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
                 {manager
-                  ? `${t.name} is your manager. Ask for anything: ${t.name} hands it to the right teammates and reports back here when it's done.`
-                  : `Give ${t.name} a task. Each message becomes a task, and the reply shows what was done.`}
+                  ? `${t.name} is your manager. Ask for anything: ${t.name} hands it to the right teammates and reports back here when it's done. Drop footage or photos into the chat to send them along.`
+                  : `Give ${t.name} a task. Each message becomes a task, and the reply shows what was done. Drop footage or photos into the chat to attach them.`}
               </p>
             </div>
           }

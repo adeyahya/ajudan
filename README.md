@@ -57,6 +57,11 @@ You can still chat with any teammate directly.
   - While the folder is open, the worker keeps `wacli sync --follow` running and spaces sends 2–6s apart.
   - wacli uses the unofficial WhatsApp Web protocol, so keep volume human-sized.
 - **Images**: teammates design social posts and carousel slides as HTML and render them to PNG (`render_image`, headless Chrome via `playwright-core`). Images are saved to `<folder>/work/images/` and attached to the work. See them on the Work page and under the teammate's reply; click a thumbnail to view it large or download it.
+- **Media and video**: drop footage, photos, music or documents onto any chat (or use the paperclip). Files are streamed to `<folder>/media/` (`/api/b/[id]/media`) and attached to the message. The manager passes them on to whoever needs them (`assign_task(files=[…])`), and they're hard-linked into that teammate's folder.
+  - Teammates look at footage with `inspect_media` (ffprobe) and `extract_frames` (ffmpeg stills they can Read), write the edit as one Remotion TSX file and call `render_video` (`worker/video.ts`: bundled with this repo's `node_modules`, rendered with your installed Chrome, one render at a time). MP4s go to `<folder>/work/videos/` and play inline in the chat and on the Work page.
+  - Skills: `agent-plugins/ajudan-video/` is a local plugin loaded into every teammate run. It has `campaign-video` (Ajudan's file contract, platform specs, hooks, shot lists for asking you for footage) and a copy of Remotion's `remotion-best-practices`.
+  - When footage is missing, teammates send a shot list instead of faking it. There's a Video Editor role you can add on the Team page.
+  - Needs `ffmpeg`/`ffprobe` on the PATH (`brew install ffmpeg`). Remotion is free for individuals and companies of up to 3 people; bigger companies need a [Remotion license](https://www.remotion.dev/license).
 - **Data**: SQLite at `<business folder>/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands
@@ -76,4 +81,5 @@ Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's ter
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
 - `publish_deliverable` / `send_message` only record the action; real outward channels are the business browser and WhatsApp.
+- Videos: no automatic transcription or captions from speech yet, and no music library (only music you upload).
 - The "ask before changing a site" rule is enforced by the teammate's instructions plus approvals, not by blocking clicks. The site list and the blocked tools are hard limits.

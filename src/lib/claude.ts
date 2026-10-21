@@ -32,6 +32,10 @@ export type RunAgentOptions = {
   allowedTools?: string[];
   disallowedTools?: string[];
   mcpServers?: Record<string, McpServerConfig>;
+  /** Local plugin folders to load (their skills become available). */
+  plugins?: string[];
+  /** Skills to enable ("plugin:skill"); needs "Skill" in tools. */
+  skills?: string[];
   /** Called for tools not in allowedTools — use it for the approvals inbox. */
   canUseTool?: CanUseTool;
   /** Resume an earlier Claude Code session for continuity. */
@@ -68,6 +72,8 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
       allowedTools: opts.allowedTools,
       disallowedTools: opts.disallowedTools,
       mcpServers: opts.mcpServers,
+      plugins: opts.plugins?.map((p) => ({ type: "local" as const, path: p })),
+      skills: opts.skills,
       canUseTool: opts.canUseTool,
       resume: opts.resume,
       maxTurns: opts.maxTurns ?? 30,
@@ -159,6 +165,18 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
     case "Glob":
     case "Grep":
       return "Looking through files";
+    case "Skill":
+      return `Studying ${short(input.skill ?? input.command, 40)}`;
+    case "mcp__biz__list_media":
+      return "Looking through the media library";
+    case "mcp__biz__inspect_media":
+      return `Checking ${baseName(input.file)}`;
+    case "mcp__biz__extract_frames":
+      return `Watching ${baseName(input.file)}`;
+    case "mcp__biz__render_video":
+      return `Rendering video ${baseName(input.file)}`;
+    case "mcp__biz__render_image":
+      return `Designing ${short(input.name, 40)}`;
     case "mcp__biz__save_deliverable":
       return `Saving “${short(input.title, 50)}”`;
     case "mcp__biz__list_deliverables":

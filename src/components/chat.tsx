@@ -1,7 +1,22 @@
 "use client";
 
-import { ArrowUpIcon, CheckIcon, CopyIcon, GlobeIcon, LoaderCircleIcon, SearchIcon, WrenchIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  CheckIcon,
+  CopyIcon,
+  FileIcon,
+  GlobeIcon,
+  LoaderCircleIcon,
+  MusicIcon,
+  PaperclipIcon,
+  SearchIcon,
+  UploadIcon,
+  VideoIcon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
 import { useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
+import { ImageStrip, fileUrl } from "@/components/image-strip";
 import { Avatar } from "@/components/kit";
 import { Markdown } from "@/components/markdown";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -25,12 +40,15 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import { MEDIA_ACCEPT, mediaKind } from "@/lib/media-types";
 import { cn } from "@/lib/utils";
 
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Files sent with the message (folder-relative paths). */
+  attachments?: string[];
   /** Small line above the message, e.g. "from schedule · 09:00". */
   meta?: string;
   /** Tool steps the assistant took for this message (shown collapsed). */
@@ -44,6 +62,9 @@ export type ChatMessage = {
 
 export type ChatAgent = { id?: string; name: string; color: string; subtitle?: string };
 
+/** A file being uploaded (or uploaded) for the next message. */
+type Upload = { key: string; name: string; progress: number; path?: string; error?: string };
+
 /**
  * Chat thread built from shadcn AI Elements: Message Scroller keeps the latest turn in
  * view, user turns are bubbles, agent turns are markdown with a collapsible trace.
@@ -55,6 +76,7 @@ export function Chat({
   busyLabel = "Thinking…",
   liveSteps = [],
   sendAction,
+  uploadBusinessId,
   placeholder,
   suggestions = [],
   emptyState,
@@ -67,31 +89,86 @@ export function Chat({
   busyLabel?: string;
   /** Live tool steps for the in-progress reply. */
   liveSteps?: string[];
-  /** Server Function that receives the typed text. */
-  sendAction?: (text: string) => Promise<void>;
+  /** Server Function that receives the typed text and attached file paths. */
+  sendAction?: (text: string, attachments: string[]) => Promise<void>;
+  /** Lets the owner drop or pick files (uploaded to this business's media library). */
+  uploadBusinessId?: string;
   placeholder?: string;
   suggestions?: string[];
   emptyState?: ReactNode;
   inputDisabled?: boolean;
   className?: string;
 }) {
-  const [optimistic, addOptimistic] = useOptimistic(messages, (state, text: string) => [
-    ...state,
-    { id: `optimistic-${state.length}`, role: "user" as const, content: text },
-  ]);
+  const [optimistic, addOptimistic] = useOptimistic(
+    messages,
+    (state, m: { text: string; attachments: string[] }) => [
+      ...state,
+      { id: `optimistic-${state.length}`, role: "user" as const, content: m.text, attachments: m.attachments },
+    ],
+  );
   const [sending, startSending] = useTransition();
   const showThinking = busy || sending;
+  const [uploads, setUploads] = useState<Upload[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
 
   const send = (text: string) => {
-    if (!sendAction || !text.trim()) return;
+    const attachments = uploads.flatMap((u) => (u.path ? [u.path] : []));
+    if (!sendAction || (!text.trim() && !attachments.length)) return;
+    const body = text.trim() || "(See the attached files.)";
+    setUploads([]);
     startSending(async () => {
-      addOptimistic(text.trim());
-      await sendAction(text.trim());
+      addOptimistic({ text: body, attachments });
+      await sendAction(body, attachments);
     });
   };
 
+  const addFiles = (files: FileList | File[]) => {
+    if (!uploadBusinessId) return;
+    for (const file of Array.from(files)) {
+      const key = `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`;
+      setUploads((u) => [...u, { key, name: file.name, progress: 0 }]);
+      const patch = (v: Partial<Upload>) => setUploads((u) => u.map((x) => (x.key === key ? { ...x, ...v } : x)));
+      uploadFile(uploadBusinessId, file, (progress) => patch({ progress }))
+        .then((path) => patch({ path, progress: 1 }))
+        .catch((err: Error) => patch({ error: err.message }));
+    }
+  };
+
+  const dropProps = uploadBusinessId
+    ? {
+        onDragEnter: (e: React.DragEvent) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          dragDepth.current += 1;
+          setDragging(true);
+        },
+        onDragLeave: () => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (!dragDepth.current) setDragging(false);
+        },
+        onDragOver: (e: React.DragEvent) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        },
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+        },
+      }
+    : {};
+
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
+    <div className={cn("relative flex min-h-0 flex-col", className)} {...dropProps}>
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80">
+          <div className="pixel-panel flex flex-col items-center gap-2 px-8 py-6 text-center">
+            <UploadIcon className="size-8 text-primary" />
+            <p className="font-pixel">Drop files to attach</p>
+            <p className="text-xs text-muted-foreground">Footage, photos, music or documents for {agent.name}</p>
+          </div>
+        </div>
+      )}
       {optimistic.length === 0 && !showThinking ? (
         // The scroller hides itself until it has an item to anchor to.
         <div className="flex flex-1 items-center justify-center overflow-y-auto">{emptyState}</div>
@@ -102,7 +179,7 @@ export function Chat({
             <MessageScrollerContent className="mx-auto w-full max-w-3xl px-1 pt-2 pb-6">
               {optimistic.map((m) => (
                 <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.role === "user"}>
-                  {m.role === "user" ? <UserTurn m={m} /> : <AgentTurn m={m} agent={agent} />}
+                  {m.role === "user" ? <UserTurn m={m} businessId={uploadBusinessId} /> : <AgentTurn m={m} agent={agent} />}
                 </MessageScrollerItem>
               ))}
               {showThinking && (
@@ -135,6 +212,10 @@ export function Chat({
             disabled={inputDisabled || showThinking}
             placeholder={showThinking ? `${agent.name} is working…` : placeholder}
             onSubmit={send}
+            uploads={uploads}
+            businessId={uploadBusinessId}
+            onAddFiles={uploadBusinessId ? addFiles : undefined}
+            onRemoveUpload={(key) => setUploads((u) => u.filter((x) => x.key !== key))}
           />
         </div>
       )}
@@ -142,11 +223,14 @@ export function Chat({
   );
 }
 
-function UserTurn({ m }: { m: ChatMessage }) {
+function UserTurn({ m, businessId }: { m: ChatMessage; businessId?: string }) {
   return (
     <Message align="end">
       <MessageContent>
         {m.meta && <MessageHeader className="font-pixel justify-end text-xs text-muted-foreground">{m.meta}</MessageHeader>}
+        {businessId && m.attachments && m.attachments.length > 0 && (
+          <ImageStrip businessId={businessId} images={m.attachments} size={72} className="justify-end" />
+        )}
         <Bubble align="end" variant="ghost">
           {/* Owner's lines: a parchment speech card. */}
           {/* `!` beats the ghost variant's transparent background and zero padding. */}
@@ -273,19 +357,87 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** Message field: Enter sends, Shift+Enter adds a line. */
+/** Upload one file to the business's media library; resolves to its folder-relative path. */
+function uploadFile(businessId: string, file: File, onProgress: (p: number) => void) {
+  return new Promise<string>((resolve, reject) => {
+    // XHR, not fetch: it reports upload progress (footage can be big).
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/b/${businessId}/media`);
+    xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText) as { path?: string; error?: string };
+        if (xhr.status < 300 && body.path) resolve(body.path);
+        else reject(new Error(body.error ?? `Upload failed (${xhr.status})`));
+      } catch {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed (network)"));
+    xhr.send(file);
+  });
+}
+
+function UploadChip({ u, businessId, onRemove }: { u: Upload; businessId?: string; onRemove: () => void }) {
+  const kind = mediaKind(u.name);
+  const Icon = kind === "video" ? VideoIcon : kind === "audio" ? MusicIcon : FileIcon;
+  return (
+    <div
+      className={cn(
+        "pixel-frame relative m-[3px] flex h-12 w-44 items-center gap-2 overflow-hidden bg-muted pr-7 text-xs",
+        u.error && "text-destructive",
+      )}
+      title={u.error ?? u.name}
+    >
+      <div className="flex size-12 shrink-0 items-center justify-center bg-card">
+        {kind === "image" && u.path && businessId ? (
+          // eslint-disable-next-line @next/next/no-img-element -- local upload preview
+          <img src={fileUrl(businessId, u.path)} alt="" className="size-full object-cover" />
+        ) : (
+          <Icon className="size-5 text-muted-foreground" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate">{u.name}</div>
+        <div className="text-[10px] text-muted-foreground">
+          {u.error ? "Failed" : u.path ? "Ready" : `Uploading ${Math.round(u.progress * 100)}%`}
+        </div>
+      </div>
+      {!u.path && !u.error && (
+        <div className="absolute bottom-0 left-0 h-[3px] bg-primary" style={{ width: `${u.progress * 100}%` }} />
+      )}
+      <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${u.name}`}>
+        <XIcon className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Message field: Enter sends, Shift+Enter adds a line. Files can be picked, dropped or pasted. */
 function PromptInput({
   onSubmit,
   disabled,
   placeholder,
+  uploads,
+  businessId,
+  onAddFiles,
+  onRemoveUpload,
 }: {
   onSubmit: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  uploads: Upload[];
+  businessId?: string;
+  onAddFiles?: (files: FileList | File[]) => void;
+  onRemoveUpload: (key: string) => void;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  const canSend = !disabled && text.trim().length > 0;
+  const picker = useRef<HTMLInputElement>(null);
+  const uploading = uploads.some((u) => !u.path && !u.error);
+  const ready = uploads.some((u) => u.path);
+  const canSend = !disabled && !uploading && (text.trim().length > 0 || ready);
   const submit = () => {
     if (!canSend) return;
     onSubmit(text);
@@ -299,10 +451,23 @@ function PromptInput({
       }}
     >
       <InputGroup className="rounded-2xl bg-card shadow-sm">
+        {uploads.length > 0 && (
+          <InputGroupAddon align="block-start" className="flex flex-wrap gap-1.5">
+            {uploads.map((u) => (
+              <UploadChip key={u.key} u={u} businessId={businessId} onRemove={() => onRemoveUpload(u.key)} />
+            ))}
+          </InputGroupAddon>
+        )}
         <InputGroupTextarea
           ref={ref}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            if (onAddFiles && e.clipboardData.files.length) {
+              e.preventDefault();
+              onAddFiles(e.clipboardData.files);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -315,7 +480,36 @@ function PromptInput({
           className="max-h-48 min-h-12"
         />
         <InputGroupAddon align="block-end" className="justify-between">
-          <span className="text-xs text-muted-foreground">Enter to send · Shift+Enter for a new line</span>
+          <div className="flex items-center gap-2">
+            {onAddFiles && (
+              <>
+                <input
+                  ref={picker}
+                  type="file"
+                  multiple
+                  accept={MEDIA_ACCEPT}
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) onAddFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <InputGroupButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => picker.current?.click()}
+                  aria-label="Attach files"
+                  title="Attach footage, photos or files (or drop them here)"
+                >
+                  <PaperclipIcon />
+                </InputGroupButton>
+              </>
+            )}
+            <span className="text-xs text-muted-foreground">
+              Enter to send · Shift+Enter for a new line{onAddFiles ? " · drop files to attach" : ""}
+            </span>
+          </div>
           <InputGroupButton type="submit" variant="default" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label="Send">
             <ArrowUpIcon />
           </InputGroupButton>

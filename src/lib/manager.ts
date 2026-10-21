@@ -111,7 +111,7 @@ export function onTaskFinished(taskId: string) {
     title: `Report: ${parent.title}`.slice(0, 80),
     createdBy: REPORT,
     parentTaskId: parent.id,
-    instructions: `Your team has finished the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (the Work page; images are attached there), and anything that needs the owner's decision or approval. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
+    instructions: `Your team has finished the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
   });
 }
 
@@ -130,7 +130,8 @@ export function managerHistory(managerId: string, beforeTask: Pick<Task, "id" | 
   return rows
     .map((t) => {
       const who = t.createdBy === REPORT ? "Team update (you reported)" : t.createdBy === "user" ? "Owner" : "Scheduled";
-      const ask = t.createdBy === REPORT ? "" : `${who}: ${t.instructions.slice(0, 500)}\n`;
+      const files = t.attachments.length ? ` [attached: ${t.attachments.join(", ")}]` : "";
+      const ask = t.createdBy === REPORT ? "" : `${who}: ${t.instructions.slice(0, 500)}${files}\n`;
       return `${ask}You: ${(t.result ?? `(${t.status})`).slice(0, 700)}`;
     })
     .join("\n\n");

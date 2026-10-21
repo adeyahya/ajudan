@@ -91,6 +91,15 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     defaultKpis: ["Response time", "Customer satisfaction"],
   },
   {
+    key: "video_editor",
+    title: "Video Editor",
+    color: "#f97316",
+    summary: "Edits campaign videos (TikTok, Reels, ads) from the owner's footage and plans the shots to film.",
+    instructions:
+      "You make short campaign videos: TikTok, Reels, Shorts, product demos and ads. Load the campaign-video skill first. Work from the owner's footage and photos (media library), cut a strong hook, on-screen captions and a clear call to action, render with render_video, check the frames, and save the MP4 with its caption and posting notes. When footage is missing, send the owner a precise shot list instead of faking it.",
+    defaultKpis: ["Videos delivered per week", "Hook retention (3-second views)", "Views and shares"],
+  },
+  {
     key: "ads_specialist",
     title: "Ads Specialist",
     color: "#84cc16",
