@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
@@ -20,7 +20,16 @@ import { syncDeliverableFile } from "@/lib/workfiles";
 export const BIZ_SERVER = "biz";
 
 /** Tools that act inside Ajudan only: always allowed. */
-export const SAFE_BIZ_TOOLS = ["save_deliverable", "list_deliverables", "assign_task", "set_status", "render_image"].map(
+export const SAFE_BIZ_TOOLS = [
+  "save_deliverable",
+  "list_deliverables",
+  "assign_task",
+  "set_status",
+  "render_image",
+  "team_status",
+  "task_results",
+  "pending_approvals",
+].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
 /** Tools that reach the outside world: gated by the teammate's autonomy. */
@@ -38,6 +47,8 @@ export type BizContext = {
   browser?: boolean;
   /** The teammate's working folder (rendered images go to its work/images/). */
   cwd: string;
+  /** The manager gets team-overview tools, and its delegations link back to this task. */
+  isManager?: boolean;
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -267,6 +278,8 @@ export function createBizServer(ctx: BizContext) {
             teammateId: target.id,
             instructions: a.instructions,
             createdBy: `teammate:${teammate.id}`,
+            // The manager's report-back waits for everything delegated from this task.
+            parentTaskId: ctx.isManager ? taskId : null,
           });
           ev("delegated", `${teammate.name} asked ${target.name}: ${task.title}`, {
             from: teammate.id,
@@ -276,6 +289,70 @@ export function createBizServer(ctx: BizContext) {
           return ok(`Assigned to ${target.name} (task ${task.id}). They'll work on it after you; check later with list_deliverables.`);
         },
       ),
+    );
+  }
+
+  if (ctx.isManager) {
+    const mates = () =>
+      db
+        .select()
+        .from(schema.teammates)
+        .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
+        .all()
+        .filter((m) => m.id !== teammate.id);
+    tools.push(
+      tool("team_status", "See what each teammate is doing right now, their open tasks and what they're allowed to do.", {}, async () => {
+        const open = db
+          .select()
+          .from(schema.tasks)
+          .where(and(eq(schema.tasks.businessId, businessId), inArray(schema.tasks.status, ["queued", "running", "waiting_approval"])))
+          .all();
+        const lines = mates().map((m) => {
+          const mine = open.filter((t) => t.teammateId === m.id).map((t) => `${t.title} (${t.status.replace("_", " ")})`);
+          const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp"].filter(Boolean).join(", ") || "no browser/WhatsApp";
+          return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
+        });
+        return ok(lines.join("\n") || "No teammates yet.");
+      }),
+      tool(
+        "task_results",
+        "Read recent finished work from the team (results of their tasks), optionally for one teammate.",
+        { teammate_name: z.string().optional(), limit: z.number().int().min(1).max(20).optional() },
+        async (a) => {
+          const target = a.teammate_name
+            ? mates().find((m) => m.name.toLowerCase() === a.teammate_name!.trim().toLowerCase())
+            : undefined;
+          if (a.teammate_name && !target) return fail(`No teammate named "${a.teammate_name}".`);
+          const rows = db
+            .select()
+            .from(schema.tasks)
+            .where(
+              and(
+                eq(schema.tasks.businessId, businessId),
+                inArray(schema.tasks.status, ["done", "failed"]),
+                ...(target ? [eq(schema.tasks.teammateId, target.id)] : []),
+              ),
+            )
+            .orderBy(desc(schema.tasks.finishedAt))
+            .limit(a.limit ?? 8)
+            .all();
+          const names = new Map(mates().map((m) => [m.id, m.name]));
+          return ok(
+            rows
+              .filter((r) => r.teammateId !== teammate.id)
+              .map((r) => `### ${names.get(r.teammateId) ?? "?"}: ${r.title} (${r.status}, ${r.finishedAt?.toISOString().slice(0, 16)})\n${(r.result ?? "").slice(0, 1200)}`)
+              .join("\n\n") || "No finished work yet.",
+          );
+        },
+      ),
+      tool("pending_approvals", "List what's waiting for the owner's approval.", {}, async () => {
+        const rows = db
+          .select()
+          .from(schema.approvals)
+          .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
+          .all();
+        return ok(rows.map((r) => `- ${r.summary}`).join("\n") || "Nothing is waiting for approval.");
+      }),
     );
   }
 

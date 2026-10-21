@@ -15,7 +15,7 @@ export function deriveTaskTitle(instructions: string) {
 /**
  * Create a task for a teammate and queue it for the worker. Used by the UI,
  * the scheduler and teammate delegation (assign_task).
- * `createdBy` is "user", "schedule" or "teammate:<id>".
+ * `createdBy` is "user", "schedule", "teammate:<id>" or "system:report" (manager reports).
  */
 export function createTask(p: {
   businessId: string;
@@ -23,6 +23,8 @@ export function createTask(p: {
   title?: string;
   instructions: string;
   createdBy: string;
+  /** The task this was delegated from (manager requests). */
+  parentTaskId?: string | null;
 }) {
   const instructions = p.instructions.trim();
   if (!instructions) throw new Error("Instructions are required");
@@ -35,6 +37,7 @@ export function createTask(p: {
       title,
       instructions,
       createdBy: p.createdBy,
+      parentTaskId: p.parentTaskId ?? null,
     })
     .returning()
     .get();

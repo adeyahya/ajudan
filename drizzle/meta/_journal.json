@@ -22,6 +22,13 @@
       "when": 1792617537160,
       "tag": "0002_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792618896164,
+      "tag": "0003_task_parent",
+      "breakpoints": true
     }
   ]
 }

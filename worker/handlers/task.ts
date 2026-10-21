@@ -8,8 +8,9 @@ import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
-import { getRole } from "@/lib/roles";
+import { getRole, MANAGER_ROLE } from "@/lib/roles";
 import { resolveWorkspace } from "@/lib/paths";
+import { managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { PausedError, runAbortController } from "../session";
@@ -42,6 +43,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
   try {
     const cwd = prepareWorkspace(teammate, business);
+    const isManager = teammate.roleKey === MANAGER_ROLE.key;
     const roster = db
       .select()
       .from(schema.teammates)
@@ -52,9 +54,12 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
           ne(schema.teammates.id, teammate.id),
         ),
       )
-      .all();
-    // Delegated tasks don't delegate further: keeps the team from ping-ponging work (and cost).
-    const canDelegate = !task.createdBy.startsWith("teammate:");
+      .all()
+      // Only the manager talks to the owner; teammates don't hand work to the manager.
+      .filter((r) => isManager || r.roleKey !== MANAGER_ROLE.key);
+    // Delegated tasks and manager reports don't delegate further: keeps the team from
+    // ping-ponging work (and cost).
+    const canDelegate = !task.createdBy.startsWith("teammate:") && task.createdBy !== REPORT;
     const delegationRoster = canDelegate ? roster : [];
 
     const useBrowser = teammate.browserAccess;
@@ -67,6 +72,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       roster: delegationRoster,
       browser: useBrowser,
       cwd,
+      isManager,
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
@@ -168,7 +174,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       return runAgent({
         cwd,
         systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp),
-        prompt: buildPrompt(task),
+        prompt: buildPrompt(task, isManager ? managerHistory(teammate.id, task) : ""),
         tools: BUILTIN_TOOLS,
         allowedTools,
         disallowedTools,
@@ -195,6 +201,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     setTask({ status: "done", result: r.text, costUsd: r.costUsd, finishedAt: new Date() });
     setMate({ state: "idle", currentActivity: null });
     ev("task_done", `${teammate.name} finished "${task.title}"`, { costUsd: r.costUsd });
+    onTaskFinished(task.id);
   } catch (err) {
     if (ac.signal.aborted) {
       // Folder closed: back to the queue; it starts over when the folder is reopened.
@@ -215,6 +222,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     });
     setMate({ state: "error", currentActivity: `Task failed: ${message}`.slice(0, 140) });
     ev("task_failed", `${teammate.name} couldn't finish "${task.title}": ${message}`, { costUsd: e.costUsd ?? 0 });
+    onTaskFinished(task.id);
     throw err;
   }
 }
@@ -312,6 +320,17 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   return `${who} wants to use ${toolName}`;
 }
 
+function managerRules() {
+  return `## You are the manager
+The owner talks to you instead of to each teammate, in a chat. Each message:
+1. Understand what they want (ask one short question back only if you truly can't act).
+2. Quick questions, status ("what is Sinta doing?"), advice or decisions: answer yourself. Use team_status, task_results and pending_approvals instead of guessing.
+3. Real work (content, images, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Don't do specialist work yourself.
+4. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
+When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines.
+If nobody on the team can do something (missing permission), say exactly which switch on the Team page would allow it.`;
+}
+
 function browserRules(business: Business, autonomy: Teammate["autonomy"]) {
   const sites = business.browserSites.length ? business.browserSites.join(", ") : "any site";
   return `## Business browser
@@ -387,18 +406,21 @@ ${[
   .filter(Boolean)
   .join("\n") || "- (nothing extra)"}
 - A permission given in chat (“I give you access”) doesn't change your tools; only those switches do.
-${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
+${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }
 
-function buildPrompt(task: Task) {
+function buildPrompt(task: Task, history = "") {
   const from =
-    task.createdBy === "schedule"
-      ? "This is your scheduled recurring work."
-      : task.createdBy.startsWith("teammate:")
-        ? `This task was delegated to you by a teammate (${teammateName(task.createdBy.slice(9))}).`
-        : "This task is from the business owner.";
-  return `${from}\n\nTask: ${task.title}\n\n${task.instructions}`;
+    task.createdBy === REPORT
+      ? "Your team finished work you delegated. Report back to the owner in this chat."
+      : task.createdBy === "schedule"
+        ? "This is your scheduled recurring work."
+        : task.createdBy.startsWith("teammate:")
+          ? `This task was delegated to you by a teammate (${teammateName(task.createdBy.slice(9))}).`
+          : "This is a message from the business owner.";
+  const past = history ? `## Your recent conversation with the owner\n${history}\n\n` : "";
+  return `${past}${from}\n\nTask: ${task.title}\n\n${task.instructions}`;
 }
 
 function teammateName(id: string) {

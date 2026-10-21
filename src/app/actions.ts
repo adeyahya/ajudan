@@ -27,7 +27,7 @@ function expandPath(raw: string) {
 
 function routeFor(businessId: string, status: string | null) {
   if (status === "onboarding") return `/b/${businessId}/onboarding`;
-  if (status === "active") return `/b/${businessId}`;
+  if (status === "active") return `/b/${businessId}/manager`;
   return `/b/${businessId}/team`;
 }
 

@@ -15,6 +15,13 @@ pnpm dev        # creates the SQLite schema, starts Next.js on :3000 and the wor
 
 Open http://localhost:3000, add your business and website, and do the interview.
 
+**Talk to your manager.** Each hired team gets a manager (the **Manager** tab, where a business opens). Ask the manager anything:
+- **Quick questions:** status, advice and "what needs my approval?" get answered directly.
+- **Real work:** goes to the right teammates. Each delegation shows up under the manager's reply with live status.
+- **Reporting back:** when all of it is finished, the manager posts a short team update in the same chat.
+
+You can still chat with any teammate directly.
+
 **One folder per business.** Each business lives in its own folder, by default `~/Ajudan/<Name>/`:
 
 ```

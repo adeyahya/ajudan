@@ -1,0 +1,137 @@
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { db, schema } from "@/db";
+import type { Task } from "@/db/schema";
+import { MANAGER_ROLE } from "@/lib/roles";
+import { createTask } from "@/lib/tasks";
+import { initTeammateWorkspace } from "@/lib/workspace";
+
+/**
+ * The manager: the owner's single point of contact. The owner talks to the manager;
+ * the manager answers or delegates (assign_task links the child tasks to the owner's
+ * request via parentTaskId) and, when all delegated work is finished, gets a
+ * "system:report" task to report back in the same chat.
+ */
+
+export const REPORT = "system:report";
+
+export function getManager(businessId: string) {
+  return db
+    .select()
+    .from(schema.teammates)
+    .where(
+      and(
+        eq(schema.teammates.businessId, businessId),
+        eq(schema.teammates.roleKey, MANAGER_ROLE.key),
+        eq(schema.teammates.status, "active"),
+      ),
+    )
+    .get();
+}
+
+/** Every hired team has a manager; create one if missing. */
+export function ensureManager(businessId: string) {
+  const existing = getManager(businessId);
+  if (existing) return existing;
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz || biz.status !== "active") return undefined;
+  const m = db
+    .insert(schema.teammates)
+    .values({
+      businessId,
+      name: biz.language === "id" ? "Ajeng" : "Avery",
+      roleKey: MANAGER_ROLE.key,
+      title: biz.language === "id" ? "Manajer Tim" : MANAGER_ROLE.title,
+      color: MANAGER_ROLE.color,
+      persona: `Manager of ${biz.name}'s AI team. Knows every teammate's role and the business goals, keeps the owner's time free and only asks for decisions that need the owner.`,
+      responsibilities: [
+        "Be the owner's single point of contact",
+        "Hand each request to the right teammate with clear instructions",
+        "Report back when the work is done and flag decisions for the owner",
+      ],
+      kpis: MANAGER_ROLE.defaultKpis,
+      autonomy: "ask",
+      status: "active",
+      deskIndex: -1, // first desk in the office
+    })
+    .returning()
+    .get();
+  if (biz.profile) {
+    const workspaceDir = initTeammateWorkspace(m, biz.profile, biz.language);
+    db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, m.id)).run();
+  }
+  return m;
+}
+
+const FINISHED = ["done", "failed", "cancelled"] as const;
+
+/**
+ * Call when a task finishes. If it was delegated by the manager and it was the last
+ * open piece of that request, queue the manager's report to the owner.
+ */
+export function onTaskFinished(taskId: string) {
+  const task = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
+  if (!task?.parentTaskId || task.createdBy.startsWith("system:")) return;
+  const parent = db.select().from(schema.tasks).where(eq(schema.tasks.id, task.parentTaskId)).get();
+  if (!parent) return;
+  const manager = getManager(task.businessId);
+  if (!manager || parent.teammateId !== manager.id) return;
+
+  const children = db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.parentTaskId, parent.id), ne(schema.tasks.createdBy, REPORT)))
+    .all();
+  if (children.some((c) => !(FINISHED as readonly string[]).includes(c.status))) return;
+  const alreadyReported = db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.parentTaskId, parent.id), eq(schema.tasks.createdBy, REPORT)))
+    .all()
+    .some((r) => r);
+  if (alreadyReported) return;
+
+  const names = new Map(
+    db
+      .select({ id: schema.teammates.id, name: schema.teammates.name })
+      .from(schema.teammates)
+      .where(inArray(schema.teammates.id, [...new Set(children.map((c) => c.teammateId))]))
+      .all()
+      .map((t) => [t.id, t.name]),
+  );
+  const results = children
+    .map(
+      (c) =>
+        `### ${names.get(c.teammateId) ?? "Teammate"}: ${c.title} (${c.status})\n${(c.result ?? "").slice(0, 2500)}`,
+    )
+    .join("\n\n");
+
+  createTask({
+    businessId: task.businessId,
+    teammateId: manager.id,
+    title: `Report: ${parent.title}`.slice(0, 80),
+    createdBy: REPORT,
+    parentTaskId: parent.id,
+    instructions: `Your team has finished the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (the Work page; images are attached there), and anything that needs the owner's decision or approval. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
+  });
+}
+
+/** Recent manager ↔ owner conversation, for continuity between messages. */
+export function managerHistory(managerId: string, beforeTask: Pick<Task, "id" | "createdAt">, limit = 8) {
+  const rows = db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.teammateId, managerId), ne(schema.tasks.id, beforeTask.id)))
+    .orderBy(desc(schema.tasks.createdAt))
+    .limit(limit)
+    .all()
+    .filter((t) => t.createdAt <= beforeTask.createdAt)
+    .reverse();
+  if (!rows.length) return "";
+  return rows
+    .map((t) => {
+      const who = t.createdBy === REPORT ? "Team update (you reported)" : t.createdBy === "user" ? "Owner" : "Scheduled";
+      const ask = t.createdBy === REPORT ? "" : `${who}: ${t.instructions.slice(0, 500)}\n`;
+      return `${ask}You: ${(t.result ?? `(${t.status})`).slice(0, 700)}`;
+    })
+    .join("\n\n");
+}

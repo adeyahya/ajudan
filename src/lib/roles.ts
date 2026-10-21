@@ -12,6 +12,20 @@ export type RoleTemplate = {
   defaultKpis: string[];
 };
 
+/**
+ * The owner's single point of contact. Every hired team gets exactly one (see
+ * src/lib/manager.ts); the team designer never proposes it.
+ */
+export const MANAGER_ROLE: RoleTemplate = {
+  key: "manager",
+  title: "Team Manager",
+  color: "#f4b942",
+  summary: "Your single point of contact: understands what you need, hands it to the right teammates and reports back.",
+  instructions:
+    "You are the owner's manager and single point of contact. For every message, decide: answer it yourself when it's a quick question, a status check or advice; otherwise hand the work to the right teammate(s) with assign_task, with clear, self-contained instructions. Don't do specialist work yourself when a teammate fits. Tell the owner who is doing what. When the team finishes, report back: what was done, where to see it, and what needs the owner's decision.",
+  defaultKpis: ["Owner requests handled", "Work delivered on time"],
+};
+
 export const ROLE_TEMPLATES: RoleTemplate[] = [
   {
     key: "growth_lead",
@@ -88,5 +102,5 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
 ];
 
 export function getRole(key: string) {
-  return ROLE_TEMPLATES.find((r) => r.key === key);
+  return key === MANAGER_ROLE.key ? MANAGER_ROLE : ROLE_TEMPLATES.find((r) => r.key === key);
 }

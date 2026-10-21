@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { db, schema } from "@/db";
 import { enqueueJob } from "@/lib/jobs";
 import { isAutonomy, validCron } from "@/lib/onboarding/schedule";
+import { ensureManager } from "@/lib/manager";
 import { getRole } from "@/lib/roles";
 import { initTeammateWorkspace } from "@/lib/workspace";
 
@@ -81,7 +82,8 @@ export async function hireTeam(businessId: string) {
     db.update(schema.teammates).set({ status: "active", workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
   }
   db.update(schema.businesses).set({ status: "active" }).where(eq(schema.businesses.id, businessId)).run();
-  redirect(`/b/${businessId}`);
+  ensureManager(businessId);
+  redirect(`/b/${businessId}/manager`);
 }
 
 export async function addTeammate(businessId: string, _prev: FormState, formData: FormData): Promise<FormState> {

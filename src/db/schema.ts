@@ -110,6 +110,11 @@ export const tasks = sqliteTable("tasks", {
   costUsd: real("cost_usd").notNull().default(0),
   /** "user", "schedule", or "teammate:<id>" when delegated. */
   createdBy: text("created_by").notNull().default("user"),
+  /**
+   * The task this one was delegated from (e.g. the manager's task for an owner
+   * request). When all children finish, the manager reports back. See src/lib/manager.ts.
+   */
+  parentTaskId: text("parent_task_id"),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
