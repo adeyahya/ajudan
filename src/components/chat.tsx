@@ -149,7 +149,8 @@ function UserTurn({ m }: { m: ChatMessage }) {
         {m.meta && <MessageHeader className="font-pixel justify-end text-xs text-muted-foreground">{m.meta}</MessageHeader>}
         <Bubble align="end" variant="ghost">
           {/* Owner's lines: a parchment speech card. */}
-          <BubbleContent className="pixel-paper whitespace-pre-wrap px-3 py-2">{m.content}</BubbleContent>
+          {/* `!` beats the ghost variant's transparent background and zero padding. */}
+          <BubbleContent className="pixel-paper whitespace-pre-wrap bg-parchment! px-3! py-2! text-ink!">{m.content}</BubbleContent>
         </Bubble>
       </MessageContent>
     </Message>

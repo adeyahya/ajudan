@@ -25,7 +25,7 @@ export function TeammateEditor({
   initial,
 }: {
   action: Action;
-  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null };
+  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean };
 }) {
   const [state, formAction] = useActionState(action, {});
   const [autonomy, setAutonomy] = useState<Autonomy>(initial.autonomy);
@@ -61,6 +61,15 @@ export function TeammateEditor({
         </div>
         <p className="text-xs text-muted-foreground">{help}</p>
       </div>
+      <label className="flex cursor-pointer items-start gap-2">
+        <input type="checkbox" name="browserAccess" defaultChecked={initial.browserAccess} className="mt-0.5 size-4 accent-[var(--primary)]" />
+        <span>
+          <span className="font-pixel">Can use the business browser</span>
+          <span className="block text-xs text-muted-foreground">
+            Drives your logged-in Chrome (Shopee, TikTok…). Changes on a site still follow the freedom setting above.
+          </span>
+        </span>
+      </label>
       <div className="grid gap-1">
         <Label>Recurring schedule (cron, blank for none)</Label>
         <div className="flex gap-2">

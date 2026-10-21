@@ -122,6 +122,14 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
   return { text: textParts.join("\n"), structured: undefined, sessionId, costUsd: 0, ok: false, error: "No result" };
 }
 
+function hostOf(url: unknown) {
+  try {
+    return new URL(String(url)).hostname.replace(/^www\./, "");
+  } catch {
+    return String(url ?? "a page").slice(0, 40);
+  }
+}
+
 function baseName(p: unknown) {
   return String(p ?? "").split("/").pop() || "a file";
 }
@@ -163,6 +171,30 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return "Asking to publish";
     case "mcp__biz__send_message":
       return `Asking to message ${short(input.to, 40)}`;
+    case "mcp__biz__confirm_browser_action":
+      return `Asking before: ${short(input.action, 60)}`;
+    // Business browser (Playwright MCP)
+    case "mcp__browser__browser_navigate":
+      return `Opening ${hostOf(input.url)}`;
+    case "mcp__browser__browser_navigate_back":
+      return "Going back";
+    case "mcp__browser__browser_snapshot":
+      return "Reading the page";
+    case "mcp__browser__browser_take_screenshot":
+      return "Looking at the page";
+    case "mcp__browser__browser_click":
+      return `Clicking “${short(input.element, 40)}”`;
+    case "mcp__browser__browser_type":
+    case "mcp__browser__browser_fill_form":
+      return `Typing into ${short(input.element ?? "a form", 40)}`;
+    case "mcp__browser__browser_select_option":
+      return `Choosing in “${short(input.element, 40)}”`;
+    case "mcp__browser__browser_press_key":
+      return `Pressing ${short(input.key, 20)}`;
+    case "mcp__browser__browser_wait_for":
+      return "Waiting for the page";
+    case "mcp__browser__browser_tabs":
+      return "Switching tabs";
     default: {
       const n = name.replace(/^mcp__\w+?__/, "").replace(/_/g, " ");
       return `Using ${n}`;

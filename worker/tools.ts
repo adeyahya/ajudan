@@ -18,7 +18,9 @@ export const SAFE_BIZ_TOOLS = ["save_deliverable", "list_deliverables", "assign_
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
 /** Tools that reach the outside world: gated by the teammate's autonomy. */
-export const OUTWARD_BIZ_TOOLS = ["publish_deliverable", "send_message"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
+export const OUTWARD_BIZ_TOOLS = ["publish_deliverable", "send_message", "confirm_browser_action"].map(
+  (t) => `mcp__${BIZ_SERVER}__${t}`,
+);
 
 export type BizContext = {
   businessId: string;
@@ -26,6 +28,8 @@ export type BizContext = {
   taskId: string;
   /** Other active teammates this teammate may delegate to. Empty = no assign_task. */
   roster: Pick<Teammate, "id" | "name" | "title">[];
+  /** The teammate has the business browser this task (adds confirm_browser_action). */
+  browser?: boolean;
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -178,6 +182,24 @@ export function createBizServer(ctx: BizContext) {
       },
     ),
   ];
+
+  if (ctx.browser) {
+    tools.push(
+      tool(
+        "confirm_browser_action",
+        "Ask the owner before you commit a change in the business browser: submitting a form, saving or publishing, replying to a customer, changing prices or stock, deleting anything. Describe exactly what you will do. Only proceed if this returns approved.",
+        {
+          site: z.string().describe('The site, e.g. "seller.shopee.co.id"'),
+          action: z.string().describe("One sentence: what you will do"),
+          details: z.string().describe("The exact values or text you will submit"),
+        },
+        async (a) => {
+          ev("browser_action_approved", `${teammate.name} may now: ${a.action} (${a.site})`, { site: a.site });
+          return ok(`Approved: ${a.action}. Do exactly this on ${a.site}, then report what changed. Ask again for anything else.`);
+        },
+      ),
+    );
+  }
 
   if (ctx.roster.length) {
     tools.push(

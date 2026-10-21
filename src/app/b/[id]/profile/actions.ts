@@ -3,6 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
+import { closeBrowser, ensureBrowser, normalizeSites } from "@/lib/browser";
 import { parseLanguage } from "@/lib/language";
 import { lines, textToGoals } from "@/lib/onboarding/profile-form";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
@@ -63,4 +64,25 @@ function refreshWorkspaces(businessId: string, profile: BusinessProfile, languag
       db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
     }
   }
+}
+
+/** Show the business's Chrome so the owner can log in to their seller accounts or watch. */
+export async function openBusinessBrowser(businessId: string, fd: FormData) {
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  const url = String(fd.get("url") ?? "").trim() || undefined;
+  await ensureBrowser(biz.id, biz.name, url);
+  refresh();
+}
+
+export async function closeBusinessBrowser(businessId: string) {
+  await closeBrowser(businessId);
+  refresh();
+}
+
+/** Sites the business browser may open (one per line). Empty = no restriction. */
+export async function saveBrowserSites(businessId: string, fd: FormData) {
+  const browserSites = normalizeSites(String(fd.get("sites") ?? "").split(/[\n,]/));
+  db.update(schema.businesses).set({ browserSites }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
 }

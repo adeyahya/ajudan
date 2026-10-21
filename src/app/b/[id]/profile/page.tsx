@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { Button, Card, Label, PageHeader, PageSkeleton, Prose } from "@/components/kit";
-import { getBusiness } from "@/lib/data";
+import { getBusiness, listTeammates } from "@/lib/data";
 import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { LanguageSelect } from "@/app/language-select";
 import { saveLanguage, saveProfile } from "./actions";
+import { BrowserPanel } from "./browser-panel";
 import { ProfileForm } from "./profile-form";
 
 type Params = { params: Promise<{ id: string }> };
@@ -61,6 +62,7 @@ async function Content({ params }: Params) {
   const biz = await getBusiness(id);
   if (!biz) notFound();
   const p = biz.profile;
+  const browserMates = (await listTeammates(id)).filter((t) => t.browserAccess).map((t) => t.name);
   if (!p) {
     return (
       <Card className="p-6 max-w-xl">
@@ -130,6 +132,10 @@ async function Content({ params }: Params) {
             <Prose>{p.brandVoice}</Prose>
           </Section>
         </Card>
+        <div className="grid gap-6 content-start">
+        <Card className="p-6">
+          <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} />
+        </Card>
         <Card className="p-6 grid gap-6 content-start">
           <LanguageForm id={id} language={biz.language} />
           <details>
@@ -154,6 +160,7 @@ async function Content({ params }: Params) {
             />
           </details>
         </Card>
+        </div>
       </div>
     </div>
   );

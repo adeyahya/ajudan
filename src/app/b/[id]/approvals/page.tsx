@@ -133,6 +133,17 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
       </div>
     );
   }
+  if (a.toolName.endsWith("__confirm_browser_action")) {
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+        <div className="text-xs text-muted-foreground">
+          In the business browser on <span className="text-foreground">{str(i.site)}</span>
+        </div>
+        <div className="font-medium">{str(i.action)}</div>
+        <Prose>{str(i.details)}</Prose>
+      </div>
+    );
+  }
   if (a.toolName.endsWith("__publish_deliverable")) {
     const d = deliverables.get(str(i.deliverable_id));
     return (

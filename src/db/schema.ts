@@ -27,6 +27,11 @@ export const businesses = sqliteTable("businesses", {
   busy: integer("busy", { mode: "boolean" }).notNull().default(false),
   /** Team designer's explanation of the proposed team. */
   teamSummary: text("team_summary"),
+  /**
+   * Sites this business's browser may load, e.g. ["seller.shopee.co.id", "tiktok.com"].
+   * Empty means no restriction. See src/lib/browser.ts.
+   */
+  browserSites: text("browser_sites", { mode: "json" }).$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
 });
 
@@ -73,6 +78,8 @@ export const teammates = sqliteTable("teammates", {
   sessionId: text("session_id"),
   workspaceDir: text("workspace_dir"),
   deskIndex: integer("desk_index").notNull().default(0),
+  /** May drive the business's browser (logged-in Shopee, TikTok…). Off by default. */
+  browserAccess: integer("browser_access", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
 });
 

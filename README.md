@@ -24,6 +24,11 @@ Open http://localhost:3000, add your business and website, and do the interview.
   - Publish/send are **simulated**: no real integrations yet.
   - Autonomy setting: `draft` never publishes, `ask` needs your approval, `auto` acts alone.
 - **Language**: each business has a primary language (e.g. Bahasa Indonesia), set at creation or on the Business page; every agent writes in it.
+- **Business browser**: each business has its own Chrome profile in `data/browsers/<id>`. Open it from **Business → Business browser**, log in to Shopee Seller Center, TikTok, etc. once, then turn on "Can use the business browser" for a teammate on the Team page. Teammates drive it through Playwright MCP over CDP (`worker/browser.ts`, swappable provider):
+  - They only open sites on the business's list.
+  - They never type passwords or codes.
+  - Before changing anything on a site they call `confirm_browser_action`, which follows their freedom setting (draft-only never changes anything).
+  - One teammate drives the browser at a time.
 - **Data**: SQLite at `data/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands
@@ -31,6 +36,7 @@ Open http://localhost:3000, add your business and website, and do the interview.
 ```bash
 pnpm typecheck && pnpm lint
 pnpm worker:once                           # process queued jobs, then exit
+pnpm db:generate && pnpm db:migrate        # after editing src/db/schema.ts (never drizzle-kit push)
 AJUDAN_DATA_DIR=.test-data/demo pnpm dev   # use a separate data folder
 ```
 
@@ -40,4 +46,5 @@ Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's ter
 
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
-- No real integrations yet: publishing and sending only record the action.
+- No real integrations yet: publishing and sending only record the action. The business browser is the way to act on real sites.
+- The "ask before changing a site" rule is enforced by the teammate's instructions plus approvals, not by blocking clicks. The site list and the blocked tools are hard limits.

@@ -189,7 +189,13 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
         <div className="pt-3 grid gap-3">
           <TeammateEditor
             action={updateTeammate.bind(null, businessId, t.id)}
-            initial={{ name: t.name, autonomy: t.autonomy, schedule: t.schedule, schedulePrompt: t.schedulePrompt }}
+            initial={{
+              name: t.name,
+              autonomy: t.autonomy,
+              schedule: t.schedule,
+              schedulePrompt: t.schedulePrompt,
+              browserAccess: t.browserAccess,
+            }}
           />
           <form action={removeTeammate.bind(null, businessId, t.id)}>
             <PendingSubmit variant="ghost">{active ? "Archive teammate" : "Remove from team"}</PendingSubmit>
