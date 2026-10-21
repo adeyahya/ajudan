@@ -116,6 +116,23 @@ async function loadTeammate(businessId: string, teammateId: string) {
       children.set(c.parentTaskId, [...(children.get(c.parentTaskId) ?? []), c]);
     }
   }
+  // A team update shows the images its delegated tasks produced.
+  const childIds = [...children.values()].flat().map((c) => c.id);
+  if (childIds.length) {
+    const byTask = new Map<string, string[]>();
+    for (const d of db
+      .select({ taskId: schema.deliverables.taskId, attachments: schema.deliverables.attachments })
+      .from(schema.deliverables)
+      .where(inArray(schema.deliverables.taskId, childIds))
+      .all()) {
+      if (d.taskId && d.attachments.length) byTask.set(d.taskId, [...(byTask.get(d.taskId) ?? []), ...d.attachments]);
+    }
+    for (const t of tasks) {
+      if (t.createdBy !== REPORT || !t.parentTaskId) continue;
+      const imgs = (children.get(t.parentTaskId) ?? []).flatMap((c) => byTask.get(c.id) ?? []);
+      if (imgs.length) taskImages.set(t.id, [...(taskImages.get(t.id) ?? []), ...imgs]);
+    }
+  }
   return { teammate, tasks, steps, deliverableCount, mates, memory, taskImages, children };
 }
 
