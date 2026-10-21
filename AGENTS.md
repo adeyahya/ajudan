@@ -7,3 +7,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Ajudan project conventions
+
+Ajudan onboards a business through an AI interview, designs a team of AI teammates, and runs them. The office view shows them working.
+
+- **Processes:** `pnpm dev` runs the Next.js app and the worker (`worker/index.ts`). **All Claude calls happen in the worker**, never in Next.js. The web app only reads and writes SQLite and enqueues jobs (`enqueueJob` in `src/lib/jobs.ts`).
+- **LLM:** call Claude only through `runAgent()` in `src/lib/claude.ts`. It wraps the Claude Agent SDK, which is headless Claude Code using the local login. Default model `MODELS.main` (claude-opus-5-5).
+- **DB:** SQLite with Drizzle. The schema is in `src/db/schema.ts`. After changing it, run `pnpm db:push`. Data lives in `$AJUDAN_DATA_DIR` (default `./data`).
+- **Live updates:** the worker writes `activity_events` with `logEvent()` (`src/lib/events.ts`). The browser gets them from `/api/b/[id]/events` over SSE. Use `<LiveRefresh businessId>` or `useActivity()` from `src/components/live.tsx`.
+- **Pages (Next 16 + Cache Components):** `page.tsx` is a non-async component that renders `<Suspense fallback={<PageSkeleton/>}><Content params={props.params}/></Suspense>`. `Content` is async, awaits params, and reads data through helpers that `await connection()` first (see `src/lib/data.ts`). Mutations are Server Functions (`'use server'`) in a colocated `actions.ts`, followed by `revalidatePath`/`refresh()`. Params and route types: `PageProps<'/b/[id]'>`, `LayoutProps`, `RouteContext`.
+- **UI:** use the primitives in `src/components/ui.tsx` and the theme tokens (`bg-surface`, `border-line`, `text-muted`, `bg-accent`). Tailwind v4.
+- **Checks:** `pnpm typecheck`, `pnpm lint`.

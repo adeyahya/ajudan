@@ -1,0 +1,48 @@
+"use client";
+
+import { useState } from "react";
+import { Chat, type ChatMessage } from "@/components/chat";
+import { LiveRefresh, useActivity } from "@/components/live";
+
+/** The interview thread with live "what the interviewer is doing" steps. */
+export function InterviewChat({
+  businessId,
+  messages,
+  busy,
+  busyLabel,
+  canSend,
+  sendAction,
+}: {
+  businessId: string;
+  messages: ChatMessage[];
+  busy: boolean;
+  busyLabel: string;
+  canSend: boolean;
+  sendAction: (text: string) => Promise<void>;
+}) {
+  const [live, setLive] = useState<{ after: number; steps: string[] }>({ after: messages.length, steps: [] });
+  useActivity(businessId, (e) => {
+    if (e.type !== "onboarding_tool") return;
+    setLive((prev) =>
+      prev.after === messages.length ? { after: prev.after, steps: [...prev.steps, e.message] } : { after: messages.length, steps: [e.message] },
+    );
+  });
+  const liveSteps = live.after === messages.length ? live.steps : [];
+
+  return (
+    <>
+      <LiveRefresh businessId={businessId} types={["onboarding_reply", "onboarding_error", "profile_ready", "team_proposed"]} />
+      <Chat
+        className="flex-1"
+        agent={{ name: "Interviewer", color: "#6366f1" }}
+        messages={messages}
+        busy={busy}
+        busyLabel={busyLabel}
+        liveSteps={liveSteps}
+        sendAction={canSend ? sendAction : undefined}
+        placeholder="Type your answer…"
+        emptyState={<p className="py-10 text-center text-sm text-muted-foreground">Starting your interview…</p>}
+      />
+    </>
+  );
+}
