@@ -13,6 +13,7 @@ import { resolveWorkspace } from "@/lib/paths";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { PausedError, runAbortController } from "../session";
+import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SERVER, createWhatsappServer, whatsappRules } from "../whatsapp-tools";
 import { BIZ_SERVER, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep"];
@@ -57,6 +58,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     const delegationRoster = canDelegate ? roster : [];
 
     const useBrowser = teammate.browserAccess;
+    const useWhatsapp = teammate.whatsappAccess && business.whatsappChats.length > 0;
+    const outward = [...OUTWARD_BIZ_TOOLS, ...(useWhatsapp ? OUTWARD_WA_TOOLS : [])];
     const biz = createBizServer({
       businessId: business.id,
       teammate,
@@ -77,7 +80,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         }
         return { behavior: "allow", updatedInput: input };
       }
-      if (OUTWARD_BIZ_TOOLS.includes(toolName)) {
+      if (outward.includes(toolName)) {
         if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
         if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
         return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
@@ -141,7 +144,11 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     const run = async () => {
       const mcpServers: Record<string, McpServerConfig> = { [BIZ_SERVER]: biz };
       const allowedTools = ["WebSearch", "WebFetch", ...SAFE_BIZ_TOOLS];
-      const disallowedTools = ["Bash", ...(teammate.autonomy === "draft" ? OUTWARD_BIZ_TOOLS : [])];
+      const disallowedTools = ["Bash", ...(teammate.autonomy === "draft" ? outward : [])];
+      if (useWhatsapp) {
+        mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd });
+        allowedTools.push(...SAFE_WA_TOOLS);
+      }
       if (useBrowser) {
         setMate({ currentActivity: "Opening the business browser" });
         const cdpEndpoint = await ensureBrowser(business.id, business.name);
@@ -159,7 +166,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       }
       return runAgent({
         cwd,
-        systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser),
+        systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp),
         prompt: buildPrompt(task),
         tools: BUILTIN_TOOLS,
         allowedTools,
@@ -276,6 +283,12 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
     const channel = s(input.channel, 30);
     return `${who} wants to send ${/^[aeiou]/i.test(channel) ? "an" : "a"} ${channel} message to ${s(input.to, 60)}: "${s(input.subject)}"`;
   }
+  if (toolName === "mcp__whatsapp__send_message") {
+    return `${who} wants to post in WhatsApp "${s(input.chat, 40)}": "${s(input.message, 100)}"`;
+  }
+  if (toolName === "mcp__whatsapp__send_file") {
+    return `${who} wants to post ${s(input.file, 40)} in WhatsApp "${s(input.chat, 40)}"`;
+  }
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;
   }
@@ -311,6 +324,7 @@ function buildSystemPrompt(
   roster: Teammate[],
   canDelegate: boolean,
   useBrowser = false,
+  useWhatsapp = false,
 ) {
   const role = getRole(teammate.roleKey);
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none)");
@@ -350,7 +364,7 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.
 - At the end, append any durable learnings (decisions, what worked, owner preferences) to memory.md with Edit. Keep it short.
 - Finish with a concise summary for the owner: what you did, what you saved, and what's next.
-${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}
+${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }
 

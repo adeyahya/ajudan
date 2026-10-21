@@ -32,6 +32,14 @@ export const businesses = sqliteTable("businesses", {
    * Empty means no restriction. See src/lib/browser.ts.
    */
   browserSites: text("browser_sites", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /**
+   * WhatsApp chats (groups, communities) teammates may read and post to. Everything
+   * else in the linked WhatsApp stays invisible to them. See src/lib/whatsapp.ts.
+   */
+  whatsappChats: text("whatsapp_chats", { mode: "json" })
+    .$type<{ jid: string; name: string }[]>()
+    .notNull()
+    .default([]),
   createdAt: createdAt(),
 });
 
@@ -80,6 +88,8 @@ export const teammates = sqliteTable("teammates", {
   deskIndex: integer("desk_index").notNull().default(0),
   /** May drive the business's browser (logged-in Shopee, TikTok…). Off by default. */
   browserAccess: integer("browser_access", { mode: "boolean" }).notNull().default(false),
+  /** May read and post in the business's allowed WhatsApp chats. Off by default. */
+  whatsappAccess: integer("whatsapp_access", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
 });
 

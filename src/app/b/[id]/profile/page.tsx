@@ -8,6 +8,7 @@ import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { LanguageSelect } from "@/app/language-select";
 import { saveLanguage, saveProfile } from "./actions";
 import { BrowserPanel } from "./browser-panel";
+import { WhatsappPanel } from "./whatsapp-panel";
 import { ProfileForm } from "./profile-form";
 
 type Params = { params: Promise<{ id: string }> };
@@ -62,7 +63,9 @@ async function Content({ params }: Params) {
   const biz = await getBusiness(id);
   if (!biz) notFound();
   const p = biz.profile;
-  const browserMates = (await listTeammates(id)).filter((t) => t.browserAccess).map((t) => t.name);
+  const mates = await listTeammates(id);
+  const browserMates = mates.filter((t) => t.browserAccess).map((t) => t.name);
+  const waMates = mates.filter((t) => t.whatsappAccess).map((t) => t.name);
   if (!p) {
     return (
       <Card className="p-6 max-w-xl">
@@ -133,6 +136,9 @@ async function Content({ params }: Params) {
           </Section>
         </Card>
         <div className="grid gap-6 content-start">
+        <Card className="p-6">
+          <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} />
+        </Card>
         <Card className="p-6">
           <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} />
         </Card>

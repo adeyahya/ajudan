@@ -133,6 +133,17 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
       </div>
     );
   }
+  if (a.toolName.startsWith("mcp__whatsapp__send_")) {
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
+        <div className="text-xs text-muted-foreground">
+          WhatsApp → <span className="text-foreground">{str(i.chat)}</span>
+          {i.file ? ` · file ${str(i.file)}` : ""}
+        </div>
+        <Prose>{str(i.message ?? i.caption ?? "")}</Prose>
+      </div>
+    );
+  }
   if (a.toolName.endsWith("__confirm_browser_action")) {
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">

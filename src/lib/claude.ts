@@ -173,6 +173,16 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Asking to message ${short(input.to, 40)}`;
     case "mcp__biz__confirm_browser_action":
       return `Asking before: ${short(input.action, 60)}`;
+    // WhatsApp (wacli)
+    case "mcp__whatsapp__list_chats":
+      return "Checking WhatsApp chats";
+    case "mcp__whatsapp__read_messages":
+      return `Reading WhatsApp: ${short(input.chat, 40)}`;
+    case "mcp__whatsapp__search_messages":
+      return `Searching WhatsApp: ${short(input.query, 40)}`;
+    case "mcp__whatsapp__send_message":
+    case "mcp__whatsapp__send_file":
+      return `Posting in WhatsApp: ${short(input.chat, 40)}`;
     // Business browser (Playwright MCP)
     case "mcp__browser__browser_navigate":
       return `Opening ${hostOf(input.url)}`;

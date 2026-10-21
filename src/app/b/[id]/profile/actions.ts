@@ -5,6 +5,8 @@ import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { closeBrowser, ensureBrowser, normalizeSites } from "@/lib/browser";
 import { parseLanguage } from "@/lib/language";
+import { cancelLink, startLink, unlinkRequestPath, whatsappDir } from "@/lib/whatsapp";
+import fs from "node:fs";
 import { lines, textToGoals } from "@/lib/onboarding/profile-form";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
 import { initTeammateWorkspace } from "@/lib/workspace";
@@ -87,5 +89,42 @@ export async function closeBusinessBrowser(businessId: string) {
 export async function saveBrowserSites(businessId: string, fd: FormData) {
   const browserSites = normalizeSites(String(fd.get("sites") ?? "").split(/[\n,]/));
   db.update(schema.businesses).set({ browserSites }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/** Start linking: the panel then shows wacli's QR code to scan. */
+export async function startWhatsappLink(businessId: string) {
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  startLink();
+  refresh();
+}
+
+export async function cancelWhatsappLink() {
+  cancelLink();
+  refresh();
+}
+
+/** Ask the worker to log this WhatsApp out (it stops syncing first). */
+export async function unlinkWhatsapp(businessId: string) {
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  fs.mkdirSync(whatsappDir(), { recursive: true });
+  fs.writeFileSync(unlinkRequestPath(), new Date().toISOString());
+  db.update(schema.businesses).set({ whatsappChats: [] }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/** Which groups/communities teammates may read and post in. Checkbox values are "jid|name". */
+export async function saveWhatsappChats(businessId: string, fd: FormData) {
+  const whatsappChats = fd
+    .getAll("chat")
+    .map(String)
+    .map((v) => {
+      const i = v.indexOf("|");
+      return { jid: v.slice(0, i), name: v.slice(i + 1) };
+    })
+    .filter((c) => c.jid.endsWith("@g.us") || c.jid.endsWith("@s.whatsapp.net") || c.jid.endsWith("@newsletter"));
+  db.update(schema.businesses).set({ whatsappChats }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }

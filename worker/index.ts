@@ -19,6 +19,7 @@ import { pinDataDir } from "@/lib/paths";
 import { handlers } from "./handlers";
 import { startScheduler, stopScheduler } from "./scheduler";
 import { endFolderSession, PausedError } from "./session";
+import { startWhatsappSync, stopWhatsappSync } from "./whatsapp-sync";
 
 const CONCURRENCY = Number(process.env.AJUDAN_CONCURRENCY ?? 2);
 const once = process.argv.includes("--once");
@@ -65,7 +66,10 @@ function activate(dir: string | null) {
     .set({ state: "idle", currentActivity: null })
     .where(inArray(schema.teammates.state, ["working", "waiting"]))
     .run();
-  if (!once) startScheduler();
+  if (!once) {
+    startScheduler();
+    startWhatsappSync();
+  }
   console.log(`[worker] working on ${dir}`);
 }
 
@@ -73,6 +77,7 @@ async function switchTo(dir: string | null) {
   switching = true;
   console.log(`[worker] switching folder → ${dir ?? "(none)"}`);
   stopScheduler();
+  stopWhatsappSync();
   endFolderSession(); // aborts running Claude calls; their jobs go back to the queue
   await Promise.allSettled([...inflight]);
   activate(dir);
@@ -98,6 +103,15 @@ function tick() {
     inflight.add(p);
   }
 }
+
+// Don't leave a wacli sync process holding the WhatsApp store lock behind.
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    stopWhatsappSync();
+    process.exit(0);
+  });
+}
+process.on("exit", () => stopWhatsappSync());
 
 async function main() {
   activate(wantedFolder());

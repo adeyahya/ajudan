@@ -31,6 +31,7 @@ export async function updateTeammate(
   const rawSchedule = String(formData.get("schedule") ?? "").trim();
   const schedulePrompt = String(formData.get("schedulePrompt") ?? "").trim();
   const browserAccess = formData.get("browserAccess") === "on";
+  const whatsappAccess = formData.get("whatsappAccess") === "on";
   if (!name) return { error: "Name can't be empty" };
   if (!isAutonomy(autonomy)) return { error: "Pick an autonomy level" };
   const schedule = rawSchedule ? validCron(rawSchedule) : null;
@@ -38,7 +39,7 @@ export async function updateTeammate(
   if (schedule && !schedulePrompt) return { error: "Describe what to do on each scheduled run" };
 
   db.update(schema.teammates)
-    .set({ name, autonomy, schedule, schedulePrompt: schedule ? schedulePrompt : null, browserAccess })
+    .set({ name, autonomy, schedule, schedulePrompt: schedule ? schedulePrompt : null, browserAccess, whatsappAccess })
     .where(ownTeammate(businessId, teammateId))
     .run();
   refresh();

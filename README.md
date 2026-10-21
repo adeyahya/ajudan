@@ -43,6 +43,11 @@ Open http://localhost:3000, add your business and website, and do the interview.
   - They never type passwords or codes.
   - Before changing anything on a site they call `confirm_browser_action`, which follows their freedom setting (draft-only never changes anything).
   - One teammate drives the browser at a time.
+- **WhatsApp** (via [wacli](https://wacli.sh), `brew install openclaw/tap/wacli`): link the business's WhatsApp on **Business → WhatsApp** by scanning a QR code. The session and message store live in `<folder>/whatsapp/`.
+  - Tick the groups or communities teammates may use (e.g. the reseller community); every other chat stays invisible to them.
+  - Turn on "Can use WhatsApp" for a teammate on the Team page. They can read and search those chats for context and post updates; posting follows their freedom setting (approvals for "ask first", never for "draft only").
+  - While the folder is open, the worker keeps `wacli sync --follow` running and spaces sends 2–6s apart.
+  - wacli uses the unofficial WhatsApp Web protocol, so keep volume human-sized.
 - **Data**: SQLite at `<business folder>/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands
@@ -61,5 +66,5 @@ Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's ter
 - Moving from the old shared `./data` folder: `npx tsx scripts/move-to-folder.ts <businessId>` copies a business into `~/Ajudan/<Name>/`. Orucraft has been moved already, and `./data` can be deleted once you are happy.
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
-- No real integrations yet: publishing and sending only record the action. The business browser is the way to act on real sites.
+- `publish_deliverable` / `send_message` only record the action; real outward channels are the business browser and WhatsApp.
 - The "ask before changing a site" rule is enforced by the teammate's instructions plus approvals, not by blocking clicks. The site list and the blocked tools are hard limits.

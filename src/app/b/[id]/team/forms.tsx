@@ -25,7 +25,7 @@ export function TeammateEditor({
   initial,
 }: {
   action: Action;
-  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean };
+  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean; whatsappAccess?: boolean };
 }) {
   const [state, formAction] = useActionState(action, {});
   const [autonomy, setAutonomy] = useState<Autonomy>(initial.autonomy);
@@ -67,6 +67,15 @@ export function TeammateEditor({
           <span className="font-pixel">Can use the business browser</span>
           <span className="block text-xs text-muted-foreground">
             Drives your logged-in Chrome (Shopee, TikTok…). Changes on a site still follow the freedom setting above.
+          </span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2">
+        <input type="checkbox" name="whatsappAccess" defaultChecked={initial.whatsappAccess} className="mt-0.5 size-4 accent-[var(--primary)]" />
+        <span>
+          <span className="font-pixel">Can use WhatsApp</span>
+          <span className="block text-xs text-muted-foreground">
+            Reads and posts in the WhatsApp groups you allowed on the Business page. Posting follows the freedom setting above.
           </span>
         </span>
       </label>
