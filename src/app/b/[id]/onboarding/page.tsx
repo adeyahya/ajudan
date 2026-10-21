@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import type { ChatMessage } from "@/components/chat";
 import { PageSkeleton } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
+import { getLanguage } from "@/lib/language";
 import { lastEventOf, listOnboardingMessages, listOnboardingSteps } from "@/lib/onboarding/data";
 import { finishInterview, retryOnboarding, sendInterviewMessage } from "./actions";
 import { PendingButton } from "./chat-form";
@@ -47,6 +48,7 @@ async function Content({ params }: Params) {
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Interview · {biz.name}</h1>
+          <p className="text-xs text-muted-foreground">Language: {getLanguage(biz.language).nativeLabel}</p>
           <p className="text-xs text-muted-foreground">
             {done
               ? "Interview complete. Your answers were turned into a business profile."

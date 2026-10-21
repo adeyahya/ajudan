@@ -62,7 +62,7 @@ async function Content({ params }: Params) {
           return (
             <Card key={a.id} className="p-4 space-y-3">
               <div className="flex items-start gap-3">
-                {m && <Avatar name={m.name} color={m.color} />}
+                {m && <Avatar seed={m.id} name={m.name} color={m.color} />}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium">{a.summary}</div>
                   <div className="text-xs text-muted-foreground">
@@ -97,7 +97,7 @@ async function Content({ params }: Params) {
           return (
             <details key={a.id} className="group rounded-xl border border-border bg-card">
               <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
-                {m && <Avatar name={m.name} color={m.color} size={26} />}
+                {m && <Avatar seed={m.id} name={m.name} color={m.color} size={26} />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{a.summary}</div>
                   <div className="text-xs text-muted-foreground">

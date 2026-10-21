@@ -3,7 +3,9 @@ import { Suspense } from "react";
 import type { BusinessStatus } from "@/db/schema";
 import { Badge, Button, Card, Input, Label, PageHeader, PageSkeleton } from "@/components/kit";
 import { listBusinesses } from "@/lib/data";
+import { DEFAULT_LANGUAGE } from "@/lib/language";
 import { createBusiness } from "./actions";
+import { LanguageSelect } from "./language-select";
 
 const STATUS: Record<BusinessStatus, { label: string; tone: "amber" | "blue" | "violet" | "green" }> = {
   onboarding: { label: "Interview", tone: "amber" },
@@ -25,7 +27,7 @@ export default function Home() {
           <p className="text-sm text-muted-foreground mb-4">
             We&apos;ll look at your website, then interview you for a few minutes to understand the business.
           </p>
-          <form action={createBusiness} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <form action={createBusiness} className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
             <div className="grid gap-1">
               <Label htmlFor="name">Business name</Label>
               <Input id="name" name="name" required placeholder="Acme Coffee" />
@@ -33,6 +35,10 @@ export default function Home() {
             <div className="grid gap-1">
               <Label htmlFor="website">Website</Label>
               <Input id="website" name="website" placeholder="https://acme.coffee" />
+            </div>
+            <div className="grid gap-1">
+              <Label htmlFor="language">Language</Label>
+              <LanguageSelect id="language" defaultValue={DEFAULT_LANGUAGE} />
             </div>
             <Button type="submit">Start interview</Button>
           </form>

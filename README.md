@@ -2,7 +2,7 @@
 
 AI teammates for your business. Ajudan interviews you about the business, designs a team of AI teammates, runs them on real work, and shows them in a 2D pixel-art office.
 
-![Office](docs/office-screenshot.png)
+![Office](docs/game-ui.jpg)
 
 ## Run it locally
 
@@ -17,12 +17,13 @@ Open http://localhost:3000, add your business and website, and do the interview.
 
 ## How it works
 
-- **Web app** (Next.js 16, shadcn/ui): onboarding chat, team review, office, teammate chats, approvals, work.
+- **Web app** (Next.js 16, shadcn/ui with a pixel-game theme in `globals.css`): onboarding chat, team review, office, teammate chats, approvals, work.
 - **Worker** (`worker/`): takes jobs from SQLite and runs each one with `runAgent()` (`src/lib/claude.ts`).
   - Each teammate runs in its own folder, `data/workspaces/<business>/<teammate>/`, with `BUSINESS.md` and its own `memory.md`.
 - **Teammate tools** (`worker/tools.ts`): save work, delegate to a teammate, update their status, and publish/send.
   - Publish/send are **simulated**: no real integrations yet.
   - Autonomy setting: `draft` never publishes, `ask` needs your approval, `auto` acts alone.
+- **Language**: each business has a primary language (e.g. Bahasa Indonesia), set at creation or on the Business page; every agent writes in it.
 - **Data**: SQLite at `data/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands

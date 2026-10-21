@@ -42,7 +42,7 @@ export type ChatMessage = {
   error?: boolean;
 };
 
-export type ChatAgent = { name: string; color: string; subtitle?: string };
+export type ChatAgent = { id?: string; name: string; color: string; subtitle?: string };
 
 /**
  * Chat thread built from shadcn AI Elements: Message Scroller keeps the latest turn in
@@ -146,9 +146,10 @@ function UserTurn({ m }: { m: ChatMessage }) {
   return (
     <Message align="end">
       <MessageContent>
-        {m.meta && <MessageHeader className="justify-end text-xs text-muted-foreground">{m.meta}</MessageHeader>}
-        <Bubble align="end" variant="muted">
-          <BubbleContent className="whitespace-pre-wrap">{m.content}</BubbleContent>
+        {m.meta && <MessageHeader className="font-pixel justify-end text-xs text-muted-foreground">{m.meta}</MessageHeader>}
+        <Bubble align="end" variant="ghost">
+          {/* Owner's lines: a parchment speech card. */}
+          <BubbleContent className="pixel-paper whitespace-pre-wrap px-3 py-2">{m.content}</BubbleContent>
         </Bubble>
       </MessageContent>
     </Message>
@@ -157,12 +158,19 @@ function UserTurn({ m }: { m: ChatMessage }) {
 
 function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
   return (
-    <Message>
-      <MessageContent className="gap-2">
-        <MessageHeader className="flex items-center gap-2 text-xs">
-          <Avatar name={agent.name} color={agent.color} size={22} />
-          <span className="font-medium text-foreground">{agent.name}</span>
-          {m.meta && !m.pending && <span className="text-muted-foreground">{m.meta}</span>}
+    // RPG dialogue box: portrait on the left, a name plate, then the text.
+    <Message className="flex-row items-start gap-3">
+      <div className="hidden shrink-0 pt-4 sm:block">
+        <Avatar seed={agent.id} name={agent.name} color={agent.color} size={44} />
+      </div>
+      <MessageContent className="pixel-panel relative min-w-0 flex-1 gap-2 px-4 pb-3 pt-5">
+        <MessageHeader className="absolute -top-3 left-3 flex items-center gap-2 px-0">
+          <span className="font-pixel bg-primary px-2 py-0.5 text-sm text-primary-foreground shadow-[-2px_0_0_var(--frame),2px_0_0_var(--frame),0_-2px_0_var(--frame),0_2px_0_var(--frame)]">
+            {agent.name}
+          </span>
+          {m.meta && !m.pending && (
+            <span className="font-pixel bg-card px-1.5 text-[11px] text-muted-foreground">{m.meta}</span>
+          )}
         </MessageHeader>
         {m.pending ? (
           <LiveTrace steps={m.steps ?? []} label={m.meta ?? "Thinking…"} />

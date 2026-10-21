@@ -75,7 +75,7 @@ export async function hireTeam(businessId: string) {
   if (!proposed.length) throw new Error("There is no one to hire");
 
   for (const t of proposed) {
-    const workspaceDir = initTeammateWorkspace(t, biz.profile);
+    const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
     db.update(schema.teammates).set({ status: "active", workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
   }
   db.update(schema.businesses).set({ status: "active" }).where(eq(schema.businesses.id, businessId)).run();
@@ -113,7 +113,7 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
     })
     .returning()
     .get();
-  const workspaceDir = initTeammateWorkspace(t, biz.profile);
+  const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
   db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
   refresh();
   return { ok: true };

@@ -117,7 +117,7 @@ async function Content({ params, searchParams }: Props) {
         {data.rows.length === 0 && <p className="text-sm text-muted-foreground">No work matches these filters yet.</p>}
         {data.rows.map((d) => {
           const m = data.mates.find((x) => x.id === d.teammateId);
-          return <DeliverableCard key={d.id} d={d} teammate={m ? { name: m.name, color: m.color } : null} />;
+          return <DeliverableCard key={d.id} d={d} teammate={m ? { id: m.id, name: m.name, color: m.color } : null} />;
         })}
       </div>
     </div>

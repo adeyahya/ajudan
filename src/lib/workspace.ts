@@ -2,13 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Teammate } from "@/db/schema";
 import type { BusinessProfile } from "@/lib/types";
+import { languageName } from "@/lib/language";
 import { teammateWorkspace } from "@/lib/paths";
 
-export function renderProfileMarkdown(p: BusinessProfile) {
+export function renderProfileMarkdown(p: BusinessProfile, language: string) {
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none yet)");
   return `# ${p.name}
 
-${p.website ? `Website: ${p.website}\n\n` : ""}**${p.oneLiner}**
+${p.website ? `Website: ${p.website}\n\n` : ""}Working language: ${languageName(language)}. Write everything for this business in this language.
+
+**${p.oneLiner}**
 
 ${p.description}
 
@@ -43,10 +46,14 @@ ${list(p.teamNeeds)}
  * BUSINESS.md is rewritten from the profile each time; memory.md is the teammate's
  * own long-term notes and is never overwritten.
  */
-export function initTeammateWorkspace(t: Pick<Teammate, "id" | "businessId" | "name" | "title">, profile: BusinessProfile) {
+export function initTeammateWorkspace(
+  t: Pick<Teammate, "id" | "businessId" | "name" | "title">,
+  profile: BusinessProfile,
+  language: string,
+) {
   const dir = teammateWorkspace(t.businessId, t.id);
   fs.mkdirSync(path.join(dir, "work"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "BUSINESS.md"), renderProfileMarkdown(profile));
+  fs.writeFileSync(path.join(dir, "BUSINESS.md"), renderProfileMarkdown(profile, language));
   const memory = path.join(dir, "memory.md");
   if (!fs.existsSync(memory)) {
     fs.writeFileSync(

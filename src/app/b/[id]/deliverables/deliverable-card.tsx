@@ -21,7 +21,7 @@ export function DeliverableCard({
   showActions = true,
 }: {
   d: Deliverable;
-  teammate?: { name: string; color: string } | null;
+  teammate?: { id: string; name: string; color: string } | null;
   showActions?: boolean;
 }) {
   const actions: { status: DeliverableStatus; label: string; variant: "secondary" | "ghost" }[] = [
@@ -32,7 +32,7 @@ export function DeliverableCard({
   return (
     <details className="group rounded-xl border border-border bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
-        {teammate && <Avatar name={teammate.name} color={teammate.color} size={26} />}
+        {teammate && <Avatar seed={teammate.id} name={teammate.name} color={teammate.color} size={26} />}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{d.title}</div>
           <div className="text-xs text-muted-foreground">

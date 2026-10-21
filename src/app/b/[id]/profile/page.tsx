@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
-import { Card, PageHeader, PageSkeleton, Prose } from "@/components/kit";
+import { Button, Card, Label, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
+import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
-import { saveProfile } from "./actions";
+import { LanguageSelect } from "@/app/language-select";
+import { saveLanguage, saveProfile } from "./actions";
 import { ProfileForm } from "./profile-form";
 
 type Params = { params: Promise<{ id: string }> };
@@ -37,6 +39,23 @@ function List({ items }: { items: string[] }) {
   );
 }
 
+function LanguageForm({ id, language }: { id: string; language: string }) {
+  return (
+    <form action={saveLanguage.bind(null, id)} className="grid gap-2">
+      <Label htmlFor="language">Language</Label>
+      <p className="text-xs text-muted-foreground">
+        Current: {languageName(language)}. Your interviewer and teammates write everything in this language.
+      </p>
+      <div className="flex items-center gap-2">
+        <LanguageSelect id="language" defaultValue={language} />
+        <Button type="submit" variant="secondary">
+          Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 async function Content({ params }: Params) {
   const { id } = await params;
   const biz = await getBusiness(id);
@@ -53,6 +72,9 @@ async function Content({ params }: Params) {
           </Link>
           .
         </p>
+        <div className="mt-5">
+          <LanguageForm id={id} language={biz.language} />
+        </div>
       </Card>
     );
   }
@@ -108,7 +130,8 @@ async function Content({ params }: Params) {
             <Prose>{p.brandVoice}</Prose>
           </Section>
         </Card>
-        <Card className="p-6 content-start">
+        <Card className="p-6 grid gap-6 content-start">
+          <LanguageForm id={id} language={biz.language} />
           <details>
             <summary className="cursor-pointer font-medium">Edit profile</summary>
             <p className="text-xs text-muted-foreground mt-1 mb-4">Your teammates read this profile before every task.</p>

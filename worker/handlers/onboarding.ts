@@ -3,12 +3,13 @@ import { db, schema } from "@/db";
 import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import { enqueueJob, type JobPayloads } from "@/lib/jobs";
+import { getLanguage, languageInstruction } from "@/lib/language";
 import { businessWorkspace } from "@/lib/paths";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
 
 const INTERVIEW_TOOLS = ["WebSearch", "WebFetch"];
 
-function interviewerSystemPrompt(name: string, website: string | null) {
+function interviewerSystemPrompt(name: string, website: string | null, language: string) {
   return `You are the onboarding interviewer for Ajudan, a service that builds a team of AI teammates (marketing, content, social, SEO, research, sales, support, ads) for small businesses.
 
 You are interviewing the owner of "${name}"${website ? ` (website: ${website})` : ""}. Your goal is to learn enough to write a complete business profile and design the right AI team.
@@ -29,7 +30,9 @@ Rules:
 - When an answer is vague (especially goals), ask for a number or example.
 - Use WebSearch/WebFetch only when it clearly helps (e.g. first look at the website, or checking a competitor the owner names). Keep research brief.
 - After about 5-8 exchanges, or as soon as you have enough on all topics, give a short recap of what you learned and tell the owner they can press "Finish interview" (they can also keep adding details).
-- Never invent facts about the business; mark guesses as guesses.`;
+- Never invent facts about the business; mark guesses as guesses.
+
+${languageInstruction(language)}`;
 }
 
 export async function onboardingTurn({ businessId }: JobPayloads["onboarding_turn"]) {
@@ -46,6 +49,7 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     const last = messages.at(-1);
     const resume = biz.onboardingSessionId ?? undefined;
 
+    const lang = getLanguage(biz.language).nativeLabel;
     let prompt: string;
     if (!resume || userMessages.length === 0) {
       // First turn (or the session was lost): research, then greet.
@@ -56,18 +60,18 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
         biz.website
           ? ` First research the business: fetch ${biz.website} (and one or two key pages such as shop/about if useful) and do a quick web search for the brand.`
           : " There is no website, so do not research; just start the interview."
-      } Then greet the owner, summarise in a few lines what you learned (products, price range, positioning), and ask your first 1-3 questions.${transcript}`;
+      } Then greet the owner in ${lang}, summarise in a few lines what you learned (products, price range, positioning), and ask your first 1-3 questions. Write your whole reply in ${lang}.${transcript}`;
     } else {
       if (!last || last.role !== "user") throw new Error("No new owner message to answer");
       const exchange = userMessages.length;
-      prompt = `${last.content}\n\n[Interview note: this is owner answer #${exchange}.${
+      prompt = `${last.content}\n\n[Interview note: this is owner answer #${exchange}. Reply in ${lang}.${
         exchange >= 5 ? " You are near the end; if you have enough, recap and invite them to press \"Finish interview\"." : ""
       }]`;
     }
 
     const res = await runAgent({
       prompt,
-      systemPrompt: interviewerSystemPrompt(biz.name, biz.website),
+      systemPrompt: interviewerSystemPrompt(biz.name, biz.website, biz.language),
       cwd: businessWorkspace(businessId),
       tools: INTERVIEW_TOOLS,
       allowedTools: INTERVIEW_TOOLS,
@@ -122,9 +126,8 @@ Here is the full onboarding interview transcript:
 ${transcript}
 </transcript>
 
-Write the business profile. Use the owner's own facts and numbers; where the owner confirmed something the interviewer inferred, include it. Keep lists concise (short items). Goals must have a measurable metric and a target with a timeframe. Do not invent facts that are not supported by the transcript; leave a list empty if nothing is known.`,
-      systemPrompt:
-        "You turn onboarding interviews into a structured business profile (the 'company brain' every AI teammate reads). Be accurate, specific and concise.",
+Write the business profile. Use the owner's own facts and numbers; where the owner confirmed something the interviewer inferred, include it. Keep lists concise (short items). Goals must have a measurable metric and a target with a timeframe. Do not invent facts that are not supported by the transcript; leave a list empty if nothing is known. Write all profile text in ${getLanguage(biz.language).nativeLabel}, even where the transcript uses another language.`,
+      systemPrompt: `You turn onboarding interviews into a structured business profile (the 'company brain' every AI teammate reads). Be accurate, specific and concise.\n\n${languageInstruction(biz.language)}`,
       cwd: businessWorkspace(businessId),
       tools: [],
       outputSchema: BusinessProfileSchema,

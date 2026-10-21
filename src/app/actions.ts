@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db, schema } from "@/db";
 import { enqueueJob } from "@/lib/jobs";
+import { parseLanguage } from "@/lib/language";
 
 function normalizeWebsite(raw: string) {
   const w = raw.trim();
@@ -15,10 +16,11 @@ export async function createBusiness(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) throw new Error("Business name is required");
   const website = normalizeWebsite(String(formData.get("website") ?? ""));
+  const language = parseLanguage(formData.get("language"));
 
   const biz = db
     .insert(schema.businesses)
-    .values({ name, website, status: "onboarding", busy: true })
+    .values({ name, website, language, status: "onboarding", busy: true })
     .returning({ id: schema.businesses.id })
     .get();
   try {

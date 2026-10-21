@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
+import { getLanguage, languageInstruction } from "@/lib/language";
 import { validCron } from "@/lib/onboarding/schedule";
 import { businessWorkspace } from "@/lib/paths";
 import { getRole, ROLE_TEMPLATES } from "@/lib/roles";
@@ -25,7 +26,7 @@ export async function designTeam({ businessId }: JobPayloads["design_team"]) {
       prompt: `Design the AI team for this business.
 
 <business_profile>
-${renderProfileMarkdown(biz.profile)}
+${renderProfileMarkdown(biz.profile, biz.language)}
 </business_profile>
 
 <role_templates>
@@ -41,9 +42,9 @@ Requirements:
 - responsibilities: 3-5 concrete items. kpis: 2-4 measurable items tied to the goals.
 - autonomy: "ask" by default; "draft" for anything customer-facing that is sensitive. Avoid "auto" unless the work is purely internal research.
 - schedule: optionally a weekly 5-field cron expression (e.g. "0 9 * * 1" = Mondays 09:00) with a concrete schedulePrompt describing the recurring work; otherwise null for both. Give the growth lead a weekly planning schedule.
-- summary: 2-4 sentences for the owner explaining how this team will reach the goals.`,
-      systemPrompt:
-        "You are Ajudan's team designer. You design small, focused teams of AI teammates for small businesses, picking from a fixed library of role templates and customizing them to the business.",
+- summary: 2-4 sentences for the owner explaining how this team will reach the goals.
+- Language: write title, why, persona, responsibilities, kpis, schedulePrompt and summary in ${getLanguage(biz.language).nativeLabel}. Names may be any fitting first names. roleKey, autonomy and schedule stay as specified.`,
+      systemPrompt: `You are Ajudan's team designer. You design small, focused teams of AI teammates for small businesses, picking from a fixed library of role templates and customizing them to the business.\n\n${languageInstruction(biz.language)}`,
       cwd: businessWorkspace(businessId),
       tools: [],
       outputSchema: TeamProposalSchema,

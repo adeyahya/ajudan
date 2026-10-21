@@ -2,36 +2,43 @@
 
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { cn } from "@/components/kit";
+import { cn } from "@/lib/utils";
 
 const TABS = [
-  { href: "", label: "Office" },
-  { href: "/approvals", label: "Approvals" },
-  { href: "/deliverables", label: "Work" },
-  { href: "/team", label: "Team" },
-  { href: "/onboarding", label: "Interview" },
-  { href: "/profile", label: "Business" },
+  { href: "", label: "Office", icon: "▦" },
+  { href: "/approvals", label: "Approvals", icon: "✉" },
+  { href: "/deliverables", label: "Work", icon: "▤" },
+  { href: "/team", label: "Team", icon: "☺" },
+  { href: "/onboarding", label: "Interview", icon: "✎" },
+  { href: "/profile", label: "Business", icon: "⌂" },
 ];
 
+/** Game-menu tabs: the active one is a raised gold tab. */
 export function BusinessNav() {
   const { id } = useParams<{ id: string }>();
   const pathname = usePathname();
   const base = `/b/${id}`;
   return (
-    <nav className="border-b border-border px-4 sm:px-6 overflow-x-auto">
-      <div className="flex gap-1 max-w-6xl mx-auto">
+    <nav className="overflow-x-auto bg-[#241b29] px-4 shadow-[inset_0_-3px_0_var(--frame)] sm:px-6">
+      <div className="mx-auto flex max-w-6xl gap-1.5 pt-2">
         {TABS.map((t) => {
           const href = base + t.href;
-          const active = t.href === "" ? pathname === base || pathname.startsWith(`${base}/teammates`) : pathname === href || pathname.startsWith(`${href}/`);
+          const active =
+            t.href === "" ? pathname === base || pathname.startsWith(`${base}/teammates`) : pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={t.href}
               href={href}
               className={cn(
-                "px-3 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap",
-                active ? "border-primary font-medium" : "border-transparent text-muted-foreground hover:text-foreground",
+                "font-pixel mx-[3px] mt-[3px] flex items-center gap-1.5 whitespace-nowrap px-3 pb-1.5 pt-1 text-sm transition-transform",
+                active
+                  ? "bg-primary text-primary-foreground shadow-[-3px_0_0_var(--frame),3px_0_0_var(--frame),0_-3px_0_var(--frame),inset_0_3px_0_rgb(255_255_255/0.35)]"
+                  : "translate-y-1 bg-secondary text-muted-foreground shadow-[-3px_0_0_var(--frame),3px_0_0_var(--frame),0_-3px_0_var(--frame)] hover:translate-y-0.5 hover:text-foreground",
               )}
             >
+              <span aria-hidden className="text-xs opacity-80">
+                {t.icon}
+              </span>
               {t.label}
             </Link>
           );

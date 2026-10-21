@@ -145,7 +145,7 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
   return (
     <Card className="p-5 flex flex-col gap-4">
       <div className="flex items-start gap-3">
-        <Avatar name={t.name} color={t.color} size={40} />
+        <Avatar seed={t.id} name={t.name} color={t.color} size={40} />
         <div className="min-w-0 flex-1">
           {active ? (
             <Link href={`/b/${businessId}/teammates/${t.id}`} className="font-semibold hover:underline">

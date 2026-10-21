@@ -16,6 +16,8 @@ export const businesses = sqliteTable("businesses", {
   id: id(),
   name: text("name").notNull(),
   website: text("website"),
+  /** Primary language code (src/lib/language.ts); all AI communication and output uses it. */
+  language: text("language").notNull().default("en"),
   status: text("status").$type<BusinessStatus>().notNull().default("onboarding"),
   /** BusinessProfile JSON (see src/lib/types.ts), filled when onboarding is finalized. */
   profile: text("profile", { mode: "json" }).$type<import("@/lib/types").BusinessProfile>(),

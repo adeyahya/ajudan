@@ -177,7 +177,7 @@ async function Content({ params }: Params) {
           <Link href={`/b/${id}`} className="text-xs text-muted-foreground hover:text-foreground">
             ← Office
           </Link>
-          <Avatar name={t.name} color={t.color} size={36} />
+          <Avatar seed={t.id} name={t.name} color={t.color} size={36} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="font-semibold tracking-tight">{t.name}</h1>
@@ -195,7 +195,7 @@ async function Content({ params }: Params) {
         </div>
         <Chat
           className="flex-1"
-          agent={{ name: t.name, color: t.color }}
+          agent={{ id: t.id, name: t.name, color: t.color }}
           messages={toMessages(id, tasks, steps, mates)}
           busy={false}
           sendAction={sendTaskMessage.bind(null, id, t.id)}
@@ -203,7 +203,7 @@ async function Content({ params }: Params) {
           suggestions={tasks.length === 0 ? t.responsibilities.slice(0, 3) : []}
           emptyState={
             <div className="py-12 text-center">
-              <Avatar name={t.name} color={t.color} size={48} />
+              <Avatar seed={t.id} name={t.name} color={t.color} size={48} />
               <p className="mt-3 font-medium">
                 {t.name} · {t.title}
               </p>
@@ -218,7 +218,7 @@ async function Content({ params }: Params) {
       <aside className="space-y-4 lg:pt-1">
         <Card className="space-y-3 p-4">
           <div className="flex items-center gap-3">
-            <Avatar name={t.name} color={t.color} size={44} />
+            <Avatar seed={t.id} name={t.name} color={t.color} size={44} />
             <div>
               <div className="font-semibold">{t.name}</div>
               <div className="text-xs text-muted-foreground">{t.title}</div>

@@ -7,6 +7,7 @@ import type { Business, Deliverable, Task, Teammate } from "@/db/schema";
 import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
+import { languageInstruction } from "@/lib/language";
 import { getRole } from "@/lib/roles";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { BIZ_SERVER, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
@@ -155,7 +156,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 function prepareWorkspace(teammate: Teammate, business: Business) {
   let dir = teammate.workspaceDir;
   if (business.profile) {
-    dir = initTeammateWorkspace(teammate, business.profile);
+    dir = initTeammateWorkspace(teammate, business.profile, business.language);
   } else if (!dir) {
     throw new Error("Business has no profile yet; finish onboarding first");
   }
@@ -265,7 +266,9 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 - You can only read and write files inside your working folder. Keep scratch files under work/.
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.
 - At the end, append any durable learnings (decisions, what worked, owner preferences) to memory.md with Edit. Keep it short.
-- Finish with a concise summary for the owner: what you did, what you saved, and what's next.`;
+- Finish with a concise summary for the owner: what you did, what you saved, and what's next.
+
+${languageInstruction(business.language)}`;
 }
 
 function buildPrompt(task: Task) {
