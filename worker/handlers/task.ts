@@ -9,8 +9,10 @@ import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
 import { getRole } from "@/lib/roles";
+import { resolveWorkspace } from "@/lib/paths";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
+import { PausedError, runAbortController } from "../session";
 import { BIZ_SERVER, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep"];
@@ -32,6 +34,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
   const setMate = (v: Partial<Teammate>) =>
     db.update(schema.teammates).set(v).where(eq(schema.teammates.id, teammate.id)).run();
 
+  const ac = runAbortController();
   setTask({ status: "running", startedAt: new Date() });
   setMate({ state: "working", currentActivity: `Starting: ${task.title}` });
   ev("task_started", `${teammate.name} started "${task.title}"`);
@@ -166,6 +169,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         onMessage,
         maxTurns: useBrowser ? 80 : 40,
         maxBudgetUsd: BUDGET_USD,
+        abortController: ac,
       });
     };
 
@@ -184,6 +188,15 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     setMate({ state: "idle", currentActivity: null });
     ev("task_done", `${teammate.name} finished "${task.title}"`, { costUsd: r.costUsd });
   } catch (err) {
+    if (ac.signal.aborted) {
+      // Folder closed: back to the queue; it starts over when the folder is reopened.
+      db.delete(schema.approvals)
+        .where(and(eq(schema.approvals.taskId, task.id), eq(schema.approvals.status, "pending")))
+        .run();
+      setTask({ status: "queued", startedAt: null });
+      setMate({ state: "idle", currentActivity: null });
+      throw new PausedError();
+    }
     const e = err as Error & { partial?: string; costUsd?: number };
     const message = e?.message ?? String(err);
     setTask({
@@ -206,11 +219,11 @@ function prepareWorkspace(teammate: Teammate, business: Business) {
   } else if (!dir) {
     throw new Error("Business has no profile yet; finish onboarding first");
   }
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(resolveWorkspace(dir), { recursive: true });
   if (dir !== teammate.workspaceDir) {
     db.update(schema.teammates).set({ workspaceDir: dir }).where(eq(schema.teammates.id, teammate.id)).run();
   }
-  return fs.realpathSync(dir);
+  return fs.realpathSync(resolveWorkspace(dir));
 }
 
 /** Allow file tools only on paths inside the teammate's workspace. */

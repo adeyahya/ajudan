@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Pixelify_Sans } from "next/font/google";
 import Link from "next/link";
+import { Suspense } from "react";
+import { OpenFolderBadge } from "@/components/open-folder-badge";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -59,6 +61,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <span className="font-pixel text-xl leading-none text-ink drop-shadow-[1px_1px_0_#fff3c4]">Ajudan</span>
             </Link>
             <span className="font-pixel hidden text-xs text-ink/70 sm:inline">· your AI team, at work</span>
+            <Suspense fallback={null}>
+              <OpenFolderBadge />
+            </Suspense>
           </div>
         </header>
         {children}

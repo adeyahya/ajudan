@@ -6,6 +6,7 @@ import type { JobPayloads } from "@/lib/jobs";
 import { getLanguage, languageInstruction } from "@/lib/language";
 import { validCron } from "@/lib/onboarding/schedule";
 import { businessWorkspace } from "@/lib/paths";
+import { PausedError, runAbortController } from "../session";
 import { getRole, ROLE_TEMPLATES } from "@/lib/roles";
 import { renderProfileMarkdown } from "@/lib/workspace";
 import { TeamProposalSchema, type TeammateProposal, type TeamProposal } from "@/lib/types";
@@ -13,6 +14,7 @@ import { TeamProposalSchema, type TeammateProposal, type TeamProposal } from "@/
 const MAX_TEAM = 5;
 
 export async function designTeam({ businessId }: JobPayloads["design_team"]) {
+  const ac = runAbortController();
   try {
     const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
     if (!biz) throw new Error(`Business ${businessId} not found`);
@@ -45,11 +47,12 @@ Requirements:
 - summary: 2-4 sentences for the owner explaining how this team will reach the goals.
 - Language: write title, why, persona, responsibilities, kpis, schedulePrompt and summary in ${getLanguage(biz.language).nativeLabel}. Names may be any fitting first names. roleKey, autonomy and schedule stay as specified.`,
       systemPrompt: `You are Ajudan's team designer. You design small, focused teams of AI teammates for small businesses, picking from a fixed library of role templates and customizing them to the business.\n\n${languageInstruction(biz.language)}`,
-      cwd: businessWorkspace(businessId),
+      cwd: businessWorkspace(),
       tools: [],
       outputSchema: TeamProposalSchema,
       maxTurns: 4,
       maxBudgetUsd: 1,
+      abortController: ac,
     });
     if (!res.ok || !res.structured) throw new Error(res.error ?? "No team proposal returned");
 
@@ -93,6 +96,7 @@ Requirements:
       data: { costUsd: res.costUsd },
     });
   } catch (err) {
+    if (ac.signal.aborted) throw new PausedError(); // stays busy; reruns when reopened
     const message = err instanceof Error ? err.message : String(err);
     db.update(schema.businesses).set({ busy: false }).where(eq(schema.businesses.id, businessId)).run();
     logEvent({ businessId, type: "team_error", message });

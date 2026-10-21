@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import { enqueueJob, type JobPayloads } from "@/lib/jobs";
+import { PausedError, runAbortController } from "../session";
 import { getLanguage, languageInstruction } from "@/lib/language";
 import { businessWorkspace } from "@/lib/paths";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
@@ -36,6 +37,7 @@ ${languageInstruction(language)}`;
 }
 
 export async function onboardingTurn({ businessId }: JobPayloads["onboarding_turn"]) {
+  const ac = runAbortController();
   try {
     const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
     if (!biz) throw new Error(`Business ${businessId} not found`);
@@ -72,12 +74,13 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     const res = await runAgent({
       prompt,
       systemPrompt: interviewerSystemPrompt(biz.name, biz.website, biz.language),
-      cwd: businessWorkspace(businessId),
+      cwd: businessWorkspace(),
       tools: INTERVIEW_TOOLS,
       allowedTools: INTERVIEW_TOOLS,
       resume: userMessages.length ? resume : undefined,
       maxTurns: userMessages.length ? 8 : 14,
       maxBudgetUsd: userMessages.length ? 1 : 2,
+      abortController: ac,
       // Live trace for the chat UI ("Reading orucraft.com…").
       onMessage: (m) => {
         if (m.type !== "assistant") return;
@@ -99,12 +102,14 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
       .run();
     logEvent({ businessId, type: "onboarding_reply", message: reply.slice(0, 200), data: { costUsd: res.costUsd } });
   } catch (err) {
+    if (ac.signal.aborted) throw new PausedError(); // stays busy; reruns when reopened
     failed(businessId, "turn", err);
     throw err;
   }
 }
 
 export async function onboardingFinalize({ businessId }: JobPayloads["onboarding_finalize"]) {
+  const ac = runAbortController();
   try {
     const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
     if (!biz) throw new Error(`Business ${businessId} not found`);
@@ -128,11 +133,12 @@ ${transcript}
 
 Write the business profile. Use the owner's own facts and numbers; where the owner confirmed something the interviewer inferred, include it. Keep lists concise (short items). Goals must have a measurable metric and a target with a timeframe. Do not invent facts that are not supported by the transcript; leave a list empty if nothing is known. Write all profile text in ${getLanguage(biz.language).nativeLabel}, even where the transcript uses another language.`,
       systemPrompt: `You turn onboarding interviews into a structured business profile (the 'company brain' every AI teammate reads). Be accurate, specific and concise.\n\n${languageInstruction(biz.language)}`,
-      cwd: businessWorkspace(businessId),
+      cwd: businessWorkspace(),
       tools: [],
       outputSchema: BusinessProfileSchema,
       maxTurns: 4,
       maxBudgetUsd: 1,
+      abortController: ac,
     });
     if (!res.ok || !res.structured) throw new Error(res.error ?? "No profile returned");
     const profile: BusinessProfile = { ...res.structured, name: biz.name, website: biz.website };
@@ -141,6 +147,7 @@ Write the business profile. Use the owner's own facts and numbers; where the own
     logEvent({ businessId, type: "profile_ready", message: `Business profile ready: ${profile.oneLiner}` });
     enqueueJob("design_team", { businessId });
   } catch (err) {
+    if (ac.signal.aborted) throw new PausedError();
     failed(businessId, "finalize", err);
     throw err;
   }

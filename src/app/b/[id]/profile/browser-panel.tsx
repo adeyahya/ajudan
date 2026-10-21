@@ -17,7 +17,7 @@ export async function BrowserPanel({
   teammatesWithAccess: string[];
 }) {
   await connection();
-  const status = await browserStatus(businessId);
+  const status = await browserStatus();
 
   return (
     <div className="grid gap-4">

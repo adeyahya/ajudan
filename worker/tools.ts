@@ -10,6 +10,7 @@ import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { createTask } from "@/lib/tasks";
+import { syncDeliverableFile } from "@/lib/workfiles";
 
 export const BIZ_SERVER = "biz";
 
@@ -71,6 +72,7 @@ export function createBizServer(ctx: BizContext) {
           })
           .returning({ id: schema.deliverables.id })
           .get();
+        syncDeliverableFile(d.id);
         ev("deliverable_saved", `${teammate.name} saved "${a.title}"`, { deliverableId: d.id, kind: a.kind });
         return ok(`Saved as draft. deliverable_id: ${d.id}`);
       },
@@ -141,6 +143,7 @@ export function createBizServer(ctx: BizContext) {
           .set({ status: "published", channel: a.channel })
           .where(eq(schema.deliverables.id, d.id))
           .run();
+        syncDeliverableFile(d.id);
         ev("deliverable_published", `${teammate.name} published "${d.title}" to ${a.channel}`, {
           deliverableId: d.id,
           channel: a.channel,
@@ -174,6 +177,7 @@ export function createBizServer(ctx: BizContext) {
           })
           .returning({ id: schema.deliverables.id })
           .get();
+        syncDeliverableFile(d.id);
         ev("message_sent", `${teammate.name} sent a ${a.channel} message to ${a.to}`, {
           deliverableId: d.id,
           simulated: true,

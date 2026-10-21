@@ -76,7 +76,10 @@ export async function openBusinessBrowser(businessId: string, fd: FormData) {
 }
 
 export async function closeBusinessBrowser(businessId: string) {
-  await closeBrowser(businessId);
+  // The browser belongs to the open folder; only close it from that business's page.
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  await closeBrowser();
   refresh();
 }
 

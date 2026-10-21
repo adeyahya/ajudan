@@ -10,9 +10,21 @@ import { createTask } from "@/lib/tasks";
 const SYNC_MS = 60_000;
 const jobs = new Map<string, { pattern: string; prompt: string; cron: Cron }>();
 
+let timer: ReturnType<typeof setInterval> | undefined;
+
+/** Run schedules for the open business folder. */
 export function startScheduler() {
+  stopScheduler();
   syncSchedules();
-  setInterval(syncSchedules, SYNC_MS);
+  timer = setInterval(syncSchedules, SYNC_MS);
+}
+
+/** Stop every schedule (the folder is being closed). */
+export function stopScheduler() {
+  clearInterval(timer);
+  timer = undefined;
+  for (const j of jobs.values()) j.cron.stop();
+  jobs.clear();
 }
 
 /** Add, remove or replace cron jobs to match the database. Exported for tests. */

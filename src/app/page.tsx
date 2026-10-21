@@ -1,73 +1,106 @@
-import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import type { BusinessStatus } from "@/db/schema";
-import { Badge, Button, Card, Input, Label, PageHeader, PageSkeleton } from "@/components/kit";
-import { listBusinesses } from "@/lib/data";
-import { DEFAULT_LANGUAGE } from "@/lib/language";
-import { createBusiness } from "./actions";
-import { LanguageSelect } from "./language-select";
+import { Badge, Button, Card, PageHeader, PageSkeleton } from "@/components/kit";
+import { AJUDAN_HOME, knownFolders, readConfig, type FolderInfo } from "@/lib/folders";
+import { forgetFolderAction, openFolder } from "./actions";
+import { NewBusinessForm, OpenFolderForm } from "./home-forms";
 
-const STATUS: Record<BusinessStatus, { label: string; tone: "amber" | "blue" | "violet" | "green" }> = {
+const STATUS: Record<string, { label: string; tone: "amber" | "blue" | "violet" | "green" }> = {
   onboarding: { label: "Interview", tone: "amber" },
   designing: { label: "Designing team", tone: "blue" },
   team_proposed: { label: "Team proposed", tone: "violet" },
   active: { label: "Active", tone: "green" },
 };
 
+const tilde = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
+
 export default function Home() {
   return (
-    <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-10">
-      <PageHeader title="Your businesses" subtitle="Each business gets its own team of AI teammates." />
-      <div className="grid gap-6">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+      <PageHeader
+        title="Your businesses"
+        subtitle="Each business lives in its own folder: its team, work, history and logged-in browser. Only the open business works; the others are paused until you switch back."
+      />
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8">
         <Suspense fallback={<PageSkeleton />}>
-          <BusinessList />
+          <FolderList />
         </Suspense>
+
         <Card className="p-5">
-          <h2 className="font-medium mb-1">Start a new business</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            We&apos;ll look at your website, then interview you for a few minutes to understand the business.
+          <h2 className="mb-1 text-lg text-primary">Start a new business</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Ajudan creates a folder for it, looks at your website, then interviews you for a few minutes.
           </p>
-          <form action={createBusiness} className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
-            <div className="grid gap-1">
-              <Label htmlFor="name">Business name</Label>
-              <Input id="name" name="name" required placeholder="Acme Coffee" />
-            </div>
-            <div className="grid gap-1">
-              <Label htmlFor="website">Website</Label>
-              <Input id="website" name="website" placeholder="https://acme.coffee" />
-            </div>
-            <div className="grid gap-1">
-              <Label htmlFor="language">Language</Label>
-              <LanguageSelect id="language" defaultValue={DEFAULT_LANGUAGE} />
-            </div>
-            <Button type="submit">Start interview</Button>
-          </form>
+          <NewBusinessForm home={AJUDAN_HOME} />
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="mb-1 text-lg text-primary">Open a business folder</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            For a folder that isn&apos;t listed above, for example one you moved, copied from another laptop or restored
+            from a backup.
+          </p>
+          <OpenFolderForm />
         </Card>
       </div>
     </main>
   );
 }
 
-async function BusinessList() {
-  const list = await listBusinesses();
-  if (!list.length) {
-    return <p className="text-sm text-muted-foreground">No businesses yet. Start one below.</p>;
+async function FolderList() {
+  await connection();
+  const active = readConfig().activeFolder;
+  const folders = knownFolders().sort((a, b) => Number(b.dir === active) - Number(a.dir === active));
+  if (!folders.length) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No businesses yet. Start one below; it will be saved in {tilde(AJUDAN_HOME)}.
+      </p>
+    );
   }
   return (
-    <Card className="divide-y divide-border">
-      {list.map((b) => {
-        const s = STATUS[b.status];
-        const href = b.status === "onboarding" ? `/b/${b.id}/onboarding` : b.status === "active" ? `/b/${b.id}` : `/b/${b.id}/team`;
-        return (
-          <Link key={b.id} href={href} className="flex items-center gap-3 px-4 py-3 hover:bg-muted">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium truncate">{b.name}</div>
-              {b.website && <div className="text-xs text-muted-foreground truncate">{b.website}</div>}
-            </div>
-            <Badge tone={s.tone}>{s.label}</Badge>
-          </Link>
-        );
-      })}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      {folders.map((f) => (
+        <FolderCard key={f.dir} f={f} isOpen={f.dir === active} />
+      ))}
+    </div>
+  );
+}
+
+function FolderCard({ f, isOpen }: { f: FolderInfo; isOpen: boolean }) {
+  const s = f.status ? STATUS[f.status] : undefined;
+  return (
+    <Card className={`flex flex-wrap items-center gap-4 p-4 ${isOpen ? "outline-3 outline-primary" : ""}`}>
+      <span aria-hidden className="font-pixel text-3xl leading-none text-primary">
+        {isOpen ? "▣" : "▢"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-pixel text-lg">{f.name}</span>
+          {isOpen && <Badge tone="green">Open</Badge>}
+          {!isOpen && f.exists && <Badge>Paused</Badge>}
+          {!f.exists && <Badge tone="red">Folder missing</Badge>}
+          {s && <Badge tone={s.tone}>{s.label}</Badge>}
+        </div>
+        <div className="truncate font-mono text-xs text-muted-foreground">{tilde(f.dir)}</div>
+        <div className="text-xs text-muted-foreground">
+          {f.website ?? "No website"} · {f.teammates} teammate{f.teammates === 1 ? "" : "s"}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        {f.exists && f.businessId && (
+          <form action={openFolder.bind(null, f.dir)}>
+            <Button type="submit">{isOpen ? "Continue" : "Switch to this"}</Button>
+          </form>
+        )}
+        {!isOpen && (
+          <form action={forgetFolderAction.bind(null, f.dir)}>
+            <Button type="submit" variant="ghost" title="Remove from this list. The folder stays on disk.">
+              Remove from list
+            </Button>
+          </form>
+        )}
+      </div>
     </Card>
   );
 }

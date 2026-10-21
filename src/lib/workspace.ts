@@ -3,7 +3,8 @@ import path from "node:path";
 import type { Teammate } from "@/db/schema";
 import type { BusinessProfile } from "@/lib/types";
 import { languageName } from "@/lib/language";
-import { teammateWorkspace } from "@/lib/paths";
+import { slugify } from "@/lib/folders";
+import { resolveWorkspace, teammatesRoot } from "@/lib/paths";
 
 export function renderProfileMarkdown(p: BusinessProfile, language: string) {
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none yet)");
@@ -47,11 +48,14 @@ ${list(p.teamNeeds)}
  * own long-term notes and is never overwritten.
  */
 export function initTeammateWorkspace(
-  t: Pick<Teammate, "id" | "businessId" | "name" | "title">,
+  t: Pick<Teammate, "id" | "businessId" | "name" | "title"> & { workspaceDir?: string | null },
   profile: BusinessProfile,
   language: string,
 ) {
-  const dir = teammateWorkspace(t.businessId, t.id);
+  const stored = t.workspaceDir || pickWorkspace(t);
+  const dir = resolveWorkspace(stored);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, ".teammate-id"), t.id);
   fs.mkdirSync(path.join(dir, "work"), { recursive: true });
   fs.writeFileSync(path.join(dir, "BUSINESS.md"), renderProfileMarkdown(profile, language));
   const memory = path.join(dir, "memory.md");
@@ -61,5 +65,16 @@ export function initTeammateWorkspace(
       `# ${t.name}'s memory (${t.title})\n\nLong-term notes: decisions, what worked, what didn't, owner preferences.\n`,
     );
   }
-  return dir;
+  return stored;
+}
+
+/** A readable, unused folder for a new teammate: teammates/raka, teammates/raka-2… (relative). */
+function pickWorkspace(t: Pick<Teammate, "id" | "name">) {
+  const base = slugify(t.name);
+  for (let i = 1; ; i++) {
+    const rel = path.join("teammates", i === 1 ? base : `${base}-${i}`);
+    const abs = path.join(teammatesRoot(), path.basename(rel));
+    const owner = path.join(abs, ".teammate-id");
+    if (!fs.existsSync(abs) || (fs.existsSync(owner) && fs.readFileSync(owner, "utf8").trim() === t.id)) return rel;
+  }
 }

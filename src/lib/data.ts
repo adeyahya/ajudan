@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
+import { currentDataDir } from "@/lib/paths";
 
 /**
  * Read helpers for Server Components. better-sqlite3 is synchronous, so each helper
@@ -8,14 +9,11 @@ import { db, schema } from "@/db";
  * Call them inside a <Suspense> boundary.
  */
 
+/** The business, if it's in the open folder (undefined when another folder is open). */
 export async function getBusiness(id: string) {
   await connection();
+  if (!currentDataDir()) return undefined;
   return db.select().from(schema.businesses).where(eq(schema.businesses.id, id)).get();
-}
-
-export async function listBusinesses() {
-  await connection();
-  return db.select().from(schema.businesses).orderBy(asc(schema.businesses.createdAt)).all();
 }
 
 export async function listTeammates(businessId: string, status: "proposed" | "active" = "active") {

@@ -5,6 +5,7 @@ import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import type { DeliverableStatus } from "@/db/schema";
 import { logEvent } from "@/lib/events";
+import { syncDeliverableFile } from "@/lib/workfiles";
 
 const STATUSES: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
 
@@ -21,6 +22,7 @@ export async function setDeliverableStatus(formData: FormData) {
     .returning()
     .get();
   if (!d) throw new Error("Deliverable not found");
+  syncDeliverableFile(d.id);
   logEvent({
     businessId,
     teammateId: d.teammateId,

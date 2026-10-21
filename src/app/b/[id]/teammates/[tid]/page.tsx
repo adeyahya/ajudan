@@ -11,6 +11,7 @@ import { Chat, type ChatMessage } from "@/components/chat";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Button, Card, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
+import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
 import { runScheduledNow, sendTaskMessage } from "./actions";
 
@@ -86,7 +87,7 @@ async function loadTeammate(businessId: string, teammateId: string) {
   let memory: string | null = null;
   if (teammate.workspaceDir) {
     try {
-      memory = fs.readFileSync(path.join(teammate.workspaceDir, "memory.md"), "utf8");
+      memory = fs.readFileSync(path.join(resolveWorkspace(teammate.workspaceDir), "memory.md"), "utf8");
     } catch {
       memory = null;
     }

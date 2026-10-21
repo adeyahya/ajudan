@@ -47,6 +47,11 @@ export function finishJob(id: number, error?: unknown) {
     .run();
 }
 
+/** Put a job back in the queue (its folder was closed mid-run). */
+export function requeueJob(id: number) {
+  db.update(schema.jobs).set({ status: "queued", startedAt: null }).where(eq(schema.jobs.id, id)).run();
+}
+
 /** Jobs left "running" by a worker that crashed go back to the queue on startup. */
 export function requeueStaleJobs() {
   db.update(schema.jobs).set({ status: "queued" }).where(eq(schema.jobs.status, "running")).run();

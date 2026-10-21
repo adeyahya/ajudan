@@ -15,6 +15,20 @@ pnpm dev        # creates the SQLite schema, starts Next.js on :3000 and the wor
 
 Open http://localhost:3000, add your business and website, and do the interview.
 
+**One folder per business.** Each business lives in its own folder, by default `~/Ajudan/<Name>/`:
+
+```
+~/Ajudan/Orucraft/
+  ajudan.db          team, tasks, approvals, history
+  teammates/raka/    memory.md, BUSINESS.md, drafts
+  work/              every deliverable as a .md file
+  browser/           the business's logged-in Chrome profile
+  backups/           database backups taken before schema changes
+```
+
+- **Switching:** the home page (or **Switch** in the header) lists your business folders. Only the open business works: its teammates run tasks and schedules, while the others are paused. When you switch, any running task goes back to its queue and runs again when you return.
+- **Copying, moving, backing up:** do it to the folder. **Open a business folder** adds one that isn't listed.
+
 ## How it works
 
 - **Web app** (Next.js 16, shadcn/ui with a pixel-game theme in `globals.css`): onboarding chat, team review, office, teammate chats, approvals, work.
@@ -29,7 +43,7 @@ Open http://localhost:3000, add your business and website, and do the interview.
   - They never type passwords or codes.
   - Before changing anything on a site they call `confirm_browser_action`, which follows their freedom setting (draft-only never changes anything).
   - One teammate drives the browser at a time.
-- **Data**: SQLite at `data/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
+- **Data**: SQLite at `<business folder>/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands
 
@@ -37,13 +51,14 @@ Open http://localhost:3000, add your business and website, and do the interview.
 pnpm typecheck && pnpm lint
 pnpm worker:once                           # process queued jobs, then exit
 pnpm db:generate && pnpm db:migrate        # after editing src/db/schema.ts (never drizzle-kit push)
-AJUDAN_DATA_DIR=.test-data/demo pnpm dev   # use a separate data folder
+AJUDAN_DATA_DIR=/tmp/demo pnpm dev         # pin one business folder (tests)
 ```
 
 Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's terms don't allow serving other users on a Pro/Max subscription login.
 
 ## Known limitations
 
+- Moving from the old shared `./data` folder: `npx tsx scripts/move-to-folder.ts <businessId>` copies a business into `~/Ajudan/<Name>/`. Orucraft has been moved already, and `./data` can be deleted once you are happy.
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
 - No real integrations yet: publishing and sending only record the action. The business browser is the way to act on real sites.

@@ -1,22 +1,22 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR } from "@/lib/paths";
+import { dataDir } from "@/lib/paths";
 
 /**
- * Each business has its own Chrome profile on this laptop (data/browsers/<id>).
+ * Each business has its own Chrome profile inside its folder (<folder>/browser).
  * The owner logs into Shopee Seller Center, TikTok, etc. there once; teammates with
  * browser access drive the same, already-logged-in browser over CDP.
  */
 
-export function browserProfileDir(businessId: string) {
-  return path.join(DATA_DIR, "browsers", businessId);
+export function browserProfileDir() {
+  return path.join(dataDir(), "browser");
 }
 
 /** Chrome writes its debugging port here when started with --remote-debugging-port=0. */
-function readDevToolsPort(businessId: string): number | undefined {
+function readDevToolsPort(): number | undefined {
   try {
-    const first = fs.readFileSync(path.join(browserProfileDir(businessId), "DevToolsActivePort"), "utf8").split("\n")[0];
+    const first = fs.readFileSync(path.join(browserProfileDir(), "DevToolsActivePort"), "utf8").split("\n")[0];
     const port = Number(first);
     return Number.isInteger(port) && port > 0 ? port : undefined;
   } catch {
@@ -27,8 +27,8 @@ function readDevToolsPort(businessId: string): number | undefined {
 export type BrowserStatus = { running: false } | { running: true; port: number; endpoint: string; version: string };
 
 /** Is this business's browser open? Checks the CDP endpoint, not just the port file. */
-export async function browserStatus(businessId: string): Promise<BrowserStatus> {
-  const port = readDevToolsPort(businessId);
+export async function browserStatus(): Promise<BrowserStatus> {
+  const port = readDevToolsPort();
   if (!port) return { running: false };
   const endpoint = `http://127.0.0.1:${port}`;
   try {
@@ -46,13 +46,13 @@ const CHROME_PATH =
 
 /** Start this business's Chrome (visible window) if it isn't running. Returns its CDP endpoint. */
 export async function ensureBrowser(businessId: string, businessName: string, url?: string) {
-  const status = await browserStatus(businessId);
+  const status = await browserStatus();
   if (status.running) return status.endpoint;
   if (!fs.existsSync(CHROME_PATH)) {
     throw new Error(`Chrome not found at ${CHROME_PATH}. Install Google Chrome or set AJUDAN_CHROME_PATH.`);
   }
 
-  const dir = browserProfileDir(businessId);
+  const dir = browserProfileDir();
   fs.mkdirSync(dir, { recursive: true });
   fs.rmSync(path.join(dir, "DevToolsActivePort"), { force: true });
   // Detached so the browser (and your logins) survive worker restarts.
@@ -73,15 +73,15 @@ export async function ensureBrowser(businessId: string, businessName: string, ur
 
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 200));
-    const s = await browserStatus(businessId);
+    const s = await browserStatus();
     if (s.running) return s.endpoint;
   }
   throw new Error("Chrome started but its debugging endpoint never came up.");
 }
 
 /** Close the business's Chrome via CDP (Browser.close). */
-export async function closeBrowser(businessId: string) {
-  const status = await browserStatus(businessId);
+export async function closeBrowser() {
+  const status = await browserStatus();
   if (!status.running) return;
   const res = await fetch(`${status.endpoint}/json/version`);
   const { webSocketDebuggerUrl } = (await res.json()) as { webSocketDebuggerUrl: string };
