@@ -54,7 +54,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
   const ac = runAbortController();
   /** WhatsApp people/chats outside the allowed list the owner approved during this run. */
-  const approvedTargets = new Set<string>();
+  const approvedTargets = new Map<string, string>();
   setTask({ status: "running", startedAt: new Date() });
   setMate({ state: "working", currentActivity: `Starting: ${task.title}` });
   ev("task_started", `${teammate.name} started "${task.title}"`);
@@ -157,7 +157,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         const summary = `${teammate.name} wants to WhatsApp ${who.length === 1 ? who[0] : `${who.length} people (${who.slice(0, 4).join(", ")}${who.length > 4 ? ", …" : ""})`}: "${text}"`;
         const decision = await requestApproval(toolName, { ...updated, recipientNames: who }, options.signal, summary);
         if (decision.behavior !== "allow") return decision;
-        jids.forEach((j) => approvedTargets.add(j));
+        resolved.forEach((t) => approvedTargets.set(t.jid, t.name));
         return { behavior: "allow", updatedInput: updated };
       }
       if (outward.includes(toolName)) {
@@ -258,9 +258,10 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         mcpServers,
         canUseTool,
         onMessage,
-        maxTurns: useBrowser || videoWork ? 80 : 40,
-        // Reacting to an approval is a quick note to the owner: answer fast.
-        effort: task.createdBy === DECISION ? "low" : undefined,
+        maxTurns: task.urgent ? 20 : useBrowser || videoWork ? 80 : 40,
+        // Reacting to an approval is a quick note to the owner, and someone in a live
+        // WhatsApp chat is waiting: answer fast.
+        effort: task.createdBy === DECISION || task.urgent ? "low" : undefined,
         maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
         abortController: ac,
       });

@@ -17,6 +17,7 @@ const eslintConfig = defineConfig([
     ".test-data/**",
     ".next-*/**",
     "dist/**",
+    ".claude/**",
   ]),
   // The Electron shell is plain CommonJS (Electron's main and sandboxed preload).
   { files: ["electron/**/*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },

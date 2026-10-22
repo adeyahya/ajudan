@@ -4,6 +4,11 @@
  * (after a quiet moment) go to the teammate who wrote, as one task with the earlier
  * message, any photos/videos and voice notes transcribed. No reply by the deadline:
  * that teammate gets a reminder to follow up or tell the owner.
+ *
+ * Pace (src/lib/watches.ts): a live chat is handed over a few seconds after they stop
+ * typing, as an urgent task (its own lane) with the recent chat in the prompt, and they
+ * see "typing…" meanwhile. One run per chat at a time: what they add while it's queued
+ * joins that task; what they add while it's running waits for the next one.
  */
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
@@ -12,11 +17,14 @@ import { logEvent } from "@/lib/events";
 import { getManager } from "@/lib/manager";
 import { isAcknowledgement, listHumans } from "@/lib/humans";
 import { createTask } from "@/lib/tasks";
-import { activeWatches } from "@/lib/watches";
-import { isRealMessage, listMessages } from "@/lib/whatsapp";
-import { QUIET_MS, readIncoming } from "./humans";
+import { activeWatches, isLive, QUIET_BY_PACE } from "@/lib/watches";
+import { formatMessage, isRealMessage, listMessages, sendTyping } from "@/lib/whatsapp";
+import { readIncoming } from "./humans";
 
 export const REPLY = "system:reply";
+
+/** The reply task handed over for each watch (this worker run): one at a time per chat. */
+const handedTo = new Map<string, string>();
 
 export async function pollWatches(business: Business) {
   const watches = activeWatches(business.id);
@@ -42,8 +50,13 @@ async function pollWatch(business: Business, w: WaWatch) {
     if (w.status === "waiting" && w.replyBy.getTime() < Date.now()) remind(business, w);
     return;
   }
+  const live = isLive(w, new Date(fresh[0].Timestamp));
   // Still typing or sending files: wait for a quiet moment.
-  if (Date.now() - new Date(fresh.at(-1)!.Timestamp).getTime() < QUIET_MS) return;
+  if (Date.now() - new Date(fresh.at(-1)!.Timestamp).getTime() < QUIET_BY_PACE[live ? "live" : w.pace]) return;
+
+  const prev = db.select().from(schema.tasks).where(eq(schema.tasks.id, handedTo.get(w.id) ?? "")).get();
+  // The teammate is answering the last batch right now: hand this over when it's done.
+  if (prev && (prev.status === "running" || prev.status === "waiting_approval")) return;
 
   const group = w.jid.endsWith("@g.us");
   const texts: string[] = [];
@@ -60,15 +73,37 @@ async function pollWatch(business: Business, w: WaWatch) {
   // "ok makasih" after the conversation already got its answer: nothing to do.
   if (wasReplied && !files.length && texts.length && texts.every((t) => isAcknowledgement(t.replace(/^[^:]+: /, "")))) return;
 
-  const mate = db.select().from(schema.teammates).where(eq(schema.teammates.id, w.teammateId)).get();
-  const target = mate && mate.status === "active" && mate.kind === "ai" ? mate : getManager(business.id);
-  if (!target) return;
-  const sentBy = db.select().from(schema.tasks).where(eq(schema.tasks.id, w.taskId ?? "")).get();
   const said = texts.length ? texts.map((t) => `> ${t.replace(/\n/g, "\n> ")}`).join("\n\n") : "(no text, only files)";
   const voice = texts.some((t) => t.includes("🎤"))
     ? "\n\n(🎤 marks a voice note, transcribed automatically: names, numbers and prices may be misheard.)"
     : "";
-  createTask({
+
+  // Still waiting in the queue: add to it rather than answering twice.
+  if (prev && prev.status === "queued") {
+    db.update(schema.tasks)
+      .set({ instructions: `${prev.instructions}\n\nThen they also sent:\n\n${said}${voice}`, attachments: [...prev.attachments, ...files], urgent: prev.urgent || live })
+      .where(eq(schema.tasks.id, prev.id))
+      .run();
+    return;
+  }
+
+  const mate = db.select().from(schema.teammates).where(eq(schema.teammates.id, w.teammateId)).get();
+  const target = mate && mate.status === "active" && mate.kind === "ai" ? mate : getManager(business.id);
+  if (!target) return;
+  if (live) void sendTyping(w.jid).catch(() => {});
+  const sentBy = db.select().from(schema.tasks).where(eq(schema.tasks.id, w.taskId ?? "")).get();
+  // A live chat: give the whole recent exchange so the teammate can answer without looking it up.
+  const recent = live
+    ? (await listMessages(w.jid, { limit: 16 }).catch(() => []))
+        .filter(isRealMessage)
+        .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp))
+        .map(formatMessage)
+        .join("\n")
+    : "";
+  const how = live
+    ? `They're chatting right now and waiting for you (live pace): answer within a minute, like a person on WhatsApp. Short and natural; one message is usually enough. If you need to check something first (price, stock, someone on the team), send a quick holding reply ("sebentar ya kak, saya cek dulu") right away, then find out and answer. Don't ask the owner for anything you can answer from what you know.`
+    : `Act on it: answer them if they asked something or the conversation should go on, save what you got, and tell the owner if they need to decide something.`;
+  const task = createTask({
     businessId: business.id,
     teammateId: target.id,
     title: `${w.name} replied on WhatsApp`.slice(0, 80),
@@ -76,19 +111,22 @@ async function pollWatch(business: Business, w: WaWatch) {
     // Part of the owner's request that sent the message, so the manager reports on it.
     parentTaskId: sentBy?.parentTaskId ?? null,
     attachments: files,
+    urgent: live,
     instructions: `${w.name} replied on WhatsApp to the message ${target.id === w.teammateId ? "you" : (mate?.name ?? "the team")} sent${w.purpose ? ` (to get: ${w.purpose})` : ""}.
 
-You wrote:
-> ${w.message.slice(0, 1500).replace(/\n/g, "\n> ")}
+${recent ? `Recent chat (oldest first):\n${recent}` : `You wrote:\n> ${w.message.slice(0, 1500).replace(/\n/g, "\n> ")}`}
 
-${group ? "Replies in the group" : "Their reply"}:
+${group ? "New in the group" : "Their new message"}:
 
 ${said}${voice}
 
-Act on it: answer them if they asked something or the conversation should go on (send_message to "${w.jid}"; this conversation counts as approved, so it follows your freedom setting), save what you got, and tell the owner if they need to decide something. When the conversation is done, call stop_waiting so further messages aren't handed to you.`,
+${how}
+
+Reply with send_message to "${w.jid}" (this conversation counts as approved, so it follows your freedom setting). Set pace when you send: "live" while it's a back-and-forth (a customer asking, ordering), "relaxed" when they'll answer in their own time. When the conversation is done, call stop_waiting so further messages aren't handed to you.`,
   });
-  logEvent({ businessId: business.id, teammateId: target.id, type: "wa_reply", message: `${w.name} replied on WhatsApp${files.length ? ` with ${files.length} file(s)` : ""}`, data: { watchId: w.id } });
-  console.log(`[replies] ${w.name} replied → ${target.name}`);
+  handedTo.set(w.id, task.id);
+  logEvent({ businessId: business.id, teammateId: target.id, type: "wa_reply", message: `${w.name} replied on WhatsApp${live ? " (live chat)" : ""}${files.length ? ` with ${files.length} file(s)` : ""}`, data: { watchId: w.id } });
+  console.log(`[replies] ${w.name} replied${live ? " (live)" : ""} → ${target.name}`);
 }
 
 /** No answer in time: remind the teammate once (a late reply still gets handed over). */

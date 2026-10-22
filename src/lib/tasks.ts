@@ -27,6 +27,8 @@ export function createTask(p: {
   parentTaskId?: string | null;
   /** Folder-relative files to work with ("media/…", "work/…"). */
   attachments?: string[];
+  /** Someone is waiting on WhatsApp right now: its own lane, answered fast. */
+  urgent?: boolean;
 }) {
   const instructions = p.instructions.trim();
   if (!instructions) throw new Error("Instructions are required");
@@ -41,6 +43,7 @@ export function createTask(p: {
       createdBy: p.createdBy,
       parentTaskId: p.parentTaskId ?? null,
       attachments: p.attachments ?? [],
+      urgent: p.urgent ?? false,
     })
     .returning()
     .get();

@@ -17,21 +17,23 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
 }
 
 /**
- * Two lanes, each with its own slots in the worker: "owner" is everything the owner is
- * waiting on in a chat (the manager, the interview, team design); "team" is the
- * teammates' work. The manager never queues behind long teammate runs.
+ * Three lanes, each with its own slots in the worker: "owner" is everything the owner is
+ * waiting on in a chat (the manager, the interview, team design); "live" is someone
+ * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work. Nobody
+ * waiting for an answer queues behind long teammate runs.
  */
-export type Lane = "owner" | "team";
+export type Lane = "owner" | "live" | "team";
 
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
   if (job.kind !== "run_task") return "owner";
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
   const row = db
-    .select({ role: schema.teammates.roleKey })
+    .select({ role: schema.teammates.roleKey, urgent: schema.tasks.urgent })
     .from(schema.tasks)
     .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
     .where(eq(schema.tasks.id, taskId))
     .get();
+  if (row?.urgent) return "live";
   return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 

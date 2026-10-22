@@ -106,6 +106,7 @@ export const teammates = sqliteTable("teammates", {
 
 /** "waiting_human": a request sent to a human teammate on WhatsApp, open until it's closed. */
 export type TaskStatus = "queued" | "running" | "waiting_approval" | "waiting_human" | "done" | "failed" | "cancelled";
+export type WatchPace = "live" | "normal" | "relaxed";
 
 export const tasks = sqliteTable("tasks", {
   id: id(),
@@ -129,6 +130,8 @@ export const tasks = sqliteTable("tasks", {
   parentTaskId: text("parent_task_id"),
   /** Files the owner (or the delegating teammate) attached: "media/…" or "work/…" paths. */
   attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /** Someone is waiting on WhatsApp right now (a live chat): runs in its own lane, answers fast. */
+  urgent: integer("urgent", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
@@ -256,6 +259,13 @@ export const waWatches = sqliteTable("wa_watches", {
   /** Messages after this were already handed over. */
   seenUntil: integer("seen_until", { mode: "timestamp_ms" }).notNull(),
   lastReplyAt: integer("last_reply_at", { mode: "timestamp_ms" }),
+  /** When the team last wrote in this chat. */
+  lastSentAt: integer("last_sent_at", { mode: "timestamp_ms" }),
+  /**
+   * How fast to answer: "live" (someone chatting now), "relaxed" (they answer in their
+   * own time), or "normal", which turns live when they answer quickly. See src/lib/watches.ts.
+   */
+  pace: text("pace").$type<WatchPace>().notNull().default("normal"),
   createdAt: createdAt(),
 });
 

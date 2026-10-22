@@ -27,7 +27,9 @@ export async function wacli<T = unknown>(
 ): Promise<T> {
   const dir = whatsappDir();
   fs.mkdirSync(dir, { recursive: true });
-  const full = ["--json", "--store", dir, ...(readOnly ? ["--read-only"] : []), "--lock-wait", "20s", ...args];
+  // While `sync --follow` runs it holds the store lock and carries out writes itself once
+  // the lock wait runs out: a long wait only delays every send (it was 20 s per message).
+  const full = ["--json", "--store", dir, ...(readOnly ? ["--read-only"] : []), "--lock-wait", "2s", ...args];
   let stdout: string;
   try {
     ({ stdout } = await run(WACLI, full, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }));
@@ -131,6 +133,11 @@ export async function searchContacts(query: string, limit = 10) {
 
 export async function sendText(chatJid: string, message: string) {
   return wacli(["send", "text", "--to", chatJid, "--message", message], { timeoutMs: 120_000 });
+}
+
+/** Show "typing…" in a chat (WhatsApp clears it by itself after a few seconds, or when we send). */
+export async function sendTyping(chatJid: string) {
+  return wacli(["presence", "typing", "--to", chatJid], { timeoutMs: 15_000 });
 }
 
 export async function sendFile(chatJid: string, file: string, caption?: string) {
