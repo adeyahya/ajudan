@@ -3,14 +3,14 @@ import { Suspense } from "react";
 import { desc, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
-import { PageSkeleton } from "@/components/kit";
+import { StudioSkeleton } from "../_components/studio-skeleton";
 import { listLibrary } from "@/lib/assets";
 import { getBusiness, listTeammates } from "@/lib/data";
-import { Docs } from "./docs";
+import { Docs, type DocsFilter } from "./docs";
 
 export default function DocsPage(props: PageProps<"/b/[id]/studio/docs">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense fallback={<StudioSkeleton shape="docs" />}>
       <Content {...props} />
     </Suspense>
   );
@@ -31,12 +31,14 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/studio/docs"
     .filter((i) => i.kind !== "audio")
     .map((i) => ({ path: i.path, name: i.title || i.name, kind: i.kind }));
   const docId = typeof sp.doc === "string" ? sp.doc : undefined;
+  const filter: DocsFilter = sp.who === "mine" || sp.who === "team" ? sp.who : "all";
   return (
     <Docs
       key={docId ?? "new"}
       businessId={id}
       docs={docs}
       docId={docId}
+      filter={filter}
       teammates={mates.map((m) => ({ id: m.id, name: m.name, title: m.title, kind: m.kind }))}
       media={media}
     />

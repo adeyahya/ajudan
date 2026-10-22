@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { useT, useTn } from "@/components/i18n";
 import { Button, Textarea } from "@/components/kit";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { planTask } from "../actions";
+import { localizeError } from "./studio-shell";
 
 export type MateOption = { id: string; name: string; title: string };
 
@@ -20,41 +24,57 @@ export function PlanTask({
   defaultText?: string;
   onDone?: () => void;
 }) {
+  const t = useT();
+  const tn = useTn();
   const [mate, setMate] = useState(teammates[0]?.id ?? "");
   const [text, setText] = useState(defaultText);
-  const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  if (!teammates.length) return <p className="text-xs text-muted-foreground">Hire a team first to hand work over.</p>;
+  if (!teammates.length) return <p className="text-xs text-muted-foreground">{t("studio.plan.noTeam")}</p>;
   return (
     <form
-      className="space-y-2"
+      className="grid gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
           const r = await planTask(businessId, mate, text, attachments);
-          setMsg(r);
-          if (r.ok) {
+          const res: { ok?: string; error?: string } = r;
+          setError(localizeError(t, res.error) ?? null);
+          if (res.ok) {
+            toast(t("studio.plan.queued", { name: teammates.find((m) => m.id === mate)?.name ?? "" }));
             setText("");
             onDone?.();
           }
         });
       }}
     >
-      <div className="text-xs font-medium">Plan a task with {attachments.length ? `${attachments.length} file${attachments.length === 1 ? "" : "s"}` : "this"}</div>
-      <select value={mate} onChange={(e) => setMate(e.target.value)} className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm">
-        {teammates.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name} · {t.title}
-          </option>
-        ))}
-      </select>
-      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="e.g. Make a 15s reel for the payday promo from these clips" />
-      <Button type="submit" size="sm" disabled={pending || !text.trim()}>
-        {pending ? "Queuing…" : "Queue for the team"}
-      </Button>
-      <p className="text-[11px] text-muted-foreground">If the team is resting, it waits in the queue and starts when they&apos;re back.</p>
-      {msg?.ok && <p className="text-xs text-emerald-600 dark:text-emerald-400">{msg.ok}</p>}
-      {msg?.error && <p className="text-xs text-red-600 dark:text-red-400">{msg.error}</p>}
+      <div className="text-[13px] leading-[18px] font-medium text-foreground">
+        {attachments.length ? tn("studio.plan.titleFiles", attachments.length) : t("studio.plan.title")}
+      </div>
+      <Select value={mate} onValueChange={setMate}>
+        <SelectTrigger size="sm" className="w-full" aria-label={t("studio.plan.teammate")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {teammates.map((m) => (
+            <SelectItem key={m.id} value={m.id}>
+              {m.name} · {m.title}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder={t("studio.plan.placeholder")} />
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" loading={pending} disabled={pending || !text.trim()}>
+          {pending ? t("studio.plan.queuing") : t("studio.plan.queue")}
+        </Button>
+      </div>
+      <p className="text-xs text-tertiary">{t("studio.plan.restNote")}</p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

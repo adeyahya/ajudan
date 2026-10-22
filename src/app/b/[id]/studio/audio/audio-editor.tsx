@@ -2,13 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { MicIcon, PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
-import { Button, Card, cn, Input } from "@/components/kit";
+import { AudioLines, MicIcon, PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
+import { useT } from "@/components/i18n";
+import { Button, EmptyState, IconButton, Input } from "@/components/kit";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import type { Edit } from "@/db/schema";
 import { AUDIO_FORMATS, formatTime, type AudioSpec } from "@/lib/edits";
 import type { EditorSource } from "@/lib/studio-data";
 import { renderEditNow, saveEdit } from "../actions";
 import { EditsList, fileUrl, RenderResult } from "../_components/edits-list";
+import { localizeError, PropRow } from "../_components/studio-shell";
 
 const BINS = 900;
 
@@ -29,6 +33,7 @@ export function AudioEditor({
   initialEditId?: string;
   initialFile?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const initial = edits.find((e) => e.id === initialEditId);
   const s0 = initial?.spec as AudioSpec | undefined;
@@ -64,53 +69,53 @@ export function AudioEditor({
     start_(async () => {
       setMsg(null);
       const r = await saveEdit(businessId, { id: editId, kind: "audio", title: title || (source ? `${source.title || source.name.replace(/\.[^.]+$/, "")} (edit)` : ""), spec });
-      if ("error" in r) return setMsg({ error: r.error });
+      if ("error" in r) return setMsg({ error: localizeError(t, r.error) });
       setEditId(r.id);
       if (thenRender) {
         const rr = await renderEditNow(businessId, r.id);
-        setMsg("error" in rr ? { error: rr.error } : { ok: "Exporting: the new file lands in your library." });
-      } else setMsg({ ok: "Saved" });
+        setMsg("error" in rr ? { error: localizeError(t, rr.error) } : { ok: t("studio.audio.exporting") });
+      } else setMsg({ ok: t("common.saved") });
       router.replace(`/b/${businessId}/studio/audio?edit=${r.id}`, { scroll: false });
       router.refresh();
     });
 
-  return (
-    <div className="grid gap-4 xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
-      <aside className="space-y-3">
-        <EditsList businessId={businessId} edits={edits} kind="audio" currentId={editId} />
-        <Recorder businessId={businessId} onRecorded={(p) => router.push(`/b/${businessId}/studio/audio?file=${encodeURIComponent(p)}`)} />
-      </aside>
+  const audioSources = sources.filter((s) => s.kind === "audio");
+  const videoSources = sources.filter((s) => s.kind === "video" && s.hasAudio);
 
-      <main className="min-w-0 space-y-3">
-        <Card className="space-y-2 p-3">
-          <label className="block space-y-1 text-sm">
-            <span className="text-xs text-muted-foreground">Sound to edit (audio, or the sound of a video)</span>
-            <select value={file} onChange={(e) => pick(e.target.value)} className="h-9 w-full rounded-md border border-border bg-background px-2">
-              {!file && <option value="">Pick a file…</option>}
-              <optgroup label="Audio">
-                {sources
-                  .filter((s) => s.kind === "audio")
-                  .map((s) => (
-                    <option key={s.path} value={s.path}>
-                      {s.starred ? "★ " : ""}
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[220px_minmax(0,1fr)_280px]">
+      <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1 xl:col-start-2">
+        <div className="grid gap-1.5">
+          <span className="text-[13px] leading-[18px] text-tertiary">{t("studio.audio.sound")}</span>
+          <Select value={file || undefined} onValueChange={pick}>
+            <SelectTrigger className="w-full" aria-label={t("studio.audio.sound")}>
+              <SelectValue placeholder={t("studio.audio.pickFile")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>{t("studio.audio.groupAudio")}</SelectLabel>
+                {audioSources.map((s) => (
+                  <SelectItem key={s.path} value={s.path}>
+                    {s.starred ? "★ " : ""}
+                    {s.title || s.name} ({formatTime(s.duration)})
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              {videoSources.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel>{t("studio.audio.groupVideo")}</SelectLabel>
+                  {videoSources.map((s) => (
+                    <SelectItem key={s.path} value={s.path}>
                       {s.title || s.name} ({formatTime(s.duration)})
-                    </option>
+                    </SelectItem>
                   ))}
-              </optgroup>
-              <optgroup label="Sound from a video">
-                {sources
-                  .filter((s) => s.kind === "video" && s.hasAudio)
-                  .map((s) => (
-                    <option key={s.path} value={s.path}>
-                      {s.title || s.name} ({formatTime(s.duration)})
-                    </option>
-                  ))}
-              </optgroup>
-            </select>
-          </label>
-        </Card>
+                </SelectGroup>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
         {file && duration > 0 ? (
-          <Card className="space-y-3 bg-[#16101a] p-3 text-parchment">
+          <div className="rounded-lg bg-stage p-4 text-white">
             <Waveform
               key={file}
               url={fileUrl(businessId, file)}
@@ -126,60 +131,99 @@ export function AudioEditor({
               fadeIn={fadeIn}
               fadeOut={fadeOut}
             />
-          </Card>
+          </div>
         ) : (
-          <Card className="p-10 text-center text-sm text-muted-foreground">
-            {sources.length ? "Pick a sound above, or record one on the left." : "Upload audio in Library, or record your voice on the left."}
-          </Card>
+          <div className="rounded-lg border border-dashed border-border">
+            <EmptyState
+              compact
+              icon={<AudioLines />}
+              title={t("studio.audio.emptyTitle")}
+              body={sources.length ? t("studio.audio.emptyPick") : t("studio.audio.emptyUpload")}
+            />
+          </div>
         )}
-      </main>
+      </div>
 
-      <aside className="space-y-3">
-        <Card className="space-y-3 p-3 text-sm">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name this sound" />
-          <div className="grid grid-cols-2 gap-2">
-            <label className="space-y-1 text-xs">
-              <span className="text-muted-foreground">From (s)</span>
-              <Input type="number" step="0.1" min={0} value={Number(start.toFixed(2))} onChange={(e) => setStart(Math.max(0, Math.min(Number(e.target.value), end - 0.2)))} className="h-8" />
-            </label>
-            <label className="space-y-1 text-xs">
-              <span className="text-muted-foreground">To (s)</span>
-              <Input type="number" step="0.1" value={Number(end.toFixed(2))} onChange={(e) => setEnd(Math.min(duration, Math.max(Number(e.target.value), start + 0.2)))} className="h-8" />
-            </label>
-          </div>
-          <p className="text-xs text-muted-foreground">Length {formatTime(Math.max(0, end - start))}</p>
-          <Slider label="Level" value={gainDb} min={-24} max={24} step={1} unit=" dB" onChange={setGainDb} />
-          <Slider label="Fade in" value={fadeIn} min={0} max={10} step={0.5} unit=" s" onChange={setFadeIn} />
-          <Slider label="Fade out" value={fadeOut} min={0} max={10} step={0.5} unit=" s" onChange={setFadeOut} />
-          <label className="flex items-start gap-2">
-            <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} className="mt-1" />
-            <span>
-              Even out loudness
-              <span className="block text-xs text-muted-foreground">Standard level for social media and voice-overs.</span>
+      <aside className="min-w-0 space-y-4 lg:col-start-2 lg:row-start-1 xl:col-start-3">
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("studio.audio.namePlaceholder")} aria-label={t("studio.audio.name")} className="text-[15px] font-semibold" />
+        <div className="space-y-1">
+          <PropRow label={t("studio.audio.from")}>
+            <Input
+              type="number"
+              step="0.1"
+              min={0}
+              value={Number(start.toFixed(2))}
+              onChange={(e) => setStart(Math.max(0, Math.min(Number(e.target.value), end - 0.2)))}
+              className="h-7 w-24 text-[13px]"
+              aria-label={t("studio.audio.from")}
+            />
+            <span className="text-xs text-tertiary">{t("studio.video.seconds")}</span>
+          </PropRow>
+          <PropRow label={t("studio.audio.to")}>
+            <Input
+              type="number"
+              step="0.1"
+              value={Number(end.toFixed(2))}
+              onChange={(e) => setEnd(Math.min(duration, Math.max(Number(e.target.value), start + 0.2)))}
+              className="h-7 w-24 text-[13px]"
+              aria-label={t("studio.audio.to")}
+            />
+            <span className="text-xs text-tertiary">{t("studio.video.seconds")}</span>
+          </PropRow>
+          <PropRow label={t("studio.audio.length")}>
+            <span className="text-foreground tabular-nums">{formatTime(Math.max(0, end - start))}</span>
+          </PropRow>
+        </div>
+        <div className="space-y-3 border-t border-border pt-4">
+          <Slider label={t("studio.audio.level")} value={gainDb} min={-24} max={24} step={1} unit=" dB" onChange={setGainDb} />
+          <Slider label={t("studio.audio.fadeIn")} value={fadeIn} min={0} max={10} step={0.5} unit=" s" onChange={setFadeIn} />
+          <Slider label={t("studio.audio.fadeOut")} value={fadeOut} min={0} max={10} step={0.5} unit=" s" onChange={setFadeOut} />
+        </div>
+        <div className="space-y-1 border-t border-border pt-4">
+          <label className="flex items-start justify-between gap-3 py-1">
+            <span className="min-w-0">
+              <span className="block text-[13px] leading-[18px] text-foreground">{t("studio.audio.normalize")}</span>
+              <span className="block text-xs text-tertiary">{t("studio.audio.normalizeHint")}</span>
             </span>
+            <Switch checked={normalize} onCheckedChange={setNormalize} className="mt-0.5" />
           </label>
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Format</span>
-            <select value={format} onChange={(e) => setFormat(e.target.value as AudioSpec["format"])} className="h-8 w-full rounded-md border border-border bg-background px-2">
-              {Object.entries(AUDIO_FORMATS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex gap-2 border-t border-border pt-3">
-            <Button variant="secondary" disabled={pending || !file} onClick={() => save(false)}>
-              Save
+          <PropRow label={t("studio.audio.format")}>
+            <Select value={format} onValueChange={(v) => setFormat(v as AudioSpec["format"])}>
+              <SelectTrigger size="sm" className="w-full" aria-label={t("studio.audio.format")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(AUDIO_FORMATS).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </PropRow>
+        </div>
+        <div className="space-y-3 border-t border-border pt-4">
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" disabled={pending || !file} onClick={() => save(false)}>
+              {t("common.save")}
             </Button>
-            <Button disabled={pending || !file} onClick={() => save(true)}>
-              {pending ? "Working…" : "Export"}
+            <Button size="sm" loading={pending} disabled={pending || !file} onClick={() => save(true)}>
+              {pending ? t("common.working") : t("studio.audio.export")}
             </Button>
           </div>
-          {msg?.ok && <p className="text-xs text-emerald-600 dark:text-emerald-400">{msg.ok}</p>}
-          {msg?.error && <p className="text-xs text-red-600 dark:text-red-400">{msg.error}</p>}
+          {msg?.ok && <p className="text-xs text-tertiary">{msg.ok}</p>}
+          {msg?.error && (
+            <p role="alert" className="text-xs text-destructive">
+              {msg.error}
+            </p>
+          )}
           <RenderResult businessId={businessId} edit={current} />
-        </Card>
+        </div>
+      </aside>
+
+      <aside className="min-w-0 space-y-6 lg:col-span-2 lg:row-start-2 xl:col-span-1 xl:col-start-1 xl:row-start-1">
+        <EditsList businessId={businessId} edits={edits} kind="audio" currentId={editId} />
+        <Recorder businessId={businessId} onRecorded={(p) => router.push(`/b/${businessId}/studio/audio?file=${encodeURIComponent(p)}`)} />
       </aside>
     </div>
   );
@@ -188,15 +232,15 @@ export function AudioEditor({
 function Slider({ label, value, min, max, step, unit, onChange }: { label: string; value: number; min: number; max: number; step: number; unit: string; onChange: (v: number) => void }) {
   return (
     <label className="block space-y-1">
-      <span className="flex justify-between text-xs text-muted-foreground">
+      <span className="flex justify-between text-[13px] leading-[18px] text-tertiary">
         {label}
-        <span className="text-foreground">
+        <span className="text-foreground tabular-nums">
           {value > 0 && unit === " dB" ? "+" : ""}
           {value}
           {unit}
         </span>
       </span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-primary" />
     </label>
   );
 }
@@ -223,6 +267,7 @@ function Waveform({
   fadeIn: number;
   fadeOut: number;
 }) {
+  const tr = useT();
   const canvas = useRef<HTMLCanvasElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const graph = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
@@ -246,14 +291,23 @@ function Waveform({
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
+    // Colors come from the theme tokens (globals.css): selected bars primary, the rest
+    // border-strong, bars that would clip destructive.
+    const css = getComputedStyle(c);
+    const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+    const primary = token("--primary", "#2383e2");
+    const idle = token("--border-strong", "#d3d1cb");
+    const clipping = token("--destructive", "#e03e3e");
     const w = (c.width = c.clientWidth * devicePixelRatio);
     const h = (c.height = c.clientHeight * devicePixelRatio);
     const g = c.getContext("2d")!;
     g.clearRect(0, 0, w, h);
     const sx = (start / duration) * w;
     const ex = (end / duration) * w;
-    g.fillStyle = "rgba(245,180,60,0.18)";
+    g.globalAlpha = 0.18;
+    g.fillStyle = primary;
     g.fillRect(sx, 0, ex - sx, h);
+    g.globalAlpha = 1;
     const k = Math.pow(10, gainDb / 20);
     if (peaks) {
       for (let b = 0; b < BINS; b++) {
@@ -261,9 +315,11 @@ function Waveform({
         const inSel = x >= sx && x <= ex;
         const amp = Math.min(1, peaks[b] * (inSel ? k : 1));
         const bh = Math.max(1, amp * h * 0.9);
-        g.fillStyle = inSel ? (amp >= 0.99 ? "#ef4444" : "#f5b43c") : "#5b4a63";
+        g.globalAlpha = inSel ? 1 : 0.45;
+        g.fillStyle = inSel ? (amp >= 0.99 ? clipping : primary) : idle;
         g.fillRect(x, (h - bh) / 2, Math.max(1, w / BINS - 0.5), bh);
       }
+      g.globalAlpha = 1;
     }
   }, [peaks, start, end, duration, gainDb]);
 
@@ -340,22 +396,22 @@ function Waveform({
 
   const pct = (x: number) => `${(Math.max(0, Math.min(x, duration)) / duration) * 100}%`;
   return (
-    <div className="space-y-2">
-      <div data-track data-which="head" onPointerDown={onDrag} className="relative h-40 cursor-pointer select-none bg-[#221a27]">
+    <div className="space-y-3">
+      <div data-track data-which="head" onPointerDown={onDrag} className="relative h-40 cursor-pointer rounded-md bg-white/5 select-none">
         <canvas ref={canvas} className="absolute inset-0 size-full" />
-        {!peaks && <span className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{failed ? "Couldn't draw this file's waveform; trimming still works." : "Reading the sound…"}</span>}
+        {!peaks && <span className="absolute inset-0 flex items-center justify-center text-xs text-white/60">{failed ? tr("studio.audio.waveFailed") : tr("studio.audio.reading")}</span>}
         <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-white" style={{ left: pct(t) }} />
-        <div data-which="start" onPointerDown={onDrag} className={cn("absolute inset-y-0 -ml-1.5 w-3 cursor-ew-resize bg-primary")} style={{ left: pct(start) }} title="Start" />
-        <div data-which="end" onPointerDown={onDrag} className="absolute inset-y-0 -ml-1.5 w-3 cursor-ew-resize bg-primary" style={{ left: pct(end) }} title="End" />
+        <div data-which="start" onPointerDown={onDrag} className="absolute inset-y-0 -ml-1.5 w-3 cursor-ew-resize rounded-sm bg-primary" style={{ left: pct(start) }} title={tr("studio.audio.start")} />
+        <div data-which="end" onPointerDown={onDrag} className="absolute inset-y-0 -ml-1.5 w-3 cursor-ew-resize rounded-sm bg-primary" style={{ left: pct(end) }} title={tr("studio.audio.end")} />
       </div>
       <div className="flex items-center gap-3">
-        <Button size="icon" onClick={toggle} aria-label={playing ? "Pause" : "Play the selection"}>
+        <IconButton label={playing ? tr("studio.video.pause") : tr("studio.audio.playSelection")} variant="primary" size="icon" onClick={toggle} className="text-white">
           {playing ? <PauseIcon /> : <PlayIcon />}
-        </Button>
-        <span className="font-pixel text-xs">
+        </IconButton>
+        <span className="font-mono text-xs tabular-nums">
           {formatTime(t)} / {formatTime(duration)}
         </span>
-        <span className="ml-auto text-xs opacity-70">Drag the yellow handles to choose the part to keep. Red bars would clip: lower the level.</span>
+        <span className="ml-auto hidden text-xs text-white/60 sm:inline">{tr("studio.audio.trimHint")}</span>
       </div>
       <audio ref={audio} src={url} preload="auto" onTimeUpdate={onTime} onEnded={() => setPlaying(false)} />
     </div>
@@ -364,6 +420,7 @@ function Waveform({
 
 /** Record a voice-over or a voice note with the microphone, straight into the library. */
 function Recorder({ businessId, onRecorded }: { businessId: string; onRecorded: (path: string) => void }) {
+  const tr = useT();
   const rec = useRef<MediaRecorder | null>(null);
   const [state, setState] = useState<"idle" | "recording" | "saving">("idle");
   const [secs, setSecs] = useState(0);
@@ -393,7 +450,7 @@ function Recorder({ businessId, onRecorded }: { businessId: string; onRecorded: 
         const res = await fetch(`/api/b/${businessId}/media`, { method: "POST", headers: { "X-File-Name": encodeURIComponent(name) }, body: blob });
         const j = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
         setState("idle");
-        if (!res.ok || !j.path) return setError(j.error ?? "Couldn't save the recording");
+        if (!res.ok || !j.path) return setError(j.error ?? tr("studio.audio.recordFailed"));
         onRecorded(j.path);
       };
       rec.current = r;
@@ -401,24 +458,28 @@ function Recorder({ businessId, onRecorded }: { businessId: string; onRecorded: 
       setSecs(0);
       setState("recording");
     } catch {
-      setError("No microphone access. Allow the microphone for Ajudan and try again.");
+      setError(tr("studio.audio.noMic"));
     }
   };
 
   return (
-    <Card className="space-y-2 p-3 text-sm">
-      <div className="font-pixel">Record</div>
-      <p className="text-xs text-muted-foreground">A voice-over, a jingle idea or a note for the team. It goes into your library.</p>
+    <section className="space-y-2">
+      <h3 className="flex h-7 items-center text-[13px] leading-[18px] font-medium text-tertiary">{tr("studio.audio.record")}</h3>
+      <p className="text-xs text-tertiary">{tr("studio.audio.recordHint")}</p>
       {state === "recording" ? (
-        <Button variant="danger" onClick={() => rec.current?.stop()} className="w-full">
-          <SquareIcon /> Stop · {formatTime(secs).replace(/\.\d$/, "")}
+        <Button size="sm" variant="secondary" onClick={() => rec.current?.stop()} className="w-full text-destructive">
+          <SquareIcon className="fill-current" /> {tr("studio.audio.stop", { time: formatTime(secs).replace(/\.\d$/, "") })}
         </Button>
       ) : (
-        <Button variant="secondary" onClick={startRec} disabled={state === "saving"} className="w-full">
-          <MicIcon /> {state === "saving" ? "Saving…" : "Start recording"}
+        <Button size="sm" variant="secondary" onClick={startRec} loading={state === "saving"} disabled={state === "saving"} className="w-full">
+          <MicIcon /> {state === "saving" ? tr("common.saving") : tr("studio.audio.startRecording")}
         </Button>
       )}
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
-    </Card>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }

@@ -1,14 +1,15 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { LiveRefresh } from "@/components/live";
-import { PageSkeleton } from "@/components/kit";
+import { StudioSkeleton } from "../_components/studio-skeleton";
+import { StudioShell } from "../_components/studio-shell";
 import { getBusiness } from "@/lib/data";
 import { editorSources, listEdits } from "@/lib/studio-data";
 import { VideoEditor } from "./video-editor";
 
 export default function VideoEditorPage(props: PageProps<"/b/[id]/studio/video">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense fallback={<StudioSkeleton shape="editor" />}>
       <Content {...props} />
     </Suspense>
   );
@@ -23,9 +24,9 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/studio/video
   const add = ([] as string[]).concat(sp.add ?? []);
   const editId = typeof sp.edit === "string" ? sp.edit : undefined;
   return (
-    <>
+    <StudioShell>
       <LiveRefresh businessId={id} types={["edit_rendering", "edit_rendered", "edit_failed"]} />
       <VideoEditor key={editId ?? add.join(",")} businessId={id} sources={sources} edits={edits} initialEditId={editId} initialAdd={add} />
-    </>
+    </StudioShell>
   );
 }

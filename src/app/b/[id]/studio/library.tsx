@@ -1,23 +1,53 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
-import { FileIcon, ImageIcon, MusicIcon, StarIcon, UploadIcon, VideoIcon } from "lucide-react";
-import { Badge, Button, Card, cn, Input, Textarea } from "@/components/kit";
+import { toast } from "sonner";
+import {
+  AudioLines,
+  Clapperboard,
+  Download,
+  FileIcon,
+  FolderIcon,
+  ImageIcon,
+  LayoutGrid,
+  MusicIcon,
+  StarIcon,
+  Tag,
+  Trash2,
+  UploadIcon,
+  UserRoundPlus,
+  VideoIcon,
+  X,
+} from "lucide-react";
+import { useT, useTn } from "@/components/i18n";
+import { Button, cn, EmptyState, IconButton, Input, LineTabs, Textarea } from "@/components/kit";
+import { Gallery, GalleryTile } from "@/components/data-table";
+import { useShortcut } from "@/components/shortcuts";
+import { SidePeek } from "@/components/side-peek";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import type { LibraryItem } from "@/lib/assets";
+import type { MessageKey } from "@/lib/i18n";
 import { MEDIA_ACCEPT, type MediaKind } from "@/lib/media-types";
 import { deleteAssets, organizeAssets } from "./actions";
 import { PlanTask, type MateOption } from "./_components/plan-task";
+import { DeleteDialog, MoreMenu, PropRow, StudioShell } from "./_components/studio-shell";
 
-const KINDS: { key: MediaKind | "all"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "image", label: "Photos" },
-  { key: "video", label: "Videos" },
-  { key: "audio", label: "Audio" },
-  { key: "file", label: "Other" },
+const KINDS: { key: MediaKind | "all"; label: MessageKey }[] = [
+  { key: "all", label: "studio.lib.kind.all" },
+  { key: "image", label: "studio.lib.kind.image" },
+  { key: "video", label: "studio.lib.kind.video" },
+  { key: "audio", label: "studio.lib.kind.audio" },
+  { key: "file", label: "studio.lib.kind.file" },
 ];
 const KIND_ICON = { image: ImageIcon, video: VideoIcon, audio: MusicIcon, file: FileIcon };
+const NONE = "__none";
+const NEW = "__new";
 
 export const fileUrl = (businessId: string, rel: string) => `/api/b/${businessId}/files/${rel.split("/").map(encodeURIComponent).join("/")}`;
 
@@ -27,18 +57,43 @@ function size(n: number) {
   return `${Math.max(1, Math.round(n / 1e3))} KB`;
 }
 
+/** Keep the one open file in the URL (?f=) without a server round trip, so a reload keeps the peek. */
+function syncPeekParam(paths: string[]) {
+  const url = new URL(window.location.href);
+  if (paths.length === 1) url.searchParams.set("f", paths[0]);
+  else url.searchParams.delete("f");
+  window.history.replaceState(window.history.state, "", url);
+}
+
 /** The media library, organized by the owner: albums, tags, notes and stars. */
 export function Library({ businessId, items, teammates }: { businessId: string; items: LibraryItem[]; teammates: MateOption[] }) {
+  const t = useT();
+  const tn = useTn();
   const router = useRouter();
-  const [kind, setKind] = useState<MediaKind | "all">("all");
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const kindParam = params.get("kind");
+  const kind: MediaKind | "all" = KINDS.some((k) => k.key === kindParam) ? (kindParam as MediaKind) : "all";
   const [album, setAlbum] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
   const [starredOnly, setStarredOnly] = useState(false);
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelectedState] = useState<string[]>(() => {
+    const f = params.get("f");
+    return f && items.some((i) => i.path === f) ? [f] : [];
+  });
   const [uploading, setUploading] = useState<{ done: number; total: number; error?: string } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [deleting, setDeleting] = useState<string[] | null>(null);
+  const [, startDelete] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const setSelected = (next: string[] | ((s: string[]) => string[])) =>
+    setSelectedState((s) => {
+      const v = typeof next === "function" ? next(s) : next;
+      syncPeekParam(v);
+      return v;
+    });
 
   const albums = useMemo(() => {
     const m = new Map<string, number>();
@@ -46,6 +101,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [items]);
   const tags = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
+  const starredCount = items.filter((i) => i.starred).length;
 
   const shown = items.filter((i) => {
     if (kind !== "all" && i.kind !== kind) return false;
@@ -57,6 +113,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     return true;
   });
   const picked = items.filter((i) => selected.includes(i.path));
+  const peekItem = picked.length === 1 ? picked[0] : null;
 
   const upload = async (files: FileList | File[]) => {
     const list = [...files];
@@ -78,6 +135,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     if (album) await organizeAssets(businessId, added, { album });
     setUploading(null);
     setSelected(added);
+    toast(tn("studio.lib.uploaded", added.length));
     router.refresh();
   };
 
@@ -85,160 +143,328 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     if (e.metaKey || e.ctrlKey || e.shiftKey) setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
     else setSelected((s) => (s.length === 1 && s[0] === path ? [] : [path]));
   };
+  const toggle = (path: string) => setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
+
+  const showAll = () => (setAlbum(null), setStarredOnly(false));
+  const showStarred = () => (setStarredOnly(!starredOnly), setAlbum(null));
+  const showAlbum = (a: string) => (setAlbum(album === a ? null : a), setStarredOnly(false));
+
+  const kindHref = (k: string) => {
+    const next = new URLSearchParams(params.toString());
+    if (k === "all") next.delete("kind");
+    else next.set("kind", k);
+    next.delete("f");
+    const s = next.toString();
+    return s ? `${pathname}?${s}` : pathname;
+  };
+
+  const confirmDelete = () => {
+    const paths = deleting;
+    setDeleting(null);
+    if (!paths) return;
+    startDelete(async () => {
+      await deleteAssets(businessId, paths);
+      setSelected((s) => s.filter((p) => !paths.includes(p)));
+      toast(tn("studio.lib.deleted", paths.length));
+    });
+  };
+
+  const peek = (
+    <SidePeek
+      open={!!peekItem}
+      onClose={() => setSelected([])}
+      title={peekItem ? peekItem.title || peekItem.name : undefined}
+      description={t("studio.lib.peekDescription")}
+      actions={
+        peekItem && (
+          <MoreMenu label={t("studio.more")}>
+            <DropdownMenuItem asChild>
+              <a href={`${fileUrl(businessId, peekItem.path)}?download=1`}>
+                <Download /> {t("studio.lib.download")}
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting([peekItem.path])}>
+              <Trash2 /> {t("common.delete")}
+            </DropdownMenuItem>
+          </MoreMenu>
+        )
+      }
+    >
+      {peekItem && <Inspector key={peekItem.path} businessId={businessId} item={peekItem} albums={albums.map((a) => a[0])} teammates={teammates} />}
+    </SidePeek>
+  );
 
   return (
-    <div
-      className="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)_20rem]"
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) {
+    <StudioShell peek={peek}>
+      <div
+        className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return;
           e.preventDefault();
-          setDragging(true);
-        }
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false);
-      }}
-      onDrop={(e) => {
-        if (!e.dataTransfer.files.length) return;
-        e.preventDefault();
-        setDragging(false);
-        void upload(e.dataTransfer.files);
-      }}
-    >
-      {/* Albums & tags */}
-      <aside className="space-y-3">
-        <Button className="w-full" onClick={() => fileInput.current?.click()} disabled={!!uploading && !uploading.error}>
-          <UploadIcon /> Upload files
-        </Button>
-        <input ref={fileInput} type="file" multiple accept={MEDIA_ACCEPT} className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
-        {uploading && (
-          <p className={cn("text-xs", uploading.error ? "text-red-600 dark:text-red-400" : "text-muted-foreground")}>
-            {uploading.error ?? `Uploading ${uploading.done + 1} of ${uploading.total}…`}
-          </p>
-        )}
-        <Card className="space-y-0.5 p-2 text-sm">
-          <SideItem active={!album && !starredOnly} onClick={() => (setAlbum(null), setStarredOnly(false))} label="Everything" count={items.length} />
-          <SideItem active={starredOnly} onClick={() => (setStarredOnly(!starredOnly), setAlbum(null))} label="★ Starred" count={items.filter((i) => i.starred).length} />
-          <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Albums</div>
-          {albums.length === 0 && <p className="px-2 pb-1 text-xs text-muted-foreground">Select files and give them an album.</p>}
-          {albums.map(([a, n]) => (
-            <SideItem key={a} active={album === a} onClick={() => (setAlbum(album === a ? null : a), setStarredOnly(false))} label={a} count={n} />
-          ))}
-        </Card>
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {tags.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTag(tag === t ? null : t)}
-                className={cn("rounded-full border px-2 py-0.5 text-xs", tag === t ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted")}
-              >
-                #{t}
-              </button>
+          setDragging(false);
+          void upload(e.dataTransfer.files);
+        }}
+      >
+        {/* Albums & tags */}
+        <aside className="min-w-0 space-y-4">
+          <Button size="sm" className="w-full" onClick={() => fileInput.current?.click()} disabled={!!uploading && !uploading.error} loading={!!uploading && !uploading.error}>
+            <UploadIcon /> {t("studio.lib.upload")}
+          </Button>
+          <input ref={fileInput} type="file" multiple accept={MEDIA_ACCEPT} className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
+
+          {/* Phone: one scrolling row of chips */}
+          <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden">
+            <Chip active={!album && !starredOnly} onClick={showAll}>
+              {t("studio.lib.everything")}
+            </Chip>
+            <Chip active={starredOnly} onClick={showStarred}>
+              <StarIcon className="size-3.5" /> {t("studio.lib.starred")}
+            </Chip>
+            {albums.map(([a]) => (
+              <Chip key={a} active={album === a} onClick={() => showAlbum(a)}>
+                <FolderIcon className="size-3.5" /> {a}
+              </Chip>
+            ))}
+            {tags.map((tg) => (
+              <Chip key={`#${tg}`} active={tag === tg} onClick={() => setTag(tag === tg ? null : tg)}>
+                #{tg}
+              </Chip>
             ))}
           </div>
-        )}
-      </aside>
 
-      {/* Grid */}
-      <main className="min-w-0 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {KINDS.map((k) => (
-            <button
-              key={k.key}
-              type="button"
-              onClick={() => setKind(k.key)}
-              className={cn("font-pixel rounded-md border border-border px-2 py-0.5 text-xs", kind === k.key ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground")}
-            >
-              {k.label}
-            </button>
-          ))}
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names, notes, tags…" className="ml-auto h-8 max-w-60" />
-        </div>
-        {items.length === 0 ? (
-          <Card className={cn("flex flex-col items-center gap-2 p-10 text-center text-sm text-muted-foreground", dragging && "ring-2 ring-primary")}>
-            <UploadIcon className="size-8" />
-            Drop photos, videos and audio here to start your library.
-          </Card>
-        ) : shown.length === 0 ? (
-          <Card className="p-6 text-sm text-muted-foreground">Nothing matches.</Card>
-        ) : (
-          <div className={cn("grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3", dragging && "rounded-md ring-2 ring-primary ring-offset-4 ring-offset-background")}>
-            {shown.map((i, n) => {
-              const Icon = KIND_ICON[i.kind];
-              const on = selected.includes(i.path);
-              return (
-                <button
-                  key={i.path}
-                  type="button"
-                  onClick={(e) => click(i.path, e)}
-                  className={cn("pixel-frame group relative m-[3px] block overflow-hidden bg-muted text-left", on && "outline-3 outline-offset-2 outline-primary")}
-                  title={i.title || i.name}
-                >
-                  <div className="flex aspect-square items-center justify-center">
-                    {i.kind === "image" ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-                      <img src={fileUrl(businessId, i.path)} alt={i.title || i.name} loading={n < 30 ? "eager" : "lazy"} className="size-full object-cover" />
-                    ) : i.kind === "video" ? (
-                      <video src={`${fileUrl(businessId, i.path)}#t=0.5`} preload="metadata" muted playsInline className="size-full object-cover" />
-                    ) : (
-                      <Icon className="size-10 text-muted-foreground" />
-                    )}
-                  </div>
-                  {i.starred && <StarIcon className="absolute top-1.5 right-1.5 size-4 fill-amber-400 text-amber-500 drop-shadow" />}
-                  <div className="flex items-center gap-1 bg-ink/85 px-1.5 py-1 text-[11px] text-parchment">
-                    <Icon className="size-3 shrink-0" />
-                    <span className="truncate">{i.title || i.name}</span>
-                  </div>
-                </button>
-              );
-            })}
+          {/* Desktop: a Notion-like list */}
+          <nav aria-label={t("studio.lib.albums")} className="hidden space-y-0.5 lg:block">
+            <SideItem active={!album && !starredOnly} onClick={showAll} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
+            <SideItem active={starredOnly} onClick={showStarred} icon={<StarIcon />} label={t("studio.lib.starred")} count={starredCount} />
+            <div className="px-2 pt-4 pb-1 text-xs font-medium text-tertiary">{t("studio.lib.albums")}</div>
+            {albums.length === 0 && <p className="px-2 text-xs text-tertiary">{t("studio.lib.noAlbums")}</p>}
+            {albums.map(([a, n]) => (
+              <SideItem key={a} active={album === a} onClick={() => showAlbum(a)} icon={<FolderIcon />} label={a} count={n} />
+            ))}
+            {tags.length > 0 && (
+              <>
+                <div className="px-2 pt-4 pb-1.5 text-xs font-medium text-tertiary">{t("studio.lib.tags")}</div>
+                <div className="flex flex-wrap gap-1 px-2">
+                  {tags.map((tg) => (
+                    <button
+                      key={tg}
+                      type="button"
+                      aria-pressed={tag === tg}
+                      onClick={() => setTag(tag === tg ? null : tg)}
+                      className={cn(
+                        "inline-flex h-5 items-center rounded-sm px-1.5 text-xs font-medium transition-colors duration-100",
+                        tag === tg ? "bg-tag-blue-bg text-tag-blue-fg" : "bg-tag-gray-bg text-tag-gray-fg hover:bg-hover-strong",
+                      )}
+                    >
+                      {tg}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </nav>
+        </aside>
+
+        {/* Gallery */}
+        <div className="min-w-0">
+          <LineTabs
+            label={t("studio.lib.kinds")}
+            items={KINDS.map((k) => ({ href: kindHref(k.key), label: t(k.label), active: kind === k.key }))}
+            trailing={
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={t("studio.lib.search")}
+                aria-label={t("studio.lib.search")}
+                className="hidden h-7 w-56 text-[13px] sm:block"
+              />
+            }
+          />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.lib.search")} aria-label={t("studio.lib.search")} className="mt-3 h-8 sm:hidden" />
+          {uploading && (
+            <p role="status" className={cn("mt-3 text-xs", uploading.error ? "text-destructive" : "text-muted-foreground")}>
+              {uploading.error ?? t("studio.lib.uploading", { n: uploading.done + 1, total: uploading.total })}
+            </p>
+          )}
+          <div
+            className={cn(
+              "mt-4 rounded-lg outline-2 outline-offset-4 outline-transparent transition-[outline-color] duration-100",
+              dragging && "outline-dashed outline-ring",
+            )}
+          >
+            {items.length === 0 ? (
+              <EmptyState
+                icon={<UploadIcon />}
+                title={t("studio.lib.emptyTitle")}
+                body={t("studio.lib.emptyBody")}
+                action={
+                  <Button size="sm" variant="secondary" onClick={() => fileInput.current?.click()}>
+                    <UploadIcon /> {t("studio.lib.upload")}
+                  </Button>
+                }
+              />
+            ) : shown.length === 0 ? (
+              <EmptyState compact icon={<LayoutGrid />} title={t("studio.lib.noMatch")} body={t("studio.lib.noMatchBody")} />
+            ) : (
+              <Gallery className="grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-4">
+                {shown.map((i, n) => {
+                  const Icon = KIND_ICON[i.kind];
+                  const on = selected.includes(i.path);
+                  return (
+                    <GalleryTile
+                      key={i.path}
+                      selected={on}
+                      onClick={(e) => click(i.path, e)}
+                      caption={<span title={i.title || i.name}>{i.title || i.name}</span>}
+                      meta={
+                        <span className="inline-flex items-center gap-1">
+                          <Icon className="size-3 shrink-0" />
+                          {i.album ?? size(i.bytes)}
+                        </span>
+                      }
+                      thumb={
+                        i.kind === "image" ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+                          <img src={fileUrl(businessId, i.path)} alt={i.title || i.name} loading={n < 30 ? "eager" : "lazy"} />
+                        ) : i.kind === "video" ? (
+                          <video src={`${fileUrl(businessId, i.path)}#t=0.5`} preload="metadata" muted playsInline />
+                        ) : (
+                          <span className="flex size-full items-center justify-center text-placeholder">
+                            <Icon className="size-8" strokeWidth={1.5} />
+                          </span>
+                        )
+                      }
+                      topLeft={
+                        <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
+                          <Checkbox checked={on} onCheckedChange={() => toggle(i.path)} aria-label={t("studio.lib.select", { name: i.title || i.name })} />
+                        </span>
+                      }
+                      badge={
+                        i.starred ? (
+                          <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
+                            <StarIcon className="size-3.5 fill-tag-yellow-bg text-warning" />
+                          </span>
+                        ) : undefined
+                      }
+                    />
+                  );
+                })}
+              </Gallery>
+            )}
           </div>
-        )}
-        <p className="text-xs text-muted-foreground">Tip: Ctrl/⌘-click to pick several files. Drop files anywhere here to upload.</p>
-      </main>
+          {items.length > 0 && <p className="mt-6 text-xs text-tertiary">{t("studio.lib.tip")}</p>}
+        </div>
+      </div>
 
-      {/* Inspector */}
-      <aside className="min-w-0">
-        {picked.length === 1 ? (
-          <Inspector key={picked[0].path} businessId={businessId} item={picked[0]} albums={albums.map((a) => a[0])} teammates={teammates} onGone={() => setSelected([])} />
-        ) : picked.length > 1 ? (
-          <BulkPanel businessId={businessId} items={picked} albums={albums.map((a) => a[0])} teammates={teammates} onClear={() => setSelected([])} />
-        ) : (
-          <Card className="space-y-2 p-4 text-sm text-muted-foreground">
-            <div className="font-pixel text-base text-foreground">Organize for later</div>
-            <p>Pick a file to give it a title, a note on how to use it, tags and an album. Star your best ones.</p>
-            <p>When the team is back, they see your stars and notes and use the right files.</p>
-          </Card>
-        )}
-      </aside>
-    </div>
+      {picked.length > 1 && (
+        <BulkBar
+          businessId={businessId}
+          items={picked}
+          albums={albums.map((a) => a[0])}
+          teammates={teammates}
+          onClear={() => setSelected([])}
+          onDelete={() => setDeleting(picked.map((i) => i.path))}
+        />
+      )}
+
+      <DeleteDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title={
+          deleting?.length === 1
+            ? t("studio.lib.deleteOne", { name: (() => { const it = items.find((i) => i.path === deleting[0]); return it?.title || it?.name || ""; })() })
+            : tn("studio.lib.deleteMany", deleting?.length ?? 0)
+        }
+        body={t("studio.lib.deleteBody")}
+        onConfirm={confirmDelete}
+      />
+    </StudioShell>
   );
 }
 
-function SideItem({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
+function SideItem({ active, onClick, icon, label, count }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count: number }) {
   return (
-    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-muted", active && "bg-muted font-medium")}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active || undefined}
+      className={cn(
+        "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] leading-[18px] font-medium text-foreground transition-colors duration-100 hover:bg-hover [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:stroke-[1.75] [&_svg]:text-tertiary",
+        active && "bg-accent [&_svg]:text-foreground",
+      )}
+    >
+      {icon}
       <span className="flex-1 truncate">{label}</span>
-      <span className="text-xs text-muted-foreground">{count}</span>
+      <span className="text-xs font-normal text-tertiary tabular-nums">{count}</span>
     </button>
   );
 }
 
-function Inspector({
-  businessId,
-  item,
-  albums,
-  teammates,
-  onGone,
-}: {
-  businessId: string;
-  item: LibraryItem;
-  albums: string[];
-  teammates: MateOption[];
-  onGone: () => void;
-}) {
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-7 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[13px] whitespace-nowrap transition-colors duration-100",
+        active ? "border-transparent bg-foreground text-background" : "border-border text-foreground hover:bg-hover",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Album picker: existing albums, "No album", or "New album…" (then a text field). */
+function AlbumSelect({ value, onChange, albums }: { value: string; onChange: (v: string) => void; albums: string[] }) {
+  const t = useT();
+  const [creating, setCreating] = useState(!!value && !albums.includes(value));
+  return (
+    <div className="flex w-full min-w-0 gap-2">
+      <Select
+        value={creating ? NEW : value || NONE}
+        onValueChange={(v) => {
+          if (v === NEW) {
+            setCreating(true);
+            onChange("");
+          } else {
+            setCreating(false);
+            onChange(v === NONE ? "" : v);
+          }
+        }}
+      >
+        <SelectTrigger size="sm" className={cn(creating ? "w-28 shrink-0" : "w-full")} aria-label={t("studio.lib.album")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE}>{t("studio.lib.noAlbum")}</SelectItem>
+          {albums.map((a) => (
+            <SelectItem key={a} value={a}>
+              {a}
+            </SelectItem>
+          ))}
+          <SelectSeparator />
+          <SelectItem value={NEW}>{t("studio.lib.newAlbum")}</SelectItem>
+        </SelectContent>
+      </Select>
+      {creating && <Input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={t("studio.lib.albumName")} className="h-7 min-w-0 flex-1 text-[13px]" />}
+    </div>
+  );
+}
+
+function Inspector({ businessId, item, albums, teammates }: { businessId: string; item: LibraryItem; albums: string[]; teammates: MateOption[] }) {
+  const t = useT();
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note);
   const [tagText, setTagText] = useState(item.tags.join(", "));
@@ -253,188 +479,218 @@ function Inspector({
       setSaved(true);
     });
   return (
-    <Card className="space-y-3 p-3">
-      <div className="overflow-hidden bg-muted">
+    <div className="space-y-5">
+      <div className="overflow-hidden rounded-lg bg-muted">
         {item.kind === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-          <img src={url} alt={item.title || item.name} className="max-h-64 w-full object-contain" />
+          <img src={url} alt={item.title || item.name} className="max-h-72 w-full object-contain" />
         ) : item.kind === "video" ? (
-          <video src={url} controls playsInline className="max-h-64 w-full bg-black" />
+          <video src={url} controls playsInline className="max-h-72 w-full bg-stage" />
         ) : item.kind === "audio" ? (
-          <audio src={url} controls className="w-full" />
+          <div className="p-4">
+            <audio src={url} controls className="w-full" />
+          </div>
         ) : (
-          <div className="p-6 text-center text-xs text-muted-foreground">No preview</div>
+          <div className="p-8 text-center text-xs text-tertiary">{t("studio.lib.noPreview")}</div>
         )}
       </div>
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-mono text-[11px] text-muted-foreground" title={item.path}>
-            {item.name}
-          </div>
-          <div className="text-[11px] text-muted-foreground">
-            {size(item.bytes)} · {new Date(item.mtime).toLocaleDateString()}
-          </div>
+      <div className="min-w-0">
+        <div className="truncate font-mono text-xs text-muted-foreground" title={item.path}>
+          {item.name}
         </div>
-        <button
-          type="button"
-          onClick={() => start(async () => void (await organizeAssets(businessId, [item.path], { starred: !item.starred })))}
-          className="rounded p-1 hover:bg-muted"
-          title={item.starred ? "Unstar" : "Star: one of your best"}
-        >
-          <StarIcon className={cn("size-5", item.starred ? "fill-amber-400 text-amber-500" : "text-muted-foreground")} />
-        </button>
+        <div className="text-xs text-tertiary">
+          {size(item.bytes)} · {new Date(item.mtime).toLocaleDateString()}
+        </div>
       </div>
       <form
-        className="space-y-2"
+        className="space-y-1"
         onSubmit={(e) => {
           e.preventDefault();
           save();
         }}
         onChange={() => setSaved(false)}
       >
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
-        <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Note for the team: what it is, when to use it" />
-        <Input value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder="Tags, comma separated" />
-        <Input value={album} onChange={(e) => setAlbum(e.target.value)} placeholder="Album" list="studio-albums" />
-        <datalist id="studio-albums">
-          {albums.map((a) => (
-            <option key={a} value={a} />
-          ))}
-        </datalist>
-        <div className="flex items-center gap-2">
-          <Button type="submit" size="sm" disabled={pending || !dirty}>
-            {pending ? "Saving…" : "Save"}
+        <PropRow label={t("studio.lib.title")}>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("studio.lib.titlePlaceholder")} className="h-7 text-[13px]" />
+        </PropRow>
+        <PropRow label={t("studio.lib.album")}>
+          <AlbumSelect
+            value={album}
+            onChange={(v) => {
+              setAlbum(v);
+              setSaved(false);
+            }}
+            albums={albums}
+          />
+        </PropRow>
+        <PropRow label={t("studio.lib.tags")}>
+          <Input value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder={t("studio.lib.tagsPlaceholder")} className="h-7 text-[13px]" />
+        </PropRow>
+        <PropRow label={t("studio.lib.starred")}>
+          <Switch
+            checked={item.starred}
+            disabled={pending}
+            onCheckedChange={() => start(async () => void (await organizeAssets(businessId, [item.path], { starred: !item.starred })))}
+            aria-label={item.starred ? t("studio.lib.unstar") : t("studio.lib.star")}
+          />
+          <span className="text-xs text-tertiary">{t("studio.lib.starHint")}</span>
+        </PropRow>
+        <div className="pt-2">
+          <span className="mb-1.5 block text-[13px] leading-[18px] text-tertiary">{t("studio.lib.note")}</span>
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={t("studio.lib.notePlaceholder")} className="text-[13px]" />
+        </div>
+        <div className="flex items-center gap-2 pt-2">
+          <Button type="submit" size="sm" loading={pending && dirty} disabled={pending || !dirty}>
+            {pending && dirty ? t("common.saving") : t("common.save")}
           </Button>
-          {saved && !dirty && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>}
+          {saved && !dirty && <span className="text-xs text-tertiary">{t("common.saved")}</span>}
         </div>
       </form>
-      <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-        {item.kind === "video" && (
+      {(item.kind === "video" || item.kind === "audio") && (
+        <div className="flex flex-wrap gap-2">
+          {item.kind === "video" && (
+            <Button asChild size="sm" variant="secondary">
+              <Link href={`/b/${businessId}/studio/video?add=${encodeURIComponent(item.path)}`}>
+                <Clapperboard /> {t("studio.lib.editVideo")}
+              </Link>
+            </Button>
+          )}
           <Button asChild size="sm" variant="secondary">
-            <Link href={`/b/${businessId}/studio/video?add=${encodeURIComponent(item.path)}`}>▶ Edit video</Link>
+            <Link href={`/b/${businessId}/studio/audio?file=${encodeURIComponent(item.path)}`}>
+              <AudioLines /> {t("studio.lib.editAudio")}
+            </Link>
           </Button>
-        )}
-        {(item.kind === "audio" || item.kind === "video") && (
-          <Button asChild size="sm" variant="secondary">
-            <Link href={`/b/${businessId}/studio/audio?file=${encodeURIComponent(item.path)}`}>♪ Edit audio</Link>
-          </Button>
-        )}
-        <Button asChild size="sm" variant="secondary">
-          <a href={`${url}?download=1`}>Download</a>
-        </Button>
-        <Button
-          size="sm"
-          variant="danger"
-          onClick={() => {
-            if (!confirm(`Delete ${item.title || item.name} for good?`)) return;
-            start(async () => {
-              await deleteAssets(businessId, [item.path]);
-              onGone();
-            });
-          }}
-        >
-          Delete
-        </Button>
-      </div>
-      <div className="border-t border-border pt-3">
+        </div>
+      )}
+      <div className="border-t border-border pt-5">
         <PlanTask businessId={businessId} teammates={teammates} attachments={[item.path]} />
       </div>
-    </Card>
+    </div>
   );
 }
 
-function BulkPanel({
+/** The floating "n selected" bar for several files: album, tags, star, make a video, plan, delete. */
+function BulkBar({
   businessId,
   items,
   albums,
   teammates,
   onClear,
+  onDelete,
 }: {
   businessId: string;
   items: LibraryItem[];
   albums: string[];
   teammates: MateOption[];
   onClear: () => void;
+  onDelete: () => void;
 }) {
+  const t = useT();
+  const tn = useTn();
   const [album, setAlbum] = useState("");
   const [tagText, setTagText] = useState("");
+  const [albumOpen, setAlbumOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [pending, start] = useTransition();
   const paths = items.map((i) => i.path);
   const videos = items.filter((i) => i.kind === "video");
   const allStarred = items.every((i) => i.starred);
+  useShortcut("escape", onClear, { enabled: !albumOpen && !tagsOpen && !planOpen });
   return (
-    <Card className="space-y-3 p-3">
-      <div className="flex items-center justify-between">
-        <span className="font-pixel">{items.length} selected</span>
-        <button type="button" onClick={onClear} className="text-xs text-muted-foreground hover:text-foreground">
-          Clear
-        </button>
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {items.slice(0, 12).map((i) => (
-          <Badge key={i.path}>{(i.title || i.name).slice(0, 18)}</Badge>
-        ))}
-        {items.length > 12 && <Badge>+{items.length - 12}</Badge>}
-      </div>
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          start(async () => void (await organizeAssets(businessId, paths, { album: album || null })));
-        }}
-      >
-        <Input value={album} onChange={(e) => setAlbum(e.target.value)} placeholder="Move to album" list="studio-albums-bulk" className="h-8" />
-        <datalist id="studio-albums-bulk">
-          {albums.map((a) => (
-            <option key={a} value={a} />
-          ))}
-        </datalist>
-        <Button size="sm" type="submit" disabled={pending}>
-          Set
-        </Button>
-      </form>
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          start(async () => {
-            await organizeAssets(businessId, paths, {}, tagText.split(","));
-            setTagText("");
-          });
-        }}
-      >
-        <Input value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder="Add tags" className="h-8" />
-        <Button size="sm" type="submit" disabled={pending || !tagText.trim()}>
-          Add
-        </Button>
-      </form>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" disabled={pending} onClick={() => start(async () => void (await organizeAssets(businessId, paths, { starred: !allStarred })))}>
-          {allStarred ? "Unstar all" : "★ Star all"}
-        </Button>
-        {videos.length > 0 && (
-          <Button asChild size="sm" variant="secondary">
-            <Link href={`/b/${businessId}/studio/video?${videos.map((v) => `add=${encodeURIComponent(v.path)}`).join("&")}`}>▶ Edit {videos.length} video{videos.length === 1 ? "" : "s"} together</Link>
+    <div
+      role="toolbar"
+      aria-label={tn("studio.lib.selected", items.length)}
+      className="fixed bottom-[calc(var(--bottombar-h)+env(safe-area-inset-bottom)+16px)] left-1/2 z-40 flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-lg border border-border bg-background p-1 shadow-menu duration-150 animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none"
+    >
+      <span className="px-2 text-[13px] font-medium whitespace-nowrap text-foreground tabular-nums">{tn("studio.lib.selected", items.length)}</span>
+      <span aria-hidden className="mx-0.5 h-5 w-px bg-border" />
+
+      <Popover open={albumOpen} onOpenChange={setAlbumOpen}>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost" disabled={pending}>
+            <FolderIcon /> <span className="hidden sm:inline">{t("studio.lib.album")}</span>
           </Button>
-        )}
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={pending}
-          onClick={() => {
-            if (!confirm(`Delete ${items.length} files for good?`)) return;
-            start(async () => {
-              await deleteAssets(businessId, paths);
-              onClear();
-            });
-          }}
-        >
-          Delete
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-64">
+          <form
+            className="grid gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              start(async () => {
+                await organizeAssets(businessId, paths, { album: album || null });
+                setAlbumOpen(false);
+                toast(album ? t("studio.lib.movedTo", { album }) : t("studio.lib.removedFromAlbum"));
+              });
+            }}
+          >
+            <span className="text-xs font-medium text-tertiary">{t("studio.lib.moveToAlbum")}</span>
+            <AlbumSelect value={album} onChange={setAlbum} albums={albums} />
+            <Button size="sm" type="submit" loading={pending} disabled={pending}>
+              {t("studio.lib.set")}
+            </Button>
+          </form>
+        </PopoverContent>
+      </Popover>
+
+      <Popover open={tagsOpen} onOpenChange={setTagsOpen}>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost" disabled={pending}>
+            <Tag /> <span className="hidden sm:inline">{t("studio.lib.tags")}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-64">
+          <form
+            className="grid gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              start(async () => {
+                await organizeAssets(businessId, paths, {}, tagText.split(","));
+                setTagText("");
+                setTagsOpen(false);
+                toast(t("studio.lib.tagsAdded"));
+              });
+            }}
+          >
+            <span className="text-xs font-medium text-tertiary">{t("studio.lib.addTags")}</span>
+            <Input autoFocus value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder={t("studio.lib.tagsPlaceholder")} className="h-7 text-[13px]" />
+            <Button size="sm" type="submit" loading={pending} disabled={pending || !tagText.trim()}>
+              {t("studio.lib.add")}
+            </Button>
+          </form>
+        </PopoverContent>
+      </Popover>
+
+      <Button size="sm" variant="ghost" disabled={pending} onClick={() => start(async () => void (await organizeAssets(businessId, paths, { starred: !allStarred })))}>
+        <StarIcon className={cn(allStarred && "fill-tag-yellow-bg text-warning")} /> <span className="hidden sm:inline">{allStarred ? t("studio.lib.unstarAll") : t("studio.lib.starAll")}</span>
+      </Button>
+
+      {videos.length > 0 && (
+        <Button asChild size="sm" variant="ghost">
+          <Link href={`/b/${businessId}/studio/video?${videos.map((v) => `add=${encodeURIComponent(v.path)}`).join("&")}`}>
+            <Clapperboard /> <span className="whitespace-nowrap">{tn("studio.lib.makeVideo", videos.length)}</span>
+          </Link>
         </Button>
-      </div>
-      <div className="border-t border-border pt-3">
-        <PlanTask businessId={businessId} teammates={teammates} attachments={paths} />
-      </div>
-    </Card>
+      )}
+
+      <Popover open={planOpen} onOpenChange={setPlanOpen}>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="ghost">
+            <UserRoundPlus /> <span className="hidden whitespace-nowrap sm:inline">{t("studio.lib.handOver")}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="end" className="w-80 p-3">
+          <PlanTask businessId={businessId} teammates={teammates} attachments={paths} onDone={() => setPlanOpen(false)} />
+        </PopoverContent>
+      </Popover>
+
+      <Button size="sm" variant="danger" disabled={pending} onClick={onDelete}>
+        <Trash2 /> <span className="hidden sm:inline">{t("common.delete")}</span>
+      </Button>
+      <span aria-hidden className="mx-0.5 h-5 w-px bg-border" />
+      <IconButton label={t("studio.lib.clearSelection")} shortcut="Esc" side="top" onClick={onClear}>
+        <X />
+      </IconButton>
+    </div>
   );
 }

@@ -1,13 +1,13 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { PageSkeleton } from "@/components/kit";
 import { listLibrary } from "@/lib/assets";
 import { getBusiness, listTeammates } from "@/lib/data";
+import { StudioSkeleton } from "./_components/studio-skeleton";
 import { Library } from "./library";
 
 export default function StudioLibraryPage(props: PageProps<"/b/[id]/studio">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense fallback={<StudioSkeleton shape="gallery" />}>
       <Content params={props.params} />
     </Suspense>
   );
