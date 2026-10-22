@@ -411,6 +411,10 @@ export const contextPages = sqliteTable("context_pages", {
   key: text("key"),
   body: text("body").notNull().default(""),
   blocks: text("blocks", { mode: "json" }).$type<unknown[]>(),
+  /** The page icon: an emoji, or "lucide:<name>". Null: the default for the page's key/kind; "": none. */
+  icon: text("icon"),
+  /** Cover image, folder-relative ("media/…"), or null. */
+  cover: text("cover"),
   sortOrder: real("sort_order").notNull().default(0),
   /** "owner", "system" or "teammate:<id>". */
   createdBy: text("created_by").notNull().default("owner"),
