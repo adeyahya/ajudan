@@ -104,7 +104,11 @@ export const teammates = sqliteTable("teammates", {
   createdAt: createdAt(),
 });
 
-/** "waiting_human": a request sent to a human teammate on WhatsApp, open until it's closed. */
+/**
+ * "waiting_approval": the run ended while the owner decides; the decision resumes its
+ * Claude session (sessionId). "waiting_human": a request sent to a human teammate on
+ * WhatsApp, open until it's closed. "cancelled": the owner stopped it (Cancel).
+ */
 export type TaskStatus = "queued" | "running" | "waiting_approval" | "waiting_human" | "done" | "failed" | "cancelled";
 
 export const tasks = sqliteTable("tasks", {
@@ -129,10 +133,22 @@ export const tasks = sqliteTable("tasks", {
   parentTaskId: text("parent_task_id"),
   /** Files the owner (or the delegating teammate) attached: "media/…" or "work/…" paths. */
   attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /**
+   * Claude Code session of this task's run: resumed after an approval decision, and
+   * set on a follow-up task (capability granted, WhatsApp reply) so it carries on
+   * from the conversation that asked. A missing session falls back to task history.
+   */
+  sessionId: text("session_id"),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
 }, (t) => [index("tasks_teammate_status_idx").on(t.teammateId, t.status)]);
+
+/**
+ * "superseded": the run that asked can't be resumed (it restarts from scratch and asks
+ * again). "cancelled": the owner cancelled the task that asked.
+ */
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "superseded" | "cancelled";
 
 export const approvals = sqliteTable("approvals", {
   id: id(),
@@ -146,7 +162,7 @@ export const approvals = sqliteTable("approvals", {
   toolName: text("tool_name").notNull(),
   input: text("input", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
   summary: text("summary").notNull(),
-  status: text("status").$type<"pending" | "approved" | "rejected">().notNull().default("pending"),
+  status: text("status").$type<ApprovalStatus>().notNull().default("pending"),
   note: text("note"),
   decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),

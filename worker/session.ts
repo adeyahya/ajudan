@@ -3,6 +3,11 @@
  * switch folders, the session's signal aborts every running Claude call; handlers
  * then throw PausedError, and the worker puts the job back in that folder's queue
  * so it runs again the next time the folder is open.
+ *
+ * A task's run can also end early on purpose: when it needs the owner's approval
+ * (ApprovalWait: the task waits, the decision resumes its session) or when the owner
+ * cancels it (CancelledError: the web app sets the task cancelled, and the worker's
+ * tick aborts the matching run, see `runningTasks`).
  */
 
 let controller = new AbortController();
@@ -33,3 +38,20 @@ export class PausedError extends Error {
 }
 
 export const isPaused = (signal: AbortSignal) => signal.aborted && signal.reason instanceof PausedError;
+
+/** The run stopped to wait for the owner's decision on this approval. */
+export class ApprovalWait extends Error {
+  constructor(public readonly approvalId: string) {
+    super("Waiting for the owner's approval");
+  }
+}
+
+/** The owner cancelled the task while it ran. */
+export class CancelledError extends Error {
+  constructor() {
+    super("Cancelled by the owner");
+  }
+}
+
+/** Task runs in flight, so a cancellation from the web app can abort them. */
+export const runningTasks = new Map<string, AbortController>();

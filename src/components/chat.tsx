@@ -53,7 +53,7 @@ export type ChatMessage = {
   meta?: string;
   /** Tool steps the assistant took for this message (shown collapsed). */
   steps?: string[];
-  /** Extra UI under an assistant message (badges, actions). */
+  /** Extra UI under an assistant message (badges, actions); under the trace while pending. */
   footer?: ReactNode;
   /** Shown in place of content while the assistant works on this message. */
   pending?: boolean;
@@ -264,7 +264,10 @@ function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
           )}
         </MessageHeader>
         {m.pending ? (
-          <LiveTrace steps={m.steps ?? []} label={m.meta ?? "Thinking…"} />
+          <>
+            <LiveTrace steps={m.steps ?? []} label={m.meta ?? "Thinking…"} />
+            {m.footer && <MessageFooter className="flex flex-wrap items-center gap-2">{m.footer}</MessageFooter>}
+          </>
         ) : (
           <>
             {m.steps && m.steps.length > 0 && <StepsTrace steps={m.steps} />}

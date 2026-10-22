@@ -7,7 +7,7 @@ import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { isServablePath } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
-import { createTask } from "@/lib/tasks";
+import { cancelTask, createTask, retryTask } from "@/lib/tasks";
 
 function findTeammate(businessId: string, teammateId: string) {
   const t = db
@@ -40,6 +40,18 @@ export async function runScheduledNow(formData: FormData) {
   const t = findTeammate(businessId, teammateId);
   if (!t.schedulePrompt) throw new Error("No scheduled work defined");
   createTask({ businessId, teammateId, instructions: t.schedulePrompt, createdBy: "schedule" });
+  refresh();
+}
+
+/** Stop a task that's queued, running or waiting. FormData: businessId, taskId. */
+export async function cancelTaskAction(formData: FormData) {
+  cancelTask(String(formData.get("businessId") ?? ""), String(formData.get("taskId") ?? ""));
+  refresh();
+}
+
+/** Run a failed or cancelled task again. FormData: businessId, taskId. */
+export async function retryTaskAction(formData: FormData) {
+  retryTask(String(formData.get("businessId") ?? ""), String(formData.get("taskId") ?? ""));
   refresh();
 }
 

@@ -54,7 +54,7 @@ async function Content({ params }: Params) {
 
   return (
     <div className="space-y-8">
-      <LiveRefresh businessId={id} types={["approval_requested", "approval_granted", "approval_rejected", "task_done", "task_failed"]} />
+      <LiveRefresh businessId={id} types={["approval_requested", "approval_granted", "approval_rejected", "task_done", "task_failed", "task_cancelled"]} />
       <PageHeader
         title="Approvals"
         subtitle={`Teammates with “ask” autonomy wait here before anything goes out on WhatsApp, in the business browser or through an API. Posts and messages for other channels never go out by themselves: find them on the Work page.${owner ? ` Each request also goes to ${owner.name}'s WhatsApp: answer “ya <code>” or “tidak <code>”.` : " Mark yourself as the owner on the Team page to approve on WhatsApp too."}`}
@@ -117,7 +117,7 @@ async function Content({ params }: Params) {
                     {a.note ? ` · “${a.note}”` : ""}
                   </div>
                 </div>
-                <Badge tone={a.status === "approved" ? "green" : "red"}>{a.status}</Badge>
+                <Badge tone={a.status === "approved" ? "green" : a.status === "rejected" ? "red" : "neutral"}>{a.status}</Badge>
               </summary>
               <div className="border-t border-border p-3">
                 <ApprovalInput a={a} businessId={id} deliverables={data.deliverables} />

@@ -75,6 +75,8 @@ async function pollWatch(business: Business, w: WaWatch) {
     createdBy: REPLY,
     // Part of the owner's request that sent the message, so the manager reports on it.
     parentTaskId: sentBy?.parentTaskId ?? null,
+    // The teammate that wrote picks the conversation up where it left it.
+    sessionId: target.id === sentBy?.teammateId ? sentBy.sessionId : null,
     attachments: files,
     instructions: `${w.name} replied on WhatsApp to the message ${target.id === w.teammateId ? "you" : (mate?.name ?? "the team")} sent${w.purpose ? ` (to get: ${w.purpose})` : ""}.
 
@@ -105,6 +107,7 @@ function remind(business: Business, w: WaWatch) {
     title: `No reply yet from ${w.name}`.slice(0, 80),
     createdBy: REPLY,
     parentTaskId: sentBy?.parentTaskId ?? null,
+    sessionId: target.id === sentBy?.teammateId ? sentBy.sessionId : null,
     instructions: `${w.name} hasn't replied on WhatsApp within ${hours} h to the message you sent${w.purpose ? ` (to get: ${w.purpose})` : ""}:
 
 > ${w.message.slice(0, 1500).replace(/\n/g, "\n> ")}

@@ -119,6 +119,8 @@ export async function grantCapability(approval: Approval, opts: { secretValue?: 
     // Stays part of the owner's request, so the manager reports the result.
     parentTaskId: original?.parentTaskId ?? null,
     attachments: original?.attachments ?? [],
+    // Carries on in the conversation that asked (if its session still exists).
+    sessionId: original?.sessionId ?? null,
     instructions: `The owner approved your request: you now have ${granted}.${opts.note ? ` Their note: "${opts.note}"` : ""}\n\nCarry on with the work that needed it${original ? `:\n\n> ${original.instructions.slice(0, 3000).replace(/\n/g, "\n> ")}` : "."}`,
   });
   return granted;
