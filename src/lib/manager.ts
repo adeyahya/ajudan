@@ -168,7 +168,7 @@ function followUp(parent: Task) {
   });
 }
 
-const REVIEW_STEP = `1. Review before you report (once per request). Check each piece of saved work above against what the owner asked, the business goals and KPIs in BUSINESS.md, the owner's preferences in TEAM.md and the maker's checklist. Use read_deliverable(id) to read a piece in full and look at its images. If a piece clearly misses (wrong facts or prices, ignores the request, off-brand, unfinished or placeholder text), send it back with request_revision(deliverable_id, exactly what to fix). That's the only revision round, so be specific, and only for real problems, not taste. If you sent something back, tell the owner in one or two lines what's done and what's being polished; you'll report again when the fixes are in. Otherwise:
+const REVIEW_STEP = `1. Review before you report (once per request). Check each piece of saved work above against what the owner asked, the business goals and KPIs and the owner's preferences in the Context pages, and the maker's checklist. Use read_deliverable(id) to read a piece in full and look at its images. If a piece clearly misses (wrong facts or prices, ignores the request, off-brand, unfinished or placeholder text), send it back with request_revision(deliverable_id, exactly what to fix). That's the only revision round, so be specific, and only for real problems, not taste. If you sent something back, tell the owner in one or two lines what's done and what's being polished; you'll report again when the fixes are in. Otherwise:
 2. `;
 
 const FINAL_REPORT = `The team already had its revision round for this request: don't send anything back again. Note anything still imperfect for the owner.

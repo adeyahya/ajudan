@@ -8,13 +8,15 @@ import { getManager, REVISION } from "@/lib/manager";
 import { resolveWorkspace } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
-import { ensureTeamNotes, initTeammateWorkspace } from "@/lib/workspace";
+import { appendLearned } from "@/lib/context";
+import { initTeammateWorkspace } from "@/lib/workspace";
 
 /**
  * The owner's feedback loop. "Looks good" and "Needs changes" on the Work page (and a
  * note on a rejected approval) are written where the team will read them again:
  *  - the teammate's own memory.md (read before each of its runs),
- *  - teammates/TEAM.md, shared by the whole team (copied next to BUSINESS.md each run),
+ *  - the Context page of what the team learned from the owner, shared by the whole team
+ *    (in every teammate's prompt; teammates/TEAM.md is its copy),
  * and "Needs changes" gives the maker a revision task on the same deliverable.
  */
 
@@ -43,10 +45,9 @@ export function rejectionEntry(p: { summary: string; note: string; date?: Date }
   return `- ${day(p.date)} — Rejected: ${p.summary.replace(/\s+/g, " ").trim()}: "${p.note.replace(/\s+/g, " ").trim()}"`;
 }
 
-/** Append a line to the shared TEAM.md (created if missing). */
-export function appendTeamNote(businessName: string, line: string) {
-  const file = ensureTeamNotes(businessName);
-  fs.appendFileSync(file, `${line}\n`);
+/** Append a line to the team's shared feedback: the "learned" Context page (TEAM.md is its copy). */
+export function appendTeamNote(businessId: string, line: string) {
+  appendLearned(businessId, line);
 }
 
 /** Append a line to a teammate's memory.md (its folder is created if it never ran). */
@@ -86,7 +87,7 @@ export function recordDeliverableFeedback(p: { businessId: string; deliverableId
   const maker = d.teammateId ? db.select().from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get() : undefined;
   if (maker) appendTeammateMemory(maker, feedbackEntry({ verdict: p.verdict, title: d.title, kind: d.kind, note }));
   // Only what was said is a lesson for everyone; a bare "Looks good" is the maker's.
-  if (note && business) appendTeamNote(business.name, teamNoteEntry({ verdict: p.verdict, title: d.title, kind: d.kind, by: maker?.name ?? null, note }));
+  if (note && business) appendTeamNote(business.id, teamNoteEntry({ verdict: p.verdict, title: d.title, kind: d.kind, by: maker?.name ?? null, note }));
   logEvent({
     businessId: p.businessId,
     teammateId: d.teammateId,
@@ -173,5 +174,5 @@ export function recordRejectionNote(approval: Pick<Approval, "businessId" | "tea
   const mate = db.select().from(schema.teammates).where(eq(schema.teammates.id, approval.teammateId)).get();
   const line = rejectionEntry({ summary: approval.summary, note });
   if (mate) appendTeammateMemory(mate, line.replace(/^- /, "- [Owner feedback] "));
-  if (business) appendTeamNote(business.name, line);
+  if (business) appendTeamNote(business.id, line);
 }

@@ -19,9 +19,9 @@ export type RoleTemplate = {
 
 /** Checks every role's work must pass, whatever the role. */
 const COMMON_CHECKLIST = [
-  "In the business's working language and brand voice (BUSINESS.md)",
-  "Facts, names, prices and claims come from BUSINESS.md or a cited source, never invented",
-  "Follows the owner's preferences in TEAM.md and your memory.md",
+  "In the business's working language and brand voice (the About page)",
+  "Facts, names, prices and claims come from the Context pages (cite the page) or a cited source, never invented",
+  "Follows the owner's preferences in the Context pages and your memory.md",
 ];
 
 /**

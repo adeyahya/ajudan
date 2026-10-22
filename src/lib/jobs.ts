@@ -19,6 +19,8 @@ export type JobPayloads = {
   consolidate_memory: { teammateId: string };
   /** A Studio edit rendered with ffmpeg (worker/edits.ts). */
   render_edit: { editId: string };
+  /** The inspector's "Test-ask": a dry run on a teammate's context (worker/handlers/context.ts). */
+  context_test_ask: { askId: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */

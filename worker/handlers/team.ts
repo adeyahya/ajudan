@@ -9,7 +9,7 @@ import { PausedError, runAbortController } from "../session";
 import { UsageLimitError } from "@/lib/rest";
 import { getRole, MANAGER_ROLE, ROLE_TEMPLATES } from "@/lib/roles";
 import { defaultPersona, MAX_TEAM, mergeProposal, normalizeTeam, renderCurrentTeam, type CurrentTeammate } from "@/lib/team";
-import { renderProfileMarkdown } from "@/lib/workspace";
+import { renderProfileMarkdown } from "@/lib/profile-markdown";
 import type { BusinessProfile } from "@/lib/types";
 import { TeamProposalSchema, type TeammateProposal, type TeamProposal } from "@/lib/types";
 
