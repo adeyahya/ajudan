@@ -3,21 +3,42 @@
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
-import type { DeliverableStatus } from "@/db/schema";
 import { logEvent } from "@/lib/events";
+import { recordDeliverableFeedback } from "@/lib/feedback";
 import { syncDeliverableFile } from "@/lib/workfiles";
 
-const STATUSES: DeliverableStatus[] = ["draft", "ready_to_post", "approved", "published", "rejected"];
+export type FeedbackState = { error?: string; ok?: string };
 
-/** FormData: businessId, deliverableId, status. */
-export async function setDeliverableStatus(formData: FormData) {
+/**
+ * "Looks good" or "Needs changes" from the Work page (the submit button's verdict).
+ * FormData: businessId, deliverableId, verdict ("good" | "changes"), note.
+ */
+export async function giveFeedback(_prev: FeedbackState, formData: FormData): Promise<FeedbackState> {
+  const verdict = String(formData.get("verdict") ?? "");
+  if (verdict !== "good" && verdict !== "changes") return { error: "Choose Looks good or Needs changes." };
+  try {
+    const { task } = recordDeliverableFeedback({
+      businessId: String(formData.get("businessId") ?? ""),
+      deliverableId: String(formData.get("deliverableId") ?? ""),
+      verdict,
+      note: String(formData.get("note") ?? ""),
+    });
+    refresh();
+    return {
+      ok: verdict === "good" ? "Thanks, the team will remember that." : task ? "Sent back for changes." : "Noted. Nobody on the team can revise it right now.",
+    };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+}
+
+/** The owner posted it themselves. FormData: businessId, deliverableId. */
+export async function markPosted(formData: FormData) {
   const businessId = String(formData.get("businessId") ?? "");
   const deliverableId = String(formData.get("deliverableId") ?? "");
-  const status = String(formData.get("status") ?? "") as DeliverableStatus;
-  if (!STATUSES.includes(status)) throw new Error("Invalid status");
   const d = db
     .update(schema.deliverables)
-    .set({ status })
+    .set({ status: "published" })
     .where(and(eq(schema.deliverables.id, deliverableId), eq(schema.deliverables.businessId, businessId)))
     .returning()
     .get();
@@ -28,8 +49,8 @@ export async function setDeliverableStatus(formData: FormData) {
     teammateId: d.teammateId,
     taskId: d.taskId,
     type: "deliverable_status",
-    message: `Owner marked "${d.title}" as ${status}`,
-    data: { deliverableId: d.id, status },
+    message: `Owner posted "${d.title}"`,
+    data: { deliverableId: d.id, status: "published" },
   });
   refresh();
 }

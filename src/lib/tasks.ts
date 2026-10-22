@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logEvent } from "@/lib/events";
+import { HUMAN } from "@/lib/humans";
 import { enqueueJob } from "@/lib/jobs";
 import { onTaskFinished } from "@/lib/manager";
 
@@ -39,9 +40,38 @@ export function delegationDepth(taskId: string) {
 }
 
 /**
+ * The owner's own words at the top of a delegation chain: the root task, when the
+ * owner wrote it (in the app or on WhatsApp). Delegates get it next to their brief so
+ * they don't work from a paraphrase only.
+ */
+export function ownerRequest(taskId: string) {
+  const seen = new Set<string>();
+  let row = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
+  while (row?.parentTaskId && !seen.has(row.id)) {
+    seen.add(row.id);
+    const up = db.select().from(schema.tasks).where(eq(schema.tasks.id, row.parentTaskId)).get();
+    if (!up) break;
+    row = up;
+  }
+  if (!row) return undefined;
+  if (row.createdBy === "user") return row;
+  const owner = db.select({ o: schema.businesses.ownerHumanId }).from(schema.businesses).where(eq(schema.businesses.id, row.businessId)).get()?.o;
+  return owner && row.createdBy === `${HUMAN}${owner}` ? row : undefined;
+}
+
+/** A delegated task's instructions: the owner's request (truncated), then the delegator's brief. */
+export function delegatedInstructions(brief: string, from: string, request?: { instructions: string }) {
+  if (!request) return brief;
+  const said = request.instructions.trim();
+  const quoted = (said.length > 1200 ? `${said.slice(0, 1200)}…` : said).replace(/\n/g, "\n> ");
+  return `## Your brief from ${from}\n${brief.trim()}\n\n## The owner's original request (for context)\n> ${quoted}`;
+}
+
+/**
  * Create a task for a teammate and queue it for the worker. Used by the UI,
  * the scheduler and teammate delegation (assign_task).
- * `createdBy` is "user", "schedule", "teammate:<id>" or "system:report" (manager reports).
+ * `createdBy` is "user", "schedule", "teammate:<id>", "system:report" (manager reports),
+ * "system:results" (delegated work back to a teammate) or "system:revision" (rework a deliverable).
  */
 export function createTask(p: {
   businessId: string;
@@ -55,6 +85,8 @@ export function createTask(p: {
   attachments?: string[];
   /** A follow-up: resume this Claude session (the task that asked) instead of starting cold. */
   sessionId?: string | null;
+  /** A revision: the deliverable it reworks (update_deliverable). */
+  deliverableId?: string | null;
 }) {
   const instructions = p.instructions.trim();
   if (!instructions) throw new Error("Instructions are required");
@@ -70,6 +102,7 @@ export function createTask(p: {
       parentTaskId: p.parentTaskId ?? null,
       attachments: p.attachments ?? [],
       sessionId: p.sessionId ?? null,
+      deliverableId: p.deliverableId ?? null,
     })
     .returning()
     .get();

@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import type { Approval } from "@/db/schema";
 import { CAPABILITY, grantCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { logEvent } from "@/lib/events";
+import { recordRejectionNote } from "@/lib/feedback";
 import { enqueueJob } from "@/lib/jobs";
 import { reactToDecision } from "@/lib/manager";
 
@@ -87,6 +88,14 @@ export async function decide(p: {
     message: `Owner ${p.decision}${p.via === "whatsapp" ? " on WhatsApp" : ""}: ${decided.summary}`,
     data: { approvalId: decided.id, note },
   });
+  // A "no, because…" is a lesson for next time, for that teammate and the whole team.
+  if (p.decision === "rejected" && note) {
+    try {
+      recordRejectionNote(decided);
+    } catch (err) {
+      console.error("[approvals] couldn't record the rejection note", err);
+    }
+  }
   if (decided.toolName !== CAPABILITY) continueTask(decided);
   reactToDecision(decided, p.via);
   return { ok: true, approval: decided };

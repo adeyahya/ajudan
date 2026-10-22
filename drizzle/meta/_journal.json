@@ -85,6 +85,13 @@
       "when": 1792671071428,
       "tag": "0011_daily_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792671569432,
+      "tag": "0012_feedback_versions",
+      "breakpoints": true
     }
   ]
 }

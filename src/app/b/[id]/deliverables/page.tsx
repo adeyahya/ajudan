@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { and, desc, eq, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, type SQL } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { DeliverableStatus } from "@/db/schema";
@@ -49,7 +49,22 @@ async function loadDeliverables(businessId: string, f: Filters) {
     .map((k) => k.kind)
     .sort();
   const mates = db.select().from(schema.teammates).where(eq(schema.teammates.businessId, businessId)).all();
-  return { rows, kinds, mates };
+  // Pieces a teammate is revising right now (the owner's "Needs changes" or the manager's review).
+  const revising = new Map(
+    db
+      .select({ deliverableId: schema.tasks.deliverableId, teammateId: schema.tasks.teammateId })
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.businessId, businessId),
+          isNotNull(schema.tasks.deliverableId),
+          inArray(schema.tasks.status, ["queued", "running", "waiting_approval"]),
+        ),
+      )
+      .all()
+      .map((t) => [t.deliverableId!, mates.find((m) => m.id === t.teammateId)?.name ?? "A teammate"]),
+  );
+  return { rows, kinds, mates, revising };
 }
 
 async function Content({ params, searchParams }: Props) {
@@ -72,11 +87,11 @@ async function Content({ params, searchParams }: Props) {
     <div className="space-y-5">
       <LiveRefresh
         businessId={id}
-        types={["deliverable_saved", "deliverable_ready", "message_drafted", "deliverable_status", "task_done"]}
+        types={["deliverable_saved", "deliverable_ready", "message_drafted", "deliverable_status", "deliverable_revised", "task_done"]}
       />
       <PageHeader
         title="Work"
-        subtitle="Everything your teammates produced. Ajudan doesn't post it anywhere: copy what's ready, post it yourself, then mark it posted."
+        subtitle="Everything your teammates produced. Ajudan doesn't post it anywhere: copy what's ready, post it yourself, then mark it posted. Tell the team what looks good and what needs changes: they remember it."
       />
 
       <div className="space-y-2">
@@ -120,7 +135,14 @@ async function Content({ params, searchParams }: Props) {
         {data.rows.length === 0 && <p className="text-sm text-muted-foreground">No work matches these filters yet.</p>}
         {data.rows.map((d) => {
           const m = data.mates.find((x) => x.id === d.teammateId);
-          return <DeliverableCard key={d.id} d={d} teammate={m ? { id: m.id, name: m.name, color: m.color } : null} />;
+          return (
+            <DeliverableCard
+              key={d.id}
+              d={d}
+              teammate={m ? { id: m.id, name: m.name, color: m.color } : null}
+              revisingBy={data.revising.get(d.id) ?? null}
+            />
+          );
         })}
       </div>
     </div>

@@ -1,7 +1,8 @@
 import type { Deliverable, DeliverableStatus } from "@/db/schema";
 import { Avatar, Badge, Button, Prose } from "@/components/kit";
-import { setDeliverableStatus } from "./actions";
+import { markPosted } from "./actions";
 import { CopyButton } from "./copy-button";
+import { FeedbackForm } from "./feedback-form";
 import { ImageStrip } from "@/components/image-strip";
 
 export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "blue" | "amber" | "red"> = {
@@ -18,28 +19,26 @@ export const DELIVERABLE_LABEL: Record<DeliverableStatus, string> = {
   ready_to_post: "Ready to post",
   approved: "Approved",
   published: "Posted",
-  rejected: "Rejected",
+  rejected: "Needs changes",
 };
 
 export function kindLabel(kind: string) {
   return kind.replace(/_/g, " ");
 }
 
-/** One deliverable with expandable content, Copy and status actions. */
+/** One deliverable with expandable content, Copy, Mark posted and the owner's feedback. */
 export function DeliverableCard({
   d,
   teammate,
+  revisingBy,
   showActions = true,
 }: {
   d: Deliverable;
   teammate?: { id: string; name: string; color: string } | null;
+  /** Who is revising it right now (an open revision task), if anyone. */
+  revisingBy?: string | null;
   showActions?: boolean;
 }) {
-  const actions: { status: DeliverableStatus; label: string; variant: "secondary" | "ghost" }[] = [
-    { status: "approved", label: "Mark approved", variant: "secondary" },
-    { status: "published", label: "Mark posted", variant: "secondary" },
-    { status: "rejected", label: "Reject", variant: "ghost" },
-  ];
   const isMessage = d.kind === "outbound_message";
   return (
     <details className="group rounded-xl border border-border bg-card">
@@ -51,6 +50,7 @@ export function DeliverableCard({
             {kindLabel(d.kind)}
             {d.channel ? ` · ${d.channel}` : ""}
             {teammate ? ` · ${teammate.name}` : ""} · {d.createdAt.toLocaleString()}
+            {d.versions.length > 0 ? ` · version ${d.versions.length + 1}` : ""}
           </div>
         </div>
         {d.attachments.length > 0 && (
@@ -67,24 +67,22 @@ export function DeliverableCard({
             {d.attachments.length ? ", download the files" : ""} and {isMessage ? "send" : "post"} it yourself, then mark it posted.
           </p>
         )}
+        {revisingBy && <p className="text-xs text-muted-foreground">{revisingBy} is revising this.</p>}
         <ImageStrip businessId={d.businessId} images={d.attachments} size={120} />
         <Prose className="max-h-[28rem] overflow-y-auto">{d.content}</Prose>
         <div className="flex flex-wrap items-center gap-2">
           <CopyButton text={d.content} />
-          {showActions &&
-            actions
-              .filter((a) => a.status !== d.status)
-              .map((a) => (
-                <form key={a.status} action={setDeliverableStatus}>
-                  <input type="hidden" name="businessId" value={d.businessId} />
-                  <input type="hidden" name="deliverableId" value={d.id} />
-                  <input type="hidden" name="status" value={a.status} />
-                  <Button variant={a.variant} className="h-7 px-2.5 text-xs">
-                    {a.label}
-                  </Button>
-                </form>
-              ))}
+          {showActions && (d.status === "ready_to_post" || d.status === "approved") && (
+            <form action={markPosted}>
+              <input type="hidden" name="businessId" value={d.businessId} />
+              <input type="hidden" name="deliverableId" value={d.id} />
+              <Button variant="secondary" className="h-7 px-2.5 text-xs">
+                {isMessage ? "Mark sent" : "Mark posted"}
+              </Button>
+            </form>
+          )}
         </div>
+        {showActions && <FeedbackForm businessId={d.businessId} deliverableId={d.id} canRevise={d.status !== "published"} />}
       </div>
     </details>
   );

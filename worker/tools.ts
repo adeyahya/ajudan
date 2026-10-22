@@ -16,13 +16,15 @@ import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from 
 import { renderHtmlToPng } from "@/lib/images";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
-import { createTask, delegationDepth, MAX_DELEGATION_DEPTH } from "@/lib/tasks";
+import { createTask, delegatedInstructions, delegationDepth, deriveTaskTitle, MAX_DELEGATION_DEPTH, ownerRequest } from "@/lib/tasks";
+import { describeDeliverable, reviseDeliverable } from "@/lib/deliverables";
+import { queueRevision } from "@/lib/feedback";
 import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
-import { onTaskFinished } from "@/lib/manager";
+import { onTaskFinished, REVISION } from "@/lib/manager";
 import { sendToHuman } from "./humans";
 import { notifyOwner } from "./owner-approvals";
 import { speechAvailable, transcribe } from "@/lib/speech";
@@ -38,6 +40,9 @@ export const SAFE_BIZ_TOOLS = [
   "mark_ready_to_post",
   "draft_outbound_message",
   "list_deliverables",
+  "read_deliverable",
+  "update_deliverable",
+  "request_revision",
   "assign_task",
   "set_status",
   "render_image",
@@ -69,7 +74,7 @@ export const OUTWARD_BIZ_TOOLS = ["confirm_browser_action"].map((t) => `mcp__${B
 
 export type BizContext = {
   businessId: string;
-  teammate: Pick<Teammate, "id" | "name" | "title">;
+  teammate: Pick<Teammate, "id" | "name" | "title" | "roleKey">;
   taskId: string;
   /** Other active teammates this teammate may delegate to. Empty = no assign_task. */
   roster: Pick<Teammate, "id" | "name" | "title">[];
@@ -83,6 +88,11 @@ export type BizContext = {
   signal?: AbortSignal;
   /** Human teammates reachable on WhatsApp (adds ask_human & co). */
   humans?: Teammate[];
+  /**
+   * The manager's first report on a request (canReview in src/lib/manager.ts): the
+   * owner's request it may send work back for, once (adds request_revision).
+   */
+  reviewRequestId?: string | null;
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -383,6 +393,57 @@ export function createBizServer(ctx: BizContext) {
     ),
 
     tool(
+      "read_deliverable",
+      "Read a saved deliverable in full (yours or a teammate's): title, kind, status, version, content and its attached images and videos, which become readable in your folder at the same paths. Use it to review work or before revising it.",
+      { deliverable_id: z.string() },
+      async (a) => {
+        const d = db
+          .select()
+          .from(schema.deliverables)
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+          .get();
+        if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business. list_deliverables shows the ids.`);
+        const maker = d.teammateId ? db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get() : undefined;
+        linkIntoWorkspace(d.attachments, ctx.cwd);
+        return ok(`${describeDeliverable(d, maker?.name)}${d.attachments.length ? "\n\n(Read the images at the paths above; use extract_frames for videos.)" : ""}`);
+      },
+    ),
+
+    tool(
+      "update_deliverable",
+      "Revise a saved deliverable in place: new content, title or attachments. The previous version is kept, the id stays the same (feedback and the Work page stay attached), and it goes back to draft for the owner to look at again. Use this for revisions instead of saving a new deliverable. Pass only what changes.",
+      {
+        deliverable_id: z.string(),
+        content: z.string().optional().describe("The full new content (not a diff)"),
+        title: z.string().optional(),
+        images: z
+          .array(z.string())
+          .optional()
+          .describe("The full new list of images and videos, in order (render_image / render_video paths or media/… files); omit to keep the current ones"),
+      },
+      async (a) => {
+        const attachments = a.images?.map((p: string) => p.replace(/^\.?\//, ""));
+        const missing = (attachments ?? []).filter((p: string) => !isServablePath(p) || !fs.existsSync(path.join(dataDir(), p)));
+        if (missing.length) {
+          return fail(`Unknown file(s): ${missing.join(", ")}. Use the paths render_image or render_video returned, or media/… files.`);
+        }
+        const r = reviseDeliverable({
+          businessId,
+          deliverableId: a.deliverable_id,
+          by: teammate,
+          taskId,
+          title: a.title,
+          content: a.content,
+          attachments,
+        });
+        if (!r.ok) return fail(r.error);
+        return ok(
+          `Updated "${r.deliverable.title}" (now version ${r.deliverable.versions.length + 1}; the previous one is kept). It's a draft again: mark_ready_to_post when it's ready for the owner.`,
+        );
+      },
+    ),
+
+    tool(
       "set_status",
       "Update your short live status line (shown as your speech bubble in the office), e.g. 'Drafting 3 Instagram captions'.",
       { text: z.string().describe("Under 80 characters") },
@@ -629,8 +690,6 @@ export function createBizServer(ctx: BizContext) {
           const files = (a.files ?? []).map((f: string) => f.replace(/^\.?\//, ""));
           const unknown = files.filter((f: string) => !isServablePath(f) || !fs.existsSync(path.join(dataDir(), f)));
           if (unknown.length) return fail(`Unknown file(s): ${unknown.join(", ")}. Use media/… or work/… paths.`);
-          // The manager's report-back waits for everything delegated from this task.
-          const parentTaskId = ctx.isManager ? taskId : null;
           // Chains of hand-offs multiply cost without adding work: stop them early.
           if (delegationDepth(taskId) + 1 > MAX_DELEGATION_DEPTH) {
             return fail("This request has already been handed on too many times. Do the work yourself or tell the owner what's missing.");
@@ -638,10 +697,13 @@ export function createBizServer(ctx: BizContext) {
           const task = createTask({
             businessId,
             teammateId: target.id,
-            instructions: a.instructions,
+            title: deriveTaskTitle(a.instructions),
+            // The owner's own words travel with the brief.
+            instructions: delegatedInstructions(a.instructions, teammate.name, ownerRequest(taskId)),
             attachments: files,
             createdBy: `teammate:${teammate.id}`,
-            parentTaskId,
+            // Whoever delegates hears back when it's done (onTaskFinished, src/lib/manager.ts).
+            parentTaskId: taskId,
           });
           ev("delegated", `${teammate.name} asked ${target.name}: ${task.title}`, {
             from: teammate.id,
@@ -649,7 +711,7 @@ export function createBizServer(ctx: BizContext) {
             delegatedTaskId: task.id,
           });
           return ok(
-            `Assigned to ${target.name} (task ${task.id})${files.length ? ` with ${files.length} file(s)` : ""}. They'll work on it after you; check later with list_deliverables.`,
+            `Assigned to ${target.name} (task ${task.id})${files.length ? ` with ${files.length} file(s)` : ""}. They'll work on it after you${ctx.isManager ? "" : ", and their results come back to you as a new task when they're done"}.`,
           );
         },
       ),
@@ -813,6 +875,44 @@ export function createBizServer(ctx: BizContext) {
           .all();
         return ok(rows.map((r) => `- ${r.summary}`).join("\n") || "Nothing is waiting for approval.");
       }),
+    );
+  }
+
+  if (ctx.isManager && ctx.reviewRequestId) {
+    const requestId = ctx.reviewRequestId;
+    tools.push(
+      tool(
+        "request_revision",
+        "Send a teammate's saved work back for one round of fixes before you report to the owner. Only for real problems (wrong facts, ignores the request, off-brand, unfinished), with exactly what to fix. They revise the same deliverable, and you report again when they're done. One revision round per request.",
+        {
+          deliverable_id: z.string(),
+          fix: z.string().describe("Exactly what to change and why, in a few lines"),
+        },
+        async (a) => {
+          const d = db
+            .select()
+            .from(schema.deliverables)
+            .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+            .get();
+          if (!d) return fail(`No deliverable with id ${a.deliverable_id}.`);
+          if (d.status === "published") return fail("The owner already posted it; mention the problem in your report instead.");
+          if (!d.teammateId || d.teammateId === teammate.id) return fail("That's your own work: fix it with update_deliverable.");
+          const sent = db
+            .select({ id: schema.tasks.id })
+            .from(schema.tasks)
+            .where(and(eq(schema.tasks.parentTaskId, requestId), eq(schema.tasks.createdBy, REVISION), eq(schema.tasks.deliverableId, d.id)))
+            .get();
+          if (sent) return fail(`"${d.title}" already went back once for this request. Report it as it is and say what's still off.`);
+          const maker = db.select().from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get();
+          const task = queueRevision({ d, maker, note: a.fix, from: "manager", parentTaskId: requestId });
+          if (!task) return fail("Nobody can revise it (its maker left the team). Report it as it is.");
+          ev("revision_requested", `${teammate.name} sent "${d.title}" back to ${maker?.name ?? "the team"}: ${a.fix.replace(/\s+/g, " ").slice(0, 120)}`, {
+            deliverableId: d.id,
+            revisionTaskId: task.id,
+          });
+          return ok(`Sent back to ${maker?.name ?? "the team"} (task ${task.id}). You'll get another report task when it's done; tell the owner briefly that it's being polished.`);
+        },
+      ),
     );
   }
 

@@ -141,6 +141,8 @@ export const tasks = sqliteTable("tasks", {
    * from the conversation that asked. A missing session falls back to task history.
    */
   sessionId: text("session_id"),
+  /** The deliverable this task revises (the owner's "Needs changes", src/lib/feedback.ts). */
+  deliverableId: text("deliverable_id"),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
@@ -193,8 +195,23 @@ export const deliverables = sqliteTable("deliverables", {
   status: text("status").$type<DeliverableStatus>().notNull().default("draft"),
   /** Files that belong to this work (e.g. carousel slides), relative to the business folder: work/images/… */
   attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /**
+   * Earlier versions, oldest first: what the row held before each update_deliverable
+   * (a teammate's revision after the owner's or the manager's feedback). See src/lib/deliverables.ts.
+   */
+  versions: text("versions", { mode: "json" }).$type<DeliverableVersion[]>().notNull().default([]),
   createdAt: createdAt(),
 });
+
+export type DeliverableVersion = {
+  title: string;
+  content: string;
+  attachments: string[];
+  /** ISO timestamp of when this version was replaced. */
+  savedAt: string;
+  /** Who made the version that replaced it. */
+  byTeammateId: string | null;
+};
 
 export const activityEvents = sqliteTable("activity_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
