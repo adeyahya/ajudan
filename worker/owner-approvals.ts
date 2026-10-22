@@ -13,8 +13,8 @@ import { isServablePath, mediaKind } from "@/lib/media";
 import { isLinked } from "@/lib/whatsapp";
 import { sendToHuman } from "./humans";
 
-const YES = /^\s*(ya|iya|y|yes|ok|oke|okay|setuju|approve|approved|acc|gas|lanjut|boleh)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
-const NO = /^\s*(tidak|nggak|gak|enggak|ga|no|n|tolak|reject|rejected|jangan|batal)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
+export const YES = /^\s*(ya|iya|y|yes|ok|oke|okay|setuju|approve|approved|acc|gas|lanjut|boleh)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
+export const NO = /^\s*(tidak|nggak|gak|enggak|ga|no|n|tolak|reject|rejected|jangan|batal)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
 const PROMPT = "🔔";
 
 const t = (business: Pick<Business, "language">, id: string, en: string) => (business.language === "id" ? id : en);
