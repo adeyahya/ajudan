@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import { overBudget, spentThisWeek, spentToday } from "@/lib/budget";
 import { currentDataDir } from "@/lib/paths";
+import { computeProgress } from "@/lib/progress";
 
 /**
  * Read helpers for Server Components. better-sqlite3 is synchronous, so each helper
@@ -42,4 +43,33 @@ export async function pendingApprovalCount(businessId: string) {
     .from(schema.approvals)
     .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
     .all().length;
+}
+
+/** XP, levels, trust and the clean-queue streak for the chat home (src/lib/progress.ts). */
+export async function getProgress(businessId: string) {
+  await connection();
+  const tasks = db
+    .select({
+      teammateId: schema.tasks.teammateId,
+      status: schema.tasks.status,
+      createdBy: schema.tasks.createdBy,
+      createdAt: schema.tasks.createdAt,
+      finishedAt: schema.tasks.finishedAt,
+    })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.businessId, businessId), eq(schema.tasks.status, "done")))
+    .all();
+  const deliverables = db
+    .select({ teammateId: schema.deliverables.teammateId, status: schema.deliverables.status, versions: schema.deliverables.versions, createdAt: schema.deliverables.createdAt })
+    .from(schema.deliverables)
+    .where(eq(schema.deliverables.businessId, businessId))
+    .all()
+    .map(({ versions, ...d }) => ({ ...d, revisions: versions.length }));
+  const approvals = db
+    .select({ teammateId: schema.approvals.teammateId, status: schema.approvals.status, createdAt: schema.approvals.createdAt, decidedAt: schema.approvals.decidedAt })
+    .from(schema.approvals)
+    .where(eq(schema.approvals.businessId, businessId))
+    .all();
+  const teammateIds = db.select({ id: schema.teammates.id }).from(schema.teammates).where(eq(schema.teammates.businessId, businessId)).all().map((t) => t.id);
+  return computeProgress({ tasks, deliverables, approvals, teammateIds }, new Date());
 }
