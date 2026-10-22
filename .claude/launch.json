@@ -4,7 +4,17 @@
     {
       "name": "ajudan",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeArgs": [
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "ajudan-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "web"
+      ],
       "port": 3000
     }
   ]

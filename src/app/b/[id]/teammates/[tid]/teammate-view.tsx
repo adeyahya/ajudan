@@ -355,7 +355,14 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
 
         <Card className="space-y-2 p-4">
           <h2 className="text-sm font-semibold">Memory</h2>
-          <p className="text-xs text-muted-foreground">{t.name}&apos;s own notes (memory.md).</p>
+          <p className="text-xs text-muted-foreground">
+            {t.name}&apos;s own notes (memory.md).{" "}
+            {t.workspaceDir && (
+              <Link href={`/b/${id}/files?path=${encodeURIComponent(`${t.workspaceDir.replace(/^.*?(teammates\/)/, "$1")}/memory.md`)}`} className="underline hover:text-foreground">
+                Open in Files
+              </Link>
+            )}
+          </p>
           {memory ? (
             <Prose className="max-h-80 overflow-y-auto text-xs">{memory}</Prose>
           ) : (
