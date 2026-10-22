@@ -30,8 +30,9 @@ export function onIncomingMessage(fn: () => void) {
 
 function signedBy(secret: string, body: Buffer, header: string | string[] | undefined) {
   const got = String(header ?? "").replace(/^sha256=/, "");
+  if (!/^[0-9a-f]{64}$/i.test(got)) return false;
   const want = crypto.createHmac("sha256", secret).update(body).digest("hex");
-  return got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  return crypto.timingSafeEqual(Buffer.from(got.toLowerCase()), Buffer.from(want));
 }
 
 let starting: Promise<NonNullable<typeof hook>> | undefined;

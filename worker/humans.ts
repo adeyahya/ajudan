@@ -134,8 +134,12 @@ function wake(ms: number) {
  * A message just came in (the sync's webhook): look now, and again when each quiet
  * window ends, so a live chat is handed over seconds after they stop typing.
  */
+let lastNudge = 0;
+
 function onMessage() {
-  if (!timer) return;
+  // A burst (history catch-up, an album) needs one set of checks, not one per message.
+  if (!timer || Date.now() - lastNudge < 500) return;
+  lastNudge = Date.now();
   for (const ms of new Set([1_000, QUIET_BY_PACE.live, QUIET_BY_PACE.normal, QUIET_MS])) wake(ms + 1_000);
 }
 
