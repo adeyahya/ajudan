@@ -3,7 +3,6 @@
  * allowed WhatsApp chats (reseller groups, community announcements). Chats outside
  * businesses.whatsappChats can't be named, read or written to at all.
  */
-import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -15,6 +14,7 @@ import { createGroup, formatMessage, inviteLink, listGroups, updateGroup, listMe
 import { normalizePhone } from "@/lib/humans";
 import { activeWatchFor, activeWatches, closeWatches, describeWatch, watchReply } from "@/lib/watches";
 import { withSyncPaused } from "./whatsapp-sync";
+import { fileInside } from "./fs-guard";
 import { syncDeliverableFile } from "@/lib/workfiles";
 
 export const WA_SERVER = "whatsapp";
@@ -210,10 +210,9 @@ export function createWhatsappServer(ctx: {
       async (a) => {
         const c = sendTarget(a.chat);
         if (!c) return notAllowed(a.chat);
-        const abs = path.resolve(ctx.cwd, a.file);
-        if (!abs.startsWith(path.resolve(ctx.cwd) + path.sep) || !fs.existsSync(abs)) {
-          return fail("The file must exist inside your working folder.");
-        }
+        // Real path: a symlink in the folder must not send ~/.ssh over WhatsApp.
+        const abs = fileInside(ctx.cwd, a.file);
+        if (!abs) return fail("The file must exist inside your working folder.");
         await sendFile(c.jid, abs, a.caption);
         const waiting = expect(c, a.caption ?? `[file ${path.basename(abs)}]`, a);
         const id = record(`WhatsApp file → ${c.name}: ${path.basename(abs)}`, a.caption ?? path.basename(abs), c.name);

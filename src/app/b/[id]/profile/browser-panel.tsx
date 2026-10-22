@@ -59,7 +59,10 @@ export async function BrowserPanel({
           placeholder={SUGGESTED_SITES.slice(0, 4).join("\n")}
         />
         <p className="text-xs text-muted-foreground">
-          {sites.length ? `${sites.length} site${sites.length === 1 ? "" : "s"} allowed.` : "Empty: any site is allowed."} Suggestions:{" "}
+          {sites.length
+            ? `${sites.length} site${sites.length === 1 ? "" : "s"} allowed.`
+            : "Empty: teammates can't open any site until you add one here or approve a teammate's request for it."}{" "}
+          Suggestions:{" "}
           {SUGGESTED_SITES.join(", ")}.
         </p>
         <div>

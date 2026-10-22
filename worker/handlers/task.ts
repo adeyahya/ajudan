@@ -19,6 +19,7 @@ import { REPLY } from "../replies";
 import { DECISION, managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
+import { isInside, resolveReal } from "../fs-guard";
 import { PausedError, runAbortController } from "../session";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
@@ -124,7 +125,9 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         if (url && !isAllowedUrl(url, business.browserSites)) {
           return {
             behavior: "deny",
-            message: `${url} is not on this business's browser site list (${business.browserSites.join(", ")}). Ask the owner to add it on the Business page if it's needed.`,
+            message: business.browserSites.length
+              ? `${url} is not on this business's browser site list (${business.browserSites.join(", ")}). Ask for it with request_capability(kind "browser_site", site "<host>") if it's needed.`
+              : `No sites are approved for the business browser yet, so ${url} can't be opened. Ask for the site with request_capability(kind "browser_site", site "<host>").`,
           };
         }
         return { behavior: "allow", updatedInput: input };
@@ -375,23 +378,6 @@ export function checkFileAccess(
   return { behavior: "allow", updatedInput: input };
 }
 
-/** realpath of the deepest existing ancestor, so symlinks can't escape and new files resolve. */
-function resolveReal(p: string): string {
-  let cur = p;
-  const rest: string[] = [];
-  while (!fs.existsSync(cur)) {
-    const parent = path.dirname(cur);
-    if (parent === cur) return p;
-    rest.unshift(path.basename(cur));
-    cur = parent;
-  }
-  return path.join(fs.realpathSync(cur), ...rest);
-}
-
-function isInside(p: string, dir: string) {
-  return p === dir || p.startsWith(dir + path.sep);
-}
-
 function summarizeOutward(toolName: string, input: Record<string, unknown>, who: string) {
   const s = (v: unknown, n = 80) => String(v ?? "").replace(/\s+/g, " ").slice(0, n);
   // WhatsApp first: its send_message also ends with "__send_message".
@@ -474,7 +460,9 @@ ${humans.map((h) => `- ${h.name}, ${h.title}${h.responsibilities.length ? `: ${h
 }
 
 function browserRules(business: Business, autonomy: Teammate["autonomy"]) {
-  const sites = business.browserSites.length ? business.browserSites.join(", ") : "any site";
+  const sites = business.browserSites.length
+    ? business.browserSites.join(", ")
+    : 'none yet. Before opening any page, ask for the site with request_capability(kind "browser_site", site "<host>")';
   return `## Business browser
 You can drive ${business.name}'s own Chrome browser with the browser_* tools. It is the owner's real, logged-in browser (e.g. Shopee Seller Center, TikTok), and the owner may be watching. Allowed sites: ${sites}.
 - Prefer browser_snapshot to read pages; use screenshots only when layout matters. Work in one tab; don't close the owner's tabs.
