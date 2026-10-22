@@ -1,19 +1,25 @@
 "use client";
 
+import { FolderSearch } from "lucide-react";
 import Link from "next/link";
-import { Card } from "@/components/kit";
+import { Button, EmptyState, PageBody } from "@/components/kit";
 import { useT } from "@/components/i18n";
 
 /** Shown for a business that isn't in the open folder (or doesn't exist). */
 export default function BusinessNotFound() {
   const t = useT();
   return (
-    <Card className="mx-auto max-w-lg p-6">
-      <h1 className="mb-1 text-lg text-foreground">{t("notFound.title")}</h1>
-      <p className="text-sm text-muted-foreground">{t("notFound.body")}</p>
-      <Link href="/" className="font-pixel mt-4 inline-block text-primary underline">
-        {t("notFound.back")}
-      </Link>
-    </Card>
+    <PageBody>
+      <EmptyState
+        icon={<FolderSearch />}
+        title={t("notFound.title")}
+        body={t("notFound.body")}
+        action={
+          <Button size="sm" variant="secondary" asChild>
+            <Link href="/">{t("notFound.back")}</Link>
+          </Button>
+        }
+      />
+    </PageBody>
   );
 }

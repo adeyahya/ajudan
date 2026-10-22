@@ -5,8 +5,10 @@ import { buildSheet, lookFor, SPR_H, SPR_W } from "@/app/b/[id]/office/sprites";
 import { cn } from "@/lib/utils";
 
 /**
- * A teammate's chibi from the office, drawn as a framed pixel portrait.
- * `seed` picks the same hair/skin as in the office (use the teammate id).
+ * A teammate's chibi from the office, as a small rounded portrait (the avatar everywhere
+ * outside the office). `seed` picks the same hair/skin as in the office (use the teammate id).
+ * Sizes in use: 16, 20, 24, 28, 32, 40, 64. Wrap with `Avatar` from @/components/kit for a
+ * status dot.
  */
 export function PixelPortrait({
   seed,
@@ -38,15 +40,18 @@ export function PixelPortrait({
   return (
     <span
       title={title}
-      className={cn("pixel-frame relative inline-block shrink-0 overflow-hidden", className)}
+      className={cn(
+        "relative inline-block shrink-0 overflow-hidden ring-1 ring-black/5 ring-inset",
+        size <= 20 ? "rounded-sm" : "rounded-md",
+        className,
+      )}
       style={{
         width: size,
         height: size,
-        margin: 3,
         background: `linear-gradient(${color}55, ${color}22)`,
       }}
     >
-      <canvas ref={ref} width={20} height={20} className="pixelated absolute inset-0 size-full" aria-hidden />
+      <canvas ref={ref} width={20} height={20} className="absolute inset-0 size-full [image-rendering:pixelated]" aria-hidden />
     </span>
   );
 }

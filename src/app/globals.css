@@ -6,49 +6,124 @@
 @source "../../node_modules/@blocknote/shadcn/dist/*.js";
 
 /*
- * Ajudan theme: clean and quiet, in the spirit of Notion. White pages, a light grey
- * sidebar, ink text, hairline borders and soft hovers. The pixel art lives only in the
- * office (and the small game badges that belong to it).
+ * Ajudan design system (docs/UI-PLAN.md §2): quiet and precise, in the spirit of Notion.
+ * White pages, a warm grey sidebar, ink text, hairline borders, soft hovers.
+ * Light only. The pixel art lives only in the office (src/app/b/[id]/office) and the
+ * single game badge (`font-game`).
+ *
+ * Utilities you get from the tokens below (all Tailwind v4 color utilities work):
+ *   bg-hover / bg-hover-strong     row and button hover / pressed overlays
+ *   text-tertiary / text-placeholder
+ *   border-border-strong           input-ish borders, resize handles
+ *   bg-primary-hover / bg-primary-soft
+ *   text-success bg-success-soft · text-warning bg-warning-soft
+ *   text-destructive bg-destructive-soft · text-info bg-info-soft
+ *   bg-tag-{gray,brown,orange,yellow,green,blue,purple,pink,red}-bg + text-tag-…-fg
+ *   bg-stage                       video/audio editor stage
+ *   shadow-menu / shadow-dialog / shadow-xs (raw values: var(--elev-menu|dialog|xs))
+ *   ease-(--ease)                  the one easing curve
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  /* Surfaces */
   --background: #ffffff;
   --foreground: #37352f;
   --card: #ffffff;
   --card-foreground: #37352f;
   --popover: #ffffff;
   --popover-foreground: #37352f;
-  --primary: #2383e2;
-  --primary-foreground: #ffffff;
+  --sidebar: #f7f7f5;
+  --muted: #f7f7f5;
   --secondary: #f1f1ef;
   --secondary-foreground: #37352f;
-  --muted: #f7f7f5;
-  --muted-foreground: #787774;
   --accent: #efefed;
   --accent-foreground: #37352f;
-  --destructive: #e03e3e;
+  --hover: rgba(55, 53, 47, 0.06);
+  --hover-strong: rgba(55, 53, 47, 0.1);
+
+  /* Lines */
   --border: #e9e9e7;
+  --border-strong: #d3d1cb;
   --input: #e3e2e0;
+
+  /* Text */
+  --muted-foreground: #787774;
+  --tertiary: #9b9a97;
+  --placeholder: #b4b4b0;
+
+  /* Brand + status */
+  --primary: #2383e2;
+  --primary-foreground: #ffffff;
+  --primary-hover: #1a73c9;
+  --primary-soft: rgba(35, 131, 226, 0.08);
   --ring: #2383e2;
+  --success: #0f7b6c;
+  --success-soft: #dbeddb;
+  --warning: #d9730d;
+  --warning-soft: #fdecc8;
+  --destructive: #e03e3e;
+  --destructive-soft: #ffe2dd;
+  --info: #2383e2;
+  --info-soft: #d3e5ef;
+  --stage: #16101a;
+
+  /* Tag set (badges, select properties) */
+  --tag-gray-bg: #e3e2e0;
+  --tag-gray-fg: #32302c;
+  --tag-brown-bg: #eee0da;
+  --tag-brown-fg: #442a1e;
+  --tag-orange-bg: #fadec9;
+  --tag-orange-fg: #49290e;
+  --tag-yellow-bg: #fdecc8;
+  --tag-yellow-fg: #402c1b;
+  --tag-green-bg: #dbeddb;
+  --tag-green-fg: #1c3829;
+  --tag-blue-bg: #d3e5ef;
+  --tag-blue-fg: #183347;
+  --tag-purple-bg: #e8deee;
+  --tag-purple-fg: #412454;
+  --tag-pink-bg: #f5e0e9;
+  --tag-pink-fg: #4c2337;
+  --tag-red-bg: #ffe2dd;
+  --tag-red-fg: #5d1715;
+
   --chart-1: #2383e2;
   --chart-2: #0f7b6c;
   --chart-3: #d9730d;
   --chart-4: #ad1a72;
   --chart-5: #6940a5;
-  --radius: 0.5rem;
-  --sidebar: #f7f7f5;
+
+  /* Sidebar (shadcn names) */
   --sidebar-foreground: #5f5e5b;
   --sidebar-primary: #37352f;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ebebea;
+  --sidebar-accent: #efefed;
   --sidebar-accent-foreground: #37352f;
   --sidebar-border: #e9e9e7;
   --sidebar-ring: #2383e2;
 
-  /* Kept for components written for the old pixel theme; they now resolve to quiet values. */
-  --frame: #e9e9e7;
+  /* Shape, depth, motion */
+  --radius: 6px;
+  --elev-xs: 0 1px 2px rgba(15, 15, 15, 0.04);
+  --elev-menu: rgba(15, 15, 15, 0.05) 0 0 0 1px, rgba(15, 15, 15, 0.1) 0 3px 6px, rgba(15, 15, 15, 0.2) 0 9px 24px;
+  --elev-dialog: rgba(15, 15, 15, 0.1) 0 0 0 1px, rgba(15, 15, 15, 0.2) 0 5px 10px, rgba(15, 15, 15, 0.4) 0 15px 40px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --content-w: 708px;
+  --content-w-wide: 1100px;
+  --topbar-h: 44px;
+  --bottombar-h: 0px;
+  --sidebar-w-open: 240px;
+  --sidebar-w: var(--sidebar-w-open);
+
+  /*
+   * Transitional: names from the old pixel theme, still read by pages that later
+   * streams restyle. They resolve to the new tokens. Remove after the sweep.
+   */
+  --frame: var(--border);
   --frame-hi: transparent;
   --frame-lo: transparent;
   --wood: #c48f5f;
@@ -56,12 +131,17 @@
   --wood-dd: #4a2e1f;
   --parchment: #ffffff;
   --ink: #37352f;
-  --good: #0f7b6c;
+  --good: var(--success);
   --warn: #f5c451;
-  --warn-ink: #b4570b;
-  --bad: #e03e3e;
-  --info: #2383e2;
+  --warn-ink: var(--warning);
+  --bad: var(--destructive);
   --px: 1px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --bottombar-h: 56px;
+  }
 }
 
 @theme inline {
@@ -73,14 +153,29 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-tertiary: var(--tertiary);
+  --color-placeholder: var(--placeholder);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
   --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-stage: var(--stage);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -96,6 +191,27 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-tag-gray-bg: var(--tag-gray-bg);
+  --color-tag-gray-fg: var(--tag-gray-fg);
+  --color-tag-brown-bg: var(--tag-brown-bg);
+  --color-tag-brown-fg: var(--tag-brown-fg);
+  --color-tag-orange-bg: var(--tag-orange-bg);
+  --color-tag-orange-fg: var(--tag-orange-fg);
+  --color-tag-yellow-bg: var(--tag-yellow-bg);
+  --color-tag-yellow-fg: var(--tag-yellow-fg);
+  --color-tag-green-bg: var(--tag-green-bg);
+  --color-tag-green-fg: var(--tag-green-fg);
+  --color-tag-blue-bg: var(--tag-blue-bg);
+  --color-tag-blue-fg: var(--tag-blue-fg);
+  --color-tag-purple-bg: var(--tag-purple-bg);
+  --color-tag-purple-fg: var(--tag-purple-fg);
+  --color-tag-pink-bg: var(--tag-pink-bg);
+  --color-tag-pink-fg: var(--tag-pink-fg);
+  --color-tag-red-bg: var(--tag-red-bg);
+  --color-tag-red-fg: var(--tag-red-fg);
+
+  /* Transitional color names (see :root). */
   --color-frame: var(--frame);
   --color-wood: var(--wood);
   --color-wood-d: var(--wood-d);
@@ -105,10 +221,12 @@
   --color-warn: var(--warn);
   --color-warn-ink: var(--warn-ink);
   --color-bad: var(--bad);
-  --color-info: var(--info);
+
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --font-heading: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -116,43 +234,77 @@
   --radius-2xl: 16px;
   --radius-3xl: 20px;
   --radius-4xl: 24px;
+
+  --shadow-xs: var(--elev-xs);
+  --shadow-menu: var(--elev-menu);
+  --shadow-dialog: var(--elev-dialog);
+
+  --ease-out: var(--ease);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: var(--ease);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-    scrollbar-color: #d3d1cb transparent;
+    @apply border-border;
+    scrollbar-color: var(--border-strong) transparent;
   }
   html {
     @apply font-sans;
     color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     @apply bg-background text-foreground;
-  }
-  h1,
-  h2,
-  h3 {
-    font-family: var(--font-heading);
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
   }
   ::selection {
     background: rgb(35 131 226 / 0.22);
   }
+  ::placeholder {
+    color: var(--placeholder);
+  }
+  /*
+   * One focus rule for links, buttons and rows: a 2px blue outline that follows the
+   * element's radius. Inputs draw their own ring (border-ring + ring-2).
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [contenteditable]:focus-visible,
+  [cmdk-input]:focus-visible {
+    outline: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
-/* Old pixel-theme surfaces, now plain bordered cards. */
+/* ---------------------------------------------------------------------------------
+ * Transitional pixel-theme utilities. Still referenced by pages owned by later streams
+ * (B–F) and by the office. `font-game`, `font-pixel` and `pixelated` stay for the office.
+ * Everything else here goes once the sweep lands.
+ * ------------------------------------------------------------------------------ */
 @utility pixel-frame {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
 
 @utility pixel-panel {
   @apply pixel-frame bg-card text-card-foreground;
 }
 
-/* A document surface: the page itself. */
 @utility pixel-paper {
   background: var(--card);
   color: var(--foreground);
@@ -163,15 +315,15 @@
   color: var(--foreground);
 }
 
-/* Former pixel-font labels: now ordinary medium-weight text. */
+/* Office only (office-shell.tsx). Elsewhere use font-medium/font-semibold. */
 @utility font-pixel {
   font-family: var(--font-sans);
   font-weight: 600;
 }
 
-/* The game's own lettering, for the office and its level badges only. */
+/* The game's own lettering: the office and the single level badge. */
 @utility font-game {
-  font-family: var(--font-pixelify), ui-monospace, monospace;
+  font-family: var(--font-game-face), ui-monospace, monospace;
   font-weight: 400;
 }
 
@@ -180,20 +332,10 @@
 }
 
 @layer components {
-  [data-slot="button"] {
-    font-weight: 500;
-  }
   select.pixel-select {
     border: 1px solid var(--input);
     border-radius: var(--radius-md);
     background: var(--background);
-  }
-  [data-slot="card"],
-  [data-slot="dialog-content"],
-  [data-slot="sheet-content"],
-  [data-slot="dropdown-menu-content"] {
-    border-color: var(--border);
-    box-shadow: 0 1px 2px rgb(15 15 15 / 0.04), 0 4px 16px rgb(15 15 15 / 0.06);
   }
 }
 
@@ -233,15 +375,102 @@
   }
 }
 
-/* The Context page editor: a plain page, like Notion. */
+/* ---------------------------------------------------------------------------------
+ * App chrome (src/app/b/[id]/nav.tsx, top-bar.tsx, src/app/layout.tsx).
+ * The sidebar's width and collapsed state come from localStorage through an inline
+ * script that sets --sidebar-w and data-sidebar on <html> before first paint, so the
+ * page never jumps on hydration.
+ * ------------------------------------------------------------------------------ */
+html[data-sidebar="collapsed"] {
+  --sidebar-w: 0px;
+}
+.app-sidebar {
+  width: var(--sidebar-w);
+}
+html[data-sidebar="collapsed"] .app-sidebar {
+  border-right-color: transparent;
+}
+/* Collapsible sidebar sections (state on <html data-sec-<name>="closed">). */
+html[data-sec-workspace="closed"] [data-sec-body="workspace"],
+html[data-sec-settings="closed"] [data-sec-body="settings"] {
+  display: none;
+}
+html[data-sec-workspace="closed"] [data-sec-chevron="workspace"],
+html[data-sec-settings="closed"] [data-sec-chevron="settings"] {
+  transform: rotate(-90deg);
+  opacity: 1;
+}
+/* The top bar's "open sidebar" button: on a phone always, on desktop only when collapsed. */
+@media (min-width: 768px) {
+  html:not([data-sidebar="collapsed"]) .sidebar-open-button {
+    display: none;
+  }
+}
+/*
+ * Pages that don't use PageBody yet keep the old padded frame. Chat routes get a 12px
+ * frame unless the page marks its root with data-full-bleed.
+ */
+.app-frame:not(:has([data-page-body])):not([data-chat]) {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 72rem;
+  padding: 24px 16px 96px;
+}
+@media (min-width: 640px) {
+  .app-frame:not(:has([data-page-body])):not([data-chat]) {
+    padding-inline: 24px;
+  }
+}
+.app-frame[data-chat]:not(:has([data-full-bleed], [data-page-body])) {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 1480px;
+  padding: 12px 12px calc(12px + var(--bottombar-h) + env(safe-area-inset-bottom));
+}
+html[data-sidebar-resizing] .app-sidebar,
+html[data-sidebar-resizing] .app-sidebar-panel {
+  transition: none !important;
+}
+html[data-sidebar-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+/* The home page's site header hides under a business shell (which has its own chrome). */
+body:has([data-business-shell]) .site-header {
+  display: none;
+}
+
+/* Skeleton shimmer: a slow 1.5s pulse. */
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+[data-slot="skeleton"] {
+  animation: skeleton-pulse 1.5s var(--ease) infinite;
+}
+
+/* sonner toasts: 12px radius, menu shadow, 13px text. */
+[data-sonner-toaster] [data-sonner-toast] {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--elev-menu) !important;
+  border: none !important;
+  font-size: 13px !important;
+  font-family: var(--font-sans);
+}
+
+/* The Context page editor: a plain page, like Notion (body 16/26). */
 .ajudan-page-editor .bn-editor {
   background: transparent;
   color: var(--foreground);
   padding-inline: 0;
+  font-size: 16px;
+  line-height: 1.625;
 }
 .ajudan-page-editor .bn-editor h1,
 .ajudan-page-editor .bn-editor h2,
 .ajudan-page-editor .bn-editor h3 {
   color: var(--foreground);
-  font-weight: 650;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }

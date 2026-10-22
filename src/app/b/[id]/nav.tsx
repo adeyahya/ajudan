@@ -2,223 +2,633 @@
 
 import {
   Activity,
+  AlertCircle,
   BookOpen,
   Building2,
-  Ellipsis,
+  Check,
+  ChevronDown,
+  Clapperboard,
   Folder,
   FolderCheck,
   Headset,
+  Home,
   Inbox,
-  MessageCircle,
+  Menu,
+  MessageSquare,
+  PanelLeftClose,
   PenLine,
-  Sparkles,
+  Plus,
+  Search,
   Store,
   Users,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
+import { toast } from "sonner";
+import { openFolder } from "@/app/actions";
+import { BreadcrumbProvider } from "@/components/breadcrumb";
+import { CommandPalette, CommandPaletteProvider, useCommandPalette } from "@/components/command-palette";
 import { useT } from "@/components/i18n";
+import { Badge, CountPill, IconButton, Kbd } from "@/components/kit";
+import { ShortcutsDialog, useGlobalShortcuts, useModKey } from "@/components/shortcuts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Toaster } from "@/components/ui/sonner";
+import { appBridge } from "@/lib/app-bridge";
 import type { MessageKey } from "@/lib/i18n";
+import { statusTone } from "@/lib/status-tones";
 import { cn } from "@/lib/utils";
+import { createPageAction } from "./context/actions";
+import { TopBar } from "./top-bar";
+
+/**
+ * The business shell (UI-PLAN §2.5): one Notion-style left sidebar (workspace switcher,
+ * search, pages, collapsible sections, worker + spend footer), a 44px top bar with
+ * breadcrumbs, the ⌘K palette, toasts and global shortcuts. Phone: a bottom bar
+ * (Chat, Inbox, Work, Menu) and the same sidebar in a left sheet.
+ *
+ * Sidebar width (200–360, default 240) and collapsed state persist in localStorage
+ * (`ajudan:sidebar:w`, `ajudan:sidebar:collapsed`, sections `ajudan:sidebar:sec:<name>`)
+ * and are applied before first paint by the inline script in src/app/layout.tsx.
+ * ⌘\ toggles it; `useSidebar()` exposes the same from any client component below.
+ */
 
 type Item = { href: string; label: MessageKey; icon: LucideIcon; title?: MessageKey };
 
 /** Where the owner spends the day. Chat is home: the manager, with the office above it. */
 const PRIMARY: Item[] = [
-  { href: "", label: "nav.chat", icon: MessageCircle },
+  { href: "", label: "nav.chat", icon: MessageSquare },
   { href: "/office", label: "nav.office", icon: Building2 },
-  { href: "/approvals", label: "nav.approvals", icon: Inbox },
+  { href: "/approvals", label: "nav.inbox", icon: Inbox },
   { href: "/deliverables", label: "nav.work", icon: FolderCheck },
   { href: "/context", label: "nav.context", icon: BookOpen },
   { href: "/team", label: "nav.team", icon: Users },
 ];
-
-/** Everything else, lower in the rail (under "More" on a phone). */
-const SECONDARY: Item[] = [
+const WORKSPACE: Item[] = [
   { href: "/desk", label: "nav.desk", icon: Headset },
-  { href: "/studio", label: "nav.studio", icon: Sparkles },
+  { href: "/studio", label: "nav.studio", icon: Clapperboard },
   { href: "/files", label: "nav.files", icon: Folder },
-  { href: "/onboarding", label: "nav.interview", icon: PenLine },
+];
+const SETTINGS: Item[] = [
   { href: "/profile", label: "nav.business", icon: Store },
   { href: "/health", label: "nav.health", icon: Activity, title: "nav.healthTitle" },
+  { href: "/onboarding", label: "nav.interview", icon: PenLine },
 ];
 
-/** The phone's bottom bar: four destinations and More. */
-const PHONE_BAR = ["", "/office", "/approvals", "/deliverables"];
+/** All destinations with their labels (breadcrumbs, palette). */
+export const NAV_ITEMS: Item[] = [...PRIMARY, ...WORKSPACE, ...SETTINGS];
 
-function isActive(pathname: string, base: string, href: string) {
+export function isActive(pathname: string, base: string, href: string) {
   if (href === "") return pathname === base || pathname === `${base}/manager` || pathname.startsWith(`${base}/teammates/`);
   return pathname === base + href || pathname.startsWith(`${base}${href}/`);
 }
 
-/** Chat pages fill the viewport (the conversation scrolls inside), so they get a wider, tighter frame. */
+/** Chat pages fill the viewport (the conversation scrolls inside). */
 export function isChatRoute(pathname: string, base: string) {
   return isActive(pathname, base, "");
 }
 
-/**
- * The business's navigation: a compact left rail from md up, a bottom bar with a More
- * sheet on a phone. With hideInterview, the Interview item only shows while you're on it.
- */
-export function BusinessRail({ hideInterview = false, pendingApprovals = 0 }: { hideInterview?: boolean; pendingApprovals?: number }) {
-  const { id } = useParams<{ id: string }>();
-  const pathname = usePathname();
-  const t = useT();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const base = `/b/${id}`;
-  const secondary = SECONDARY.filter((i) => !(hideInterview && i.href === "/onboarding" && !isActive(pathname, base, i.href)));
-  const badge = (href: string) => (href === "/approvals" && pendingApprovals > 0 ? pendingApprovals : 0);
+/* ------------------------------------------------------------------ sidebar state */
 
-  const railLink = (item: Item, small = false) => {
-    const active = isActive(pathname, base, item.href);
-    const Icon = item.icon;
-    const count = badge(item.href);
-    return (
-      <Link
-        key={item.href}
-        href={base + item.href}
-        title={item.title ? t(item.title) : undefined}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "group relative flex w-full flex-col items-center gap-1 rounded-md px-1 text-center transition-colors duration-200",
-          small ? "py-1.5" : "py-2",
-          active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
-        )}
-      >
-        <Icon aria-hidden className={small ? "size-4" : "size-5"} strokeWidth={1.75} />
-        <span className={cn("leading-none", small ? "text-[10px]" : "font-pixel text-[11px]")}>{t(item.label)}</span>
-        {count > 0 && <CountDot count={count} />}
-      </Link>
-    );
-  };
+const COLLAPSED_KEY = "ajudan:sidebar:collapsed";
+const WIDTH_KEY = "ajudan:sidebar:w";
+const W_MIN = 200;
+const W_MAX = 360;
+const W_DEFAULT = 240;
 
+const listeners = new Set<() => void>();
+const subscribe = (cb: () => void) => {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+};
+const emit = () => listeners.forEach((l) => l());
+const html = () => document.documentElement;
+const store = (key: string, value: string | null) => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {}
+};
+
+function setCollapsedDom(collapsed: boolean) {
+  if (collapsed) html().setAttribute("data-sidebar", "collapsed");
+  else html().removeAttribute("data-sidebar");
+  store(COLLAPSED_KEY, collapsed ? "1" : null);
+  emit();
+}
+
+/** Section open state lives on <html data-sec-<name>="closed"> (restored before paint). */
+function setSectionDom(name: string, open: boolean) {
+  if (open) html().removeAttribute(`data-sec-${name}`);
+  else html().setAttribute(`data-sec-${name}`, "closed");
+  store(`ajudan:sidebar:sec:${name}`, open ? null : "0");
+  emit();
+}
+
+function useDomFlag(read: () => boolean) {
+  return useSyncExternalStore(subscribe, read, () => false);
+}
+
+type SidebarCtx = { collapsed: boolean; toggle: () => void; setCollapsed: (v: boolean) => void; openMobile: () => void };
+const SidebarContext = createContext<SidebarCtx | null>(null);
+
+/** The sidebar's state: collapsed on desktop, and opening it as a sheet on a phone. */
+export function useSidebar(): SidebarCtx {
+  return useContext(SidebarContext) ?? { collapsed: false, toggle: () => {}, setCollapsed: () => {}, openMobile: () => {} };
+}
+
+/* ------------------------------------------------------------------ shell */
+
+export type ShellFolder = { dir: string; name: string; path: string; status: string | null; isOpen: boolean };
+export type ShellTeammate = { id: string; name: string; title: string; color: string; state: string };
+export type ShellSpend = { today: number; week: number; cap: number; over: boolean };
+
+export type AppShellProps = {
+  businessId: string;
+  businessName: string;
+  hideInterview: boolean;
+  pendingApprovals: number;
+  inApp: boolean;
+  workerRunning: boolean;
+  spend: ShellSpend;
+  folders: ShellFolder[];
+  teammates: ShellTeammate[];
+  children: ReactNode;
+};
+
+export function AppShell(props: AppShellProps) {
   return (
-    <>
-      <nav
-        aria-label={t("nav.menu")}
-        className="sticky top-0 hidden h-[calc(100dvh-3rem)] w-[4.75rem] shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-3 md:flex"
-      >
-        {PRIMARY.map((i) => railLink(i))}
-        <div className="mt-auto space-y-0.5 border-t border-sidebar-accent pt-2">{secondary.map((i) => railLink(i, true))}</div>
-      </nav>
-
-      <nav
-        aria-label={t("nav.menu")}
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar pb-[env(safe-area-inset-bottom)] md:hidden"
-      >
-        {moreOpen && (
-          <div className="absolute inset-x-2 bottom-full mb-2 grid grid-cols-4 gap-1 rounded-md border-2 border-sidebar-border bg-sidebar p-2 shadow-[0_-6px_24px_rgb(0_0_0/0.35)]">
-            {[...PRIMARY.filter((i) => !PHONE_BAR.includes(i.href)), ...secondary].map((item) => {
-              const Icon = item.icon;
-              const active = isActive(pathname, base, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={base + item.href}
-                  onClick={() => setMoreOpen(false)}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex flex-col items-center gap-1 rounded-md px-1 py-2 text-[11px]",
-                    active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/70",
-                  )}
-                >
-                  <Icon aria-hidden className="size-5" strokeWidth={1.75} />
-                  {t(item.label)}
-                </Link>
-              );
-            })}
-          </div>
-        )}
-        <div className="flex h-16 items-stretch justify-around px-1">
-          {PRIMARY.filter((i) => PHONE_BAR.includes(i.href)).map((item) => (
-            <BarItem
-              key={item.href}
-              href={base + item.href}
-              active={isActive(pathname, base, item.href)}
-              icon={item.icon}
-              label={t(item.label)}
-              onClick={() => setMoreOpen(false)}
-            >
-              {badge(item.href) > 0 && <CountDot count={badge(item.href)} />}
-            </BarItem>
-          ))}
-          <button
-            type="button"
-            onClick={() => setMoreOpen((o) => !o)}
-            aria-expanded={moreOpen}
-            className={cn(
-              "relative flex flex-1 flex-col items-center justify-center gap-1 text-[11px]",
-              moreOpen ? "text-sidebar-primary" : "text-sidebar-foreground/70",
-            )}
-          >
-            {moreOpen ? <X aria-hidden className="size-5" strokeWidth={1.75} /> : <Ellipsis aria-hidden className="size-5" strokeWidth={1.75} />}
-            <span className="font-pixel">{t("nav.more")}</span>
-          </button>
-        </div>
-      </nav>
-    </>
+    <BreadcrumbProvider>
+      <CommandPaletteProvider>
+        <ShellInner {...props} />
+      </CommandPaletteProvider>
+    </BreadcrumbProvider>
   );
 }
 
-function BarItem({
+function ShellInner({ businessId, businessName, teammates, workerRunning, children, ...rest }: AppShellProps) {
+  const t = useT();
+  const router = useRouter();
+  const pathname = usePathname();
+  const base = `/b/${businessId}`;
+  const palette = useCommandPalette();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const collapsed = useDomFlag(() => html().getAttribute("data-sidebar") === "collapsed");
+  const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
+  const toggle = () => (isDesktop() ? setCollapsedDom(!collapsed) : setMobileOpen((o) => !o));
+  const sidebar: SidebarCtx = { collapsed, toggle, setCollapsed: setCollapsedDom, openMobile: () => setMobileOpen(true) };
+
+  useGlobalShortcuts({
+    onSearch: palette.toggle,
+    onToggleSidebar: toggle,
+    onHelp: () => setHelpOpen((o) => !o),
+    go: (href) => router.push(base + href),
+  });
+
+  // Close the phone sheet after navigating.
+  const [lastPath, setLastPath] = useState(pathname);
+  if (lastPath !== pathname) {
+    setLastPath(pathname);
+    setMobileOpen(false);
+  }
+
+  // Tell the owner once per session when nothing will run.
+  useEffect(() => {
+    if (workerRunning) return;
+    try {
+      if (sessionStorage.getItem("ajudan:worker-toast")) return;
+      sessionStorage.setItem("ajudan:worker-toast", "1");
+    } catch {}
+    toast.error(t("nav.workerDown"), { description: t("workerBanner.toast"), id: "worker-down" });
+  }, [workerRunning, t]);
+
+  const newPage = () => {
+    void createPageAction(businessId, "business", t("action.untitled")).then((id) => router.push(`${base}/context?page=${id}`));
+  };
+  const showFolders = () => {
+    if (rest.inApp) void appBridge()?.showHome();
+    else router.push("/");
+  };
+
+  const chat = isChatRoute(pathname, base);
+  const sidebarProps = { businessId, businessName, workerRunning, onNewPage: newPage, ...rest };
+
+  return (
+    <SidebarContext.Provider value={sidebar}>
+      <div data-business-shell className="flex min-h-dvh w-full">
+        <aside
+          aria-label={t("nav.menu")}
+          className="app-sidebar app-sidebar-panel sticky top-0 z-30 hidden h-dvh shrink-0 overflow-hidden border-r border-border bg-sidebar transition-[width,border-color] duration-200 ease-(--ease) md:block"
+        >
+          <div className="h-full w-(--sidebar-w-open)">
+            <SidebarContent {...sidebarProps} onCollapse={() => setCollapsedDom(true)} />
+          </div>
+          <ResizeHandle />
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar businessId={businessId} businessName={businessName} teammates={teammates} onOpenSidebar={toggle} />
+          <main className="flex min-w-0 flex-1 flex-col">
+            <div
+              data-chat={chat || undefined}
+              className={cn(
+                "app-frame min-w-0 flex-1",
+                // Transitional (until the chat stream lands): chat pages size themselves with --chrome-h,
+                // the viewport height they lose to the top bar, this frame's padding and the phone's bottom bar.
+                chat && "[--chrome-h:calc(68px+56px+env(safe-area-inset-bottom))] md:[--chrome-h:68px]",
+              )}
+            >
+              {children}
+            </div>
+          </main>
+        </div>
+
+        <BottomBar base={base} pending={rest.pendingApprovals} onMenu={() => setMobileOpen(true)} />
+
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent side="left" showCloseButton={false} className="w-[280px] gap-0 bg-sidebar p-0 sm:max-w-[280px]">
+            <SheetTitle className="sr-only">{t("nav.menu")}</SheetTitle>
+            <SidebarContent {...sidebarProps} mobile />
+          </SheetContent>
+        </Sheet>
+
+        <CommandPalette
+          businessId={businessId}
+          teammates={teammates}
+          nav={NAV_ITEMS.filter((i) => !(rest.hideInterview && i.href === "/onboarding")).map((i) => ({
+            label: t(i.label),
+            href: base + i.href,
+            icon: i.icon,
+          }))}
+          onToggleSidebar={toggle}
+          onShowShortcuts={() => setHelpOpen(true)}
+          onSwitchBusiness={showFolders}
+          onNewPage={newPage}
+        />
+        <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+        <Toaster />
+      </div>
+    </SidebarContext.Provider>
+  );
+}
+
+/* ------------------------------------------------------------------ sidebar */
+
+type SidebarProps = Omit<AppShellProps, "children" | "teammates"> & {
+  onNewPage: () => void;
+  onCollapse?: () => void;
+  mobile?: boolean;
+};
+
+function SidebarContent({
+  businessId,
+  businessName,
+  hideInterview,
+  pendingApprovals,
+  inApp,
+  workerRunning,
+  spend,
+  folders,
+  onNewPage,
+  onCollapse,
+  mobile = false,
+}: SidebarProps) {
+  const t = useT();
+  const mod = useModKey();
+  const pathname = usePathname();
+  const palette = useCommandPalette();
+  const base = `/b/${businessId}`;
+  const settings = SETTINGS.filter((i) => !(hideInterview && i.href === "/onboarding" && !isActive(pathname, base, i.href)));
+  const row = (item: Item) => (
+    <NavRow
+      key={item.href}
+      href={base + item.href}
+      icon={item.icon}
+      label={t(item.label)}
+      title={item.title ? t(item.title) : undefined}
+      active={isActive(pathname, base, item.href)}
+      trailing={item.href === "/approvals" ? <CountPill count={pendingApprovals} /> : undefined}
+      action={
+        item.href === "/context" ? (
+          <IconButton label={t("nav.newPage")} size="icon-xs" side="right" onClick={onNewPage} className="text-tertiary">
+            <Plus />
+          </IconButton>
+        ) : undefined
+      }
+    />
+  );
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="group/switcher flex items-center gap-0.5 px-2 pt-2 pb-1">
+        <WorkspaceSwitcher businessName={businessName} folders={folders} inApp={inApp} />
+        {!mobile && onCollapse && (
+          <IconButton
+            label={t("nav.collapseSidebar")}
+            shortcut={`${mod}\\`}
+            onClick={onCollapse}
+            className="opacity-0 transition-opacity duration-100 group-hover/switcher:opacity-100 focus-visible:opacity-100"
+          >
+            <PanelLeftClose />
+          </IconButton>
+        )}
+      </div>
+
+      <nav aria-label={t("nav.menu")} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2 [scrollbar-gutter:stable]">
+        <button
+          type="button"
+          onClick={() => palette.setOpen(true)}
+          className="group flex h-7 w-full shrink-0 items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium text-sidebar-foreground transition-colors duration-100 hover:bg-hover"
+        >
+          <Search className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} aria-hidden />
+          <span className="flex-1 truncate text-left">{t("nav.search")}</span>
+          <Kbd className="hidden bg-transparent lg:inline-flex">{mod}K</Kbd>
+        </button>
+
+        <div className="mt-2 space-y-px">{PRIMARY.map(row)}</div>
+
+        <NavSection name="workspace" label={t("nav.workspace")}>
+          {WORKSPACE.map(row)}
+        </NavSection>
+        <NavSection name="settings" label={t("nav.settings")}>
+          {settings.map(row)}
+        </NavSection>
+
+        <div className="mt-auto space-y-px pt-4">
+          {!workerRunning && (
+            <Link
+              href={`${base}/health`}
+              className="flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium text-destructive transition-colors duration-100 hover:bg-hover"
+            >
+              <AlertCircle className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+              <span className="truncate">{t("nav.workerDown")}</span>
+            </Link>
+          )}
+          <SpendLine base={base} spend={spend} />
+        </div>
+      </nav>
+    </div>
+  );
+}
+
+function NavRow({
   href,
-  active,
   icon: Icon,
   label,
-  onClick,
-  children,
+  title,
+  active,
+  trailing,
+  action,
 }: {
   href: string;
-  active: boolean;
   icon: LucideIcon;
   label: string;
-  onClick: () => void;
-  children?: ReactNode;
+  title?: string;
+  active: boolean;
+  trailing?: ReactNode;
+  action?: ReactNode;
 }) {
   return (
+    <div className="group/row relative">
+      <Link
+        href={href}
+        title={title}
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium transition-colors duration-100",
+          active ? "bg-accent text-foreground" : "text-sidebar-foreground hover:bg-hover",
+          action && "group-hover/row:pr-8 group-focus-within/row:pr-8",
+        )}
+      >
+        <Icon className={cn("size-4 shrink-0", active ? "text-foreground" : "text-tertiary")} strokeWidth={active ? 2 : 1.75} aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {trailing}
+      </Link>
+      {action && (
+        <div className="absolute top-0.5 right-1 opacity-0 transition-opacity duration-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+          {action}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavSection({ name, label, children }: { name: string; label: string; children: ReactNode }) {
+  const open = !useDomFlag(() => html().getAttribute(`data-sec-${name}`) === "closed");
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setSectionDom(name, !open)}
+        className="group/sec flex h-6 w-full items-center gap-1 rounded-md px-2 text-xs leading-4 font-medium text-tertiary transition-colors duration-100 hover:bg-hover hover:text-muted-foreground"
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown
+          data-sec-chevron={name}
+          className="size-3.5 opacity-0 transition-[opacity,transform] duration-150 group-hover/sec:opacity-100 group-focus-visible/sec:opacity-100"
+          aria-hidden
+        />
+      </button>
+      <div data-sec-body={name} className="mt-px space-y-px">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SpendLine({ base, spend }: { base: string; spend: ShellSpend }) {
+  const t = useT();
+  const usd = (n: number) => `$${n.toFixed(n >= 100 ? 0 : 2)}`;
+  const text = spend.cap > 0
+    ? t("nav.spend", { today: usd(spend.today), cap: usd(spend.cap), week: usd(spend.week) })
+    : t("nav.spendNoCap", { today: usd(spend.today), week: usd(spend.week) });
+  return (
     <Link
-      href={href}
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
+      href={`${base}/profile`}
+      title={spend.over ? t("nav.overBudget") : undefined}
       className={cn(
-        "relative flex flex-1 flex-col items-center justify-center gap-1 text-[11px] transition-colors",
-        active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
+        "flex min-h-7 items-center rounded-md px-2 py-1 text-xs leading-4 tabular-nums transition-colors duration-100 hover:bg-hover",
+        spend.over ? "text-destructive" : "text-tertiary",
       )}
     >
-      <Icon aria-hidden className="size-5" strokeWidth={active ? 2.25 : 1.75} />
-      <span className="font-pixel">{label}</span>
-      {children}
+      <span className="truncate">{text}</span>
     </Link>
   );
 }
 
-function CountDot({ count }: { count: number }) {
+function ResizeHandle() {
+  const t = useT();
+  const start = useRef<{ x: number; w: number } | null>(null);
+  const setW = (w: number) => html().style.setProperty("--sidebar-w-open", `${w}px`);
   return (
-    <span className="absolute right-1.5 top-1 min-w-4 rounded-full bg-warn px-1 text-[10px] font-semibold leading-4 text-ink tabular-nums">
-      {count > 99 ? "99+" : count}
-    </span>
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("nav.resizeSidebar")}
+      title={t("nav.resizeSidebar")}
+      onPointerDown={(e) => {
+        const w = Number.parseFloat(getComputedStyle(html()).getPropertyValue("--sidebar-w-open")) || W_DEFAULT;
+        start.current = { x: e.clientX, w };
+        html().setAttribute("data-sidebar-resizing", "");
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (!start.current) return;
+        setW(Math.round(Math.min(W_MAX, Math.max(W_MIN, start.current.w + e.clientX - start.current.x))));
+      }}
+      onPointerUp={() => {
+        if (!start.current) return;
+        start.current = null;
+        html().removeAttribute("data-sidebar-resizing");
+        store(WIDTH_KEY, String(Number.parseFloat(html().style.getPropertyValue("--sidebar-w-open")) || W_DEFAULT));
+      }}
+      onDoubleClick={() => {
+        html().style.removeProperty("--sidebar-w-open");
+        store(WIDTH_KEY, null);
+      }}
+      className="group absolute inset-y-0 -right-0.5 z-10 w-1.5 cursor-col-resize"
+    >
+      <span className="absolute inset-y-0 right-0.5 w-px bg-transparent transition-colors duration-100 group-hover:bg-border-strong group-active:bg-ring" />
+    </div>
   );
 }
 
-/** The page frame next to the rail: chat routes fill the viewport, other pages keep the reading width. */
-export function MainFrame({ children }: { children: ReactNode }) {
-  const { id } = useParams<{ id: string }>();
-  const pathname = usePathname();
-  const chat = isChatRoute(pathname, `/b/${id}`);
+/* ------------------------------------------------------------------ switcher */
+
+function WorkspaceSwitcher({ businessName, folders, inApp }: { businessName: string; folders: ShellFolder[]; inApp: boolean }) {
+  const t = useT();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const initial = businessName.trim().charAt(0).toUpperCase() || "A";
+
+  const open = (f: ShellFolder) => {
+    if (f.isOpen) return;
+    if (inApp) void appBridge()?.openFolder(f.dir);
+    else startTransition(() => openFolder(f.dir));
+  };
+
   return (
-    <main
-      className={cn(
-        "w-full flex-1 mx-auto",
-        // --chrome-h: what the viewport loses to the header, this frame's padding and (on a phone) the bottom bar.
-        chat
-          ? "max-w-[1480px] px-3 pt-3 pb-[5rem] sm:px-4 md:pb-3 [--chrome-h:9rem] md:[--chrome-h:4.5rem]"
-          : "max-w-6xl px-4 pt-6 pb-24 sm:px-6 md:pb-6",
-      )}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-busy={pending || undefined}
+          className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors duration-100 hover:bg-hover aria-expanded:bg-hover aria-busy:opacity-70"
+        >
+          <span
+            aria-hidden
+            className="flex size-5 shrink-0 items-center justify-center rounded-sm bg-foreground/90 text-[11px] leading-none font-semibold text-background"
+          >
+            {initial}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] font-semibold text-foreground">{businessName}</span>
+          <ChevronDown className="size-3.5 shrink-0 text-tertiary" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[280px]">
+        <DropdownMenuLabel>{t("nav.businesses")}</DropdownMenuLabel>
+        {folders.map((f) => {
+          const tone = f.status ? statusTone("business", f.status) : null;
+          return (
+            <DropdownMenuItem
+              key={f.dir}
+              onSelect={() => open(f)}
+              className="h-auto items-start py-1.5"
+              title={inApp && !f.isOpen ? t("nav.opensWindow") : undefined}
+            >
+              <span
+                aria-hidden
+                className="mt-px flex size-5 shrink-0 items-center justify-center rounded-sm bg-secondary text-[11px] leading-none font-semibold text-muted-foreground"
+              >
+                {f.name.trim().charAt(0).toUpperCase() || "·"}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate font-medium">{f.name}</span>
+                  {tone && f.status !== "active" && <Badge tone={tone.tone}>{t(tone.label)}</Badge>}
+                </span>
+                <span className="block truncate text-xs text-tertiary">{f.path}</span>
+              </span>
+              {f.isOpen && <Check className="mt-0.5 size-4 text-foreground!" aria-label={t("nav.openHere")} />}
+            </DropdownMenuItem>
+          );
+        })}
+        <DropdownMenuSeparator />
+        {inApp ? (
+          <>
+            <DropdownMenuItem onSelect={() => void appBridge()?.showHome()}>
+              <Home />
+              {t("nav.allBusinesses")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void appBridge()?.showHome()}>
+              <Plus />
+              {t("nav.newBusiness")}
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            <DropdownMenuItem onSelect={() => router.push("/")}>
+              <Home />
+              {t("nav.allBusinesses")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => router.push("/#new")}>
+              <Plus />
+              {t("nav.newBusiness")}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* ------------------------------------------------------------------ phone */
+
+function BottomBar({ base, pending, onMenu }: { base: string; pending: number; onMenu: () => void }) {
+  const t = useT();
+  const pathname = usePathname();
+  const items: { href: string; label: MessageKey; icon: LucideIcon }[] = [
+    { href: "", label: "nav.chat", icon: MessageSquare },
+    { href: "/approvals", label: "nav.inbox", icon: Inbox },
+    { href: "/deliverables", label: "nav.work", icon: FolderCheck },
+  ];
+  const inBar = items.some((i) => isActive(pathname, base, i.href));
+  const cell = "relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] leading-[14px] font-medium transition-colors duration-100";
+  return (
+    <nav
+      aria-label={t("nav.menu")}
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden"
     >
-      {children}
-    </main>
+      <div className="flex h-14 items-stretch px-2">
+        {items.map((i) => {
+          const active = isActive(pathname, base, i.href);
+          const Icon = i.icon;
+          return (
+            <Link key={i.href} href={base + i.href} aria-current={active ? "page" : undefined} className={cn(cell, active ? "text-foreground" : "text-tertiary")}>
+              <span className="relative">
+                <Icon className="size-5" strokeWidth={active ? 2 : 1.75} aria-hidden />
+                {i.href === "/approvals" && <CountPill count={pending} className="absolute -top-1.5 left-3" />}
+              </span>
+              {t(i.label)}
+            </Link>
+          );
+        })}
+        <button type="button" onClick={onMenu} className={cn(cell, inBar ? "text-tertiary" : "text-foreground")}>
+          <Menu className="size-5" strokeWidth={inBar ? 1.75 : 2} aria-hidden />
+          {t("nav.menu")}
+        </button>
+      </div>
+    </nav>
   );
 }

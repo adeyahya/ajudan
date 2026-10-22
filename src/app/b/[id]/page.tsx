@@ -1,7 +1,8 @@
+import { ArrowRight, PenLine, Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
-import { Card, PageSkeleton } from "@/components/kit";
+import { Suspense, type ReactNode } from "react";
+import { Button, EmptyState, PageBody, PageSkeleton } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { t, uiLang } from "@/lib/i18n";
 import { ChatHome } from "./_chat/chat-home";
@@ -23,6 +24,7 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
   if (business.status === "onboarding") {
     return (
       <StatusCard
+        icon={<PenLine />}
         title={t(lang, "bizhome.onboardingTitle", { name: business.name })}
         body={t(lang, "bizhome.onboardingBody")}
         href={`/b/${id}/onboarding`}
@@ -34,6 +36,7 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
     const step = business.status === "designing" ? (business.busy ? "designing" : "check") : "proposed";
     return (
       <StatusCard
+        icon={<Users />}
         title={t(lang, `bizhome.${step}Title`)}
         body={t(lang, `bizhome.${step}Body`)}
         href={`/b/${id}/team`}
@@ -46,17 +49,23 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
   return <ChatHome business={business} lang={lang} />;
 }
 
-function StatusCard({ title, body, href, cta }: { title: string; body: string; href: string; cta: string }) {
+function StatusCard({ icon, title, body, href, cta }: { icon: ReactNode; title: string; body: string; href: string; cta: string }) {
   return (
-    <Card className="max-w-xl mx-auto mt-10 p-6">
-      <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-      <p className="text-sm text-muted-foreground mt-2">{body}</p>
-      <Link
-        href={href}
-        className="mt-5 inline-flex items-center justify-center rounded-lg px-3.5 h-9 text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
-      >
-        {cta} →
-      </Link>
-    </Card>
+    <PageBody>
+      <EmptyState
+        icon={icon}
+        title={title}
+        body={body}
+        className="pt-20"
+        action={
+          <Button size="sm" asChild>
+            <Link href={href}>
+              {cta}
+              <ArrowRight />
+            </Link>
+          </Button>
+        }
+      />
+    </PageBody>
   );
 }
