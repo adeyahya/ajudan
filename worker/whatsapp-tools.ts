@@ -11,14 +11,46 @@ import { db, schema } from "@/db";
 import type { Business, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { eq } from "drizzle-orm";
-import { createGroup, formatMessage, inviteLink, updateGroup, listMessages, searchMessages, sendFile, sendText } from "@/lib/whatsapp";
+import { createGroup, formatMessage, inviteLink, listGroups, updateGroup, listMessages, searchContacts, searchMessages, sendFile, sendText } from "@/lib/whatsapp";
+import { normalizePhone } from "@/lib/humans";
 import { withSyncPaused } from "./whatsapp-sync";
 import { syncDeliverableFile } from "@/lib/workfiles";
 
 export const WA_SERVER = "whatsapp";
-export const SAFE_WA_TOOLS = ["list_chats", "read_messages", "search_messages", "invite_link"].map((t) => `mcp__${WA_SERVER}__${t}`);
+export const SAFE_WA_TOOLS = ["list_chats", "read_messages", "search_messages", "invite_link", "find_contact"].map((t) => `mcp__${WA_SERVER}__${t}`);
 /** Posting reaches real people: gated by the teammate's autonomy, like publish/send. */
-export const OUTWARD_WA_TOOLS = ["send_message", "send_file", "create_group", "update_group"].map((t) => `mcp__${WA_SERVER}__${t}`);
+export const OUTWARD_WA_TOOLS = ["send_message", "send_file", "send_to_people", "create_group", "update_group"].map((t) => `mcp__${WA_SERVER}__${t}`);
+/** Sends that can go to anyone (not only the allowed chats): those always need the owner's OK. */
+export const WA_SEND_TOOLS = ["send_message", "send_file", "send_to_people"].map((t) => `mcp__${WA_SERVER}__${t}`);
+
+export type WaTarget = { jid: string; name: string; allowed: boolean };
+
+/**
+ * Who a teammate means by "Orucraft Partner", "+62 812…", "Budi" or a JID: an allowed
+ * chat first, then a phone number, a contact, or a group the business is in.
+ * Anything that isn't an allowed chat needs the owner's approval to message.
+ */
+export async function resolveTarget(business: Pick<Business, "id" | "language">, name: string): Promise<WaTarget | null> {
+  const allowedChats = db.select({ c: schema.businesses.whatsappChats }).from(schema.businesses).where(eq(schema.businesses.id, business.id)).get()?.c ?? [];
+  const allowed = resolveAllowedChat({ whatsappChats: allowedChats }, name);
+  if (allowed) return { jid: allowed.jid, name: allowed.name, allowed: true };
+  const raw = name.trim();
+  if (/@(s\.whatsapp\.net|g\.us)$/.test(raw)) return { jid: raw, name: raw, allowed: false };
+  if (/^[+\d][\d\s().-]{6,}$/.test(raw)) {
+    const phone = normalizePhone(raw, business.language);
+    if (phone) return { jid: `${phone}@s.whatsapp.net`, name: `+${phone}`, allowed: allowedChats.some((c) => c.jid === `${phone}@s.whatsapp.net`) };
+  }
+  const n = raw.toLowerCase();
+  const contacts = await searchContacts(raw, 10).catch(() => []);
+  const contact =
+    contacts.find((c) => [c.name, c.alias, c.system_name].some((x) => x?.toLowerCase() === n)) ??
+    (contacts.length === 1 ? contacts[0] : undefined);
+  if (contact) return { jid: contact.jid, name: `${contact.name || contact.system_name || contact.alias} (+${contact.phone})`, allowed: false };
+  const groups = await listGroups().catch(() => []);
+  const group = groups.find((g) => g.Name.toLowerCase() === n);
+  if (group) return { jid: group.JID, name: group.Name, allowed: false };
+  return null;
+}
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
@@ -39,6 +71,8 @@ export function createWhatsappServer(ctx: {
   taskId: string;
   /** Teammate's working folder: files it may send must be inside. */
   cwd: string;
+  /** People and chats outside the allowed list that the owner approved for this task. */
+  approvedTargets: Set<string>;
 }) {
   const { business, teammate, taskId } = ctx;
   // Always the owner's current list: unticking a chat takes effect mid-task.
@@ -51,6 +85,12 @@ export function createWhatsappServer(ctx: {
   const ev = (type: string, message: string, data?: Record<string, unknown>) =>
     logEvent({ businessId: business.id, teammateId: teammate.id, taskId, type, message, data });
   const chatOrFail = (name: string) => resolveAllowedChat({ whatsappChats: allowedNow() }, name);
+  /** For sending: an allowed chat, or a person/chat the owner approved (canUseTool resolved it to a JID). */
+  const sendTarget = (name: string) => {
+    const c = chatOrFail(name);
+    if (c) return c;
+    return ctx.approvedTargets.has(name) ? { jid: name, name } : undefined;
+  };
   const notAllowed = (name: string) =>
     fail(`"${name}" is not one of the allowed WhatsApp chats: ${allowedNow().map((c) => c.name).join(", ") || "(none)"}.`);
 
@@ -111,13 +151,13 @@ export function createWhatsappServer(ctx: {
     ),
     tool(
       "send_message",
-      "Post a message in an allowed WhatsApp chat (outward action: real people will read it). One clear, friendly message per update.",
+      "Send a WhatsApp message (outward action: real people will read it): in an allowed chat, or to anyone else (a phone number with country code, a contact's name from find_contact, or a group), which always waits for the owner's approval. One clear, friendly message.",
       {
-        chat: z.string().describe("Chat name or JID from list_chats"),
+        chat: z.string().describe("Allowed chat name, a phone number (+62…), a contact name or a JID"),
         message: z.string().describe("The exact message text (WhatsApp formatting like *bold* is fine)"),
       },
       async (a) => {
-        const c = chatOrFail(a.chat);
+        const c = sendTarget(a.chat);
         if (!c) return notAllowed(a.chat);
         await sendText(c.jid, a.message);
         const id = record(`WhatsApp → ${c.name}`, a.message, c.name);
@@ -127,14 +167,14 @@ export function createWhatsappServer(ctx: {
     ),
     tool(
       "send_file",
-      "Post an image or document from your working folder in an allowed WhatsApp chat (outward action).",
+      "Send an image, video or document from your working folder on WhatsApp (outward action): to an allowed chat, or (with the owner's approval) to anyone.",
       {
         chat: z.string(),
         file: z.string().describe("Path inside your working folder"),
         caption: z.string().optional(),
       },
       async (a) => {
-        const c = chatOrFail(a.chat);
+        const c = sendTarget(a.chat);
         if (!c) return notAllowed(a.chat);
         const abs = path.resolve(ctx.cwd, a.file);
         if (!abs.startsWith(path.resolve(ctx.cwd) + path.sep) || !fs.existsSync(abs)) {
@@ -149,6 +189,42 @@ export function createWhatsappServer(ctx: {
   ];
 
   tools.push(
+    tool(
+      "find_contact",
+      "Find people in the business's WhatsApp contacts by name or number (to message someone who isn't in an allowed chat). Returns names and numbers only.",
+      { query: z.string().describe("A name or part of a number") },
+      async (a) => {
+        const found = await searchContacts(a.query, 10).catch(() => []);
+        return ok(found.length ? found.map((c) => `- ${c.name || c.system_name || c.alias || "(no name)"}: +${c.phone}`).join("\n") : `No contact matches "${a.query}".`);
+      },
+    ),
+    tool(
+      "send_to_people",
+      "Send the same WhatsApp message to several people or chats at once (each gets it privately), e.g. a reseller update to a list of numbers. The owner approves the whole list in one go. Max 30; personal and useful only, never spam.",
+      {
+        recipients: z.array(z.string()).min(1).max(30).describe("Phone numbers (+62…), contact names or allowed chats"),
+        message: z.string(),
+      },
+      async (a) => {
+        const results: string[] = [];
+        for (const r of a.recipients) {
+          const c = sendTarget(r);
+          if (!c) {
+            results.push(`- ${r}: skipped (not approved)`);
+            continue;
+          }
+          try {
+            await sendText(c.jid, a.message);
+            record(`WhatsApp → ${c.name}`, a.message, c.name);
+            results.push(`- ${c.name}: sent`);
+          } catch (err) {
+            results.push(`- ${c.name}: failed (${(err as Error).message.slice(0, 80)})`);
+          }
+        }
+        ev("whatsapp_sent", `${teammate.name} sent a WhatsApp message to ${a.recipients.length} people`, {});
+        return ok(results.join("\n"));
+      },
+    ),
     tool(
       "create_group",
       "Create a new WhatsApp group on the business's number (outward action), e.g. a reseller community group. It becomes an allowed chat for the team. Returns an invite link the owner can share; nobody is added automatically.",
@@ -218,7 +294,8 @@ export function createWhatsappServer(ctx: {
 
 export function whatsappRules(business: Business, autonomy: Teammate["autonomy"]) {
   return `## WhatsApp
-You can read and post in ${business.name}'s WhatsApp, only in these chats: ${business.whatsappChats.map((c) => c.name).join(", ") || "(none yet; you can create a group with create_group)"}. They are communities of people like resellers who read on their phones.
+You can read and post in ${business.name}'s WhatsApp chats the owner allowed: ${business.whatsappChats.map((c) => c.name).join(", ") || "(none yet; you can create a group with create_group)"}. They are communities of people like resellers who read on their phones.
+- You can also message anyone else (a number with country code, a contact from find_contact, another group) with send_message, send_file or send_to_people (the same message to several people, approved as one list). Those always wait for the owner's approval, whatever your freedom setting. You can't read chats outside the allowed list.
 - Read the recent messages first (read_messages) so your post fits the conversation and doesn't repeat what was already said.
 - Posts are short, warm and useful (new products, stock, prices, promos, how to order, schedules). One message per update, no spamming, no mass @mentions. Never share private customer data, internal plans or costs.
 - ${

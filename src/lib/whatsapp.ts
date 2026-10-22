@@ -101,6 +101,14 @@ export async function searchMessages(query: string, chatJid?: string, limit = 30
   return (Array.isArray(d) ? d : d?.messages) ?? [];
 }
 
+export type WaContact = { jid: string; name: string; phone: string; alias?: string; system_name?: string };
+
+/** Contacts on the business's WhatsApp whose name or number matches (local store). */
+export async function searchContacts(query: string, limit = 10) {
+  const d = await wacli<WaContact[] | null>(["contacts", "search", query, "--limit", String(limit)], { readOnly: true });
+  return (d ?? []).filter((c) => c.jid?.endsWith("@s.whatsapp.net"));
+}
+
 export async function sendText(chatJid: string, message: string) {
   return wacli(["send", "text", "--to", chatJid, "--message", message], { timeoutMs: 120_000 });
 }

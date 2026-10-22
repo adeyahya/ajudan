@@ -182,7 +182,10 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
         <div className="text-xs text-muted-foreground">
-          WhatsApp → <span className="text-foreground">{str(i.chat)}</span>
+          WhatsApp →{" "}
+          <span className="text-foreground">
+            {Array.isArray(i.recipientNames) ? (i.recipientNames as string[]).join(", ") : str(i.chat)}
+          </span>
           {i.file ? ` · file ${str(i.file)}` : ""}
         </div>
         <Prose>{str(i.message ?? i.caption ?? "")}</Prose>

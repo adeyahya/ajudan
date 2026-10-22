@@ -66,6 +66,7 @@ You can still chat with any teammate directly.
 - **WhatsApp** (via [wacli](https://wacli.sh), `brew install openclaw/tap/wacli`): link the business's WhatsApp on **Business → WhatsApp** by scanning a QR code. The session and message store live in `<folder>/whatsapp/`.
   - Tick the groups or communities teammates may use (e.g. the reseller community); every other chat stays invisible to them.
   - Turn on "Can use WhatsApp" for a teammate on the Team page. They can read and search those chats for context and post updates; posting follows their freedom setting (approvals for "ask first", never for "draft only").
+  - Teammates can also message anyone else: a number, a contact (`find_contact`) or another group, and the same message to several people at once (`send_to_people`, approved as one list). Those always wait for your approval, even for teammates on full freedom, and only the people you approved can be messaged. Reading stays limited to the allowed chats.
   - Teammates can also create a group (`create_group`), rename it, set its description or make it admins-only (`update_group`), and fetch its invite link. Changes go through approvals like posts. A group's picture can't be set via wacli, so set it on the phone.
   - While the folder is open, the worker keeps `wacli sync --follow` running and spaces sends 2–6s apart.
   - wacli uses the unofficial WhatsApp Web protocol, so keep volume human-sized.

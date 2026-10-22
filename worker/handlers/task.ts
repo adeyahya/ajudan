@@ -18,7 +18,7 @@ import { DECISION, managerHistory, onTaskFinished, REPORT } from "@/lib/manager"
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { PausedError, runAbortController } from "../session";
-import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SERVER, createWhatsappServer, whatsappRules } from "../whatsapp-tools";
+import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
 import { BIZ_SERVER, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
@@ -50,6 +50,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     db.update(schema.teammates).set(v).where(eq(schema.teammates.id, teammate.id)).run();
 
   const ac = runAbortController();
+  /** WhatsApp people/chats outside the allowed list the owner approved during this run. */
+  const approvedTargets = new Set<string>();
   setTask({ status: "running", startedAt: new Date() });
   setMate({ state: "working", currentActivity: `Starting: ${task.title}` });
   ev("task_started", `${teammate.name} started "${task.title}"`);
@@ -124,6 +126,33 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         }
         return { behavior: "allow", updatedInput: input };
       }
+      // WhatsApp to anyone: allowed chats follow the freedom setting; everyone else
+      // always needs the owner's OK (even on "auto"), for exactly the people approved.
+      if (useWhatsapp && WA_SEND_TOOLS.includes(toolName)) {
+        const names = toolName.endsWith("send_to_people") ? ((input.recipients as string[]) ?? []) : [String(input.chat ?? "")];
+        const targets = await Promise.all(names.map((n) => resolveTarget(business, n)));
+        const unknown = names.filter((_, i) => !targets[i]);
+        if (unknown.length) {
+          return { behavior: "deny", message: `Couldn't find ${unknown.join(", ")} on WhatsApp. Use a phone number with the country code (+62…), or look the person up with find_contact.` };
+        }
+        const resolved = targets as NonNullable<(typeof targets)[number]>[];
+        const jids = resolved.map((t) => t.jid);
+        const updated = toolName.endsWith("send_to_people") ? { ...input, recipients: jids } : { ...input, chat: resolved[0].allowed ? input.chat : jids[0] };
+        const outside = resolved.filter((t) => !t.allowed);
+        if (!outside.length) {
+          if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
+          if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
+          return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
+        }
+        if (teammate.autonomy === "draft") return { behavior: "deny", message: "You're draft-only: save the message as a draft for the owner." };
+        const text = String(input.message ?? input.caption ?? input.file ?? "").replace(/\s+/g, " ").slice(0, 100);
+        const who = resolved.map((t) => t.name);
+        const summary = `${teammate.name} wants to WhatsApp ${who.length === 1 ? who[0] : `${who.length} people (${who.slice(0, 4).join(", ")}${who.length > 4 ? ", …" : ""})`}: "${text}"`;
+        const decision = await requestApproval(toolName, { ...updated, recipientNames: who }, options.signal, summary);
+        if (decision.behavior !== "allow") return decision;
+        jids.forEach((j) => approvedTargets.add(j));
+        return { behavior: "allow", updatedInput: updated };
+      }
       if (outward.includes(toolName)) {
         if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
         if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
@@ -136,8 +165,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       toolName: string,
       input: Record<string, unknown>,
       signal: AbortSignal,
+      summary = summarizeOutward(toolName, input, teammate.name),
     ): Promise<PermissionResult> => {
-      const summary = summarizeOutward(toolName, input, teammate.name);
       const approval = db
         .insert(schema.approvals)
         .values({ businessId: business.id, teammateId: teammate.id, taskId: task.id, toolName, input, summary })
@@ -190,7 +219,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       const allowedTools = ["WebSearch", "WebFetch", "Skill", ...SAFE_BIZ_TOOLS, ...(humans.length ? HUMAN_TOOLS : [])];
       const disallowedTools = [...(teammate.shellAccess ? [] : ["Bash"]), ...(teammate.autonomy === "draft" ? outward : [])];
       if (useWhatsapp) {
-        mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd });
+        mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd, approvedTargets });
         allowedTools.push(...SAFE_WA_TOOLS);
       }
       if (useBrowser) {
@@ -360,6 +389,10 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   // WhatsApp first: its send_message also ends with "__send_message".
   if (toolName === "mcp__whatsapp__send_message") {
     return `${who} wants to post in WhatsApp "${s(input.chat, 40)}": "${s(input.message, 100)}"`;
+  }
+  if (toolName === "mcp__whatsapp__send_to_people") {
+    const list = (input.recipients as string[] | undefined) ?? [];
+    return `${who} wants to WhatsApp ${list.length} chats: "${s(input.message, 100)}"`;
   }
   if (toolName === "mcp__whatsapp__create_group") {
     return `${who} wants to create the WhatsApp group "${s(input.name, 60)}"${input.announce_only ? " (only admins can post)" : ""}`;
