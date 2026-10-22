@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useT } from "@/components/i18n";
@@ -31,17 +32,29 @@ export function WhatsappQr({ businessId }: { businessId: string }) {
     };
   }, [router, businessId]);
 
-  if (s.state === "linked") return <p className="font-pixel text-sm text-good">{t("profile.wa.linkedSyncingGroups")}</p>;
-  if (s.state === "error") return <p className="text-sm text-bad">{s.message}</p>;
-  if (s.state !== "qr" || !s.qr) return <p className="text-sm text-muted-foreground pixel-caret">{t("profile.wa.starting")}</p>;
+  if (s.state === "linked")
+    return (
+      <p className="flex items-center gap-2 text-sm font-medium text-success">
+        <CheckCircle2 className="size-4" />
+        {t("profile.wa.linkedSyncingGroups")}
+      </p>
+    );
+  if (s.state === "error") return <p className="text-sm text-destructive">{s.message}</p>;
+  if (s.state !== "qr" || !s.qr)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-tertiary motion-reduce:animate-none" />
+        {t("profile.wa.starting")}
+      </p>
+    );
   return (
-    <div className="flex flex-wrap items-start gap-4">
+    <div className="flex flex-wrap items-start gap-6 rounded-lg border border-border p-4">
       {/* eslint-disable-next-line @next/next/no-img-element -- data URL from the API */}
-      <img src={s.qr} alt={t("profile.wa.qrAlt")} width={200} height={200} className="pixel-paper pixelated p-1" />
-      <ol className="list-decimal space-y-1 pl-5 text-sm">
+      <img src={s.qr} alt={t("profile.wa.qrAlt")} width={200} height={200} className="size-[200px] shrink-0 bg-background" style={{ imageRendering: "pixelated" }} />
+      <ol className="min-w-56 flex-1 list-decimal space-y-2 pl-5 text-sm leading-[22px] marker:text-tertiary">
         <li>{t("profile.wa.step1")}</li>
         <li>
-          {t("profile.wa.step2Before")} <b>{t("profile.wa.step2Path")}</b>.
+          {t("profile.wa.step2Before")} <b className="font-semibold">{t("profile.wa.step2Path")}</b>.
         </li>
         <li>{t("profile.wa.step3")}</li>
       </ol>

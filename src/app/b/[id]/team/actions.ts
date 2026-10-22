@@ -231,3 +231,17 @@ export async function setOwnerHuman(businessId: string, humanId: string | null) 
   db.update(schema.businesses).set({ ownerHumanId: humanId }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }
+
+const ACCESS = { browser: "browserAccess", whatsapp: "whatsappAccess", shell: "shellAccess" } as const;
+export type AccessKind = keyof typeof ACCESS;
+
+/** Turn one of a teammate's abilities (business browser, WhatsApp, sandboxed shell) on or off. */
+export async function setTeammateAccess(businessId: string, teammateId: string, kind: AccessKind, on: boolean) {
+  const column = ACCESS[kind];
+  if (!column) throw new Error("Unknown access");
+  db.update(schema.teammates)
+    .set({ [column]: on === true })
+    .where(and(ownTeammate(businessId, teammateId), eq(schema.teammates.kind, "ai")))
+    .run();
+  refresh();
+}

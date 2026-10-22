@@ -1,11 +1,22 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { languageName, LANGUAGES } from "@/lib/language";
+import { cn } from "@/lib/utils";
 
 /** Form field (name="language") for a business's primary language. */
-export function LanguageSelect({ id, defaultValue }: { id?: string; defaultValue: string }) {
+export function LanguageSelect({
+  id,
+  defaultValue,
+  size = "default",
+  className,
+}: {
+  id?: string;
+  defaultValue: string;
+  size?: "sm" | "default";
+  className?: string;
+}) {
   return (
     <Select name="language" defaultValue={defaultValue}>
-      <SelectTrigger id={id} className="w-full">
+      <SelectTrigger id={id} size={size} className={cn("w-full", className)}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

@@ -1,42 +1,47 @@
+import { Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, PiggyBank, Store, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
-import { Button, Card, Label, PageHeader, PageSkeleton, Prose } from "@/components/kit";
+import { Button, EmptyState, LineTabs, PageBody, PageHeader, Prose, PropertyList, Section, Skeleton, ListSkeleton } from "@/components/kit";
 import { getBusiness, getSpend, listTeammates } from "@/lib/data";
 import { t, uiLang, type UiLang } from "@/lib/i18n";
 import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
-import { LanguageSelect } from "@/app/language-select";
-import { saveLanguage, saveProfile } from "./actions";
+import { saveProfile } from "./actions";
 import { BrowserPanel } from "./browser-panel";
+import { EditProfileDialog } from "./profile-form";
 import { SecretsPanel } from "./secrets-panel";
 import { SpendPanel } from "./spend-panel";
 import { WhatsappPanel } from "./whatsapp-panel";
-import { ProfileForm } from "./profile-form";
 
-type Params = { params: Promise<{ id: string }> };
-
-export default function ProfilePage(props: Params) {
+/**
+ * Business settings, as line tabs (`?tab=`): the profile every teammate reads, WhatsApp,
+ * the business browser, credentials, and budget & language.
+ */
+export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
-      <Content params={props.params} />
+    <Suspense
+      fallback={
+        <PageBody>
+          <Skeleton className="h-[34px] w-56 rounded-md" />
+          <Skeleton className="mt-3 h-4 w-80 max-w-full" />
+          <Skeleton className="mt-8 h-8 w-full" />
+          <ListSkeleton rows={5} className="mt-8" />
+        </PageBody>
+      }
+    >
+      <Content {...props} />
     </Suspense>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div>
-      <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1.5">{title}</h3>
-      {children}
-    </div>
-  );
-}
+const TABS = ["profile", "whatsapp", "browser", "credentials", "budget"] as const;
+type Tab = (typeof TABS)[number];
 
 function List({ items, lang }: { items: string[]; lang: UiLang }) {
-  if (!items.length) return <p className="text-sm text-muted-foreground">{t(lang, "profile.none")}</p>;
+  if (!items.length) return <p className="text-sm text-tertiary">{t(lang, "profile.none")}</p>;
   return (
-    <ul className="list-disc pl-5 text-sm space-y-0.5">
+    <ul className="list-disc space-y-1 pl-5 text-sm leading-[22px] text-foreground marker:text-tertiary">
       {items.map((i, n) => (
         <li key={n}>{i}</li>
       ))}
@@ -44,136 +49,35 @@ function List({ items, lang }: { items: string[]; lang: UiLang }) {
   );
 }
 
-function LanguageForm({ id, language }: { id: string; language: string }) {
-  const lang = uiLang(language);
-  return (
-    <form action={saveLanguage.bind(null, id)} className="grid gap-2">
-      <Label htmlFor="language">{t(lang, "profile.language.label")}</Label>
-      <p className="text-xs text-muted-foreground">
-        {t(lang, "profile.language.current", { language: languageName(language) })} {t(lang, "profile.language.help")}
-      </p>
-      <div className="flex items-center gap-2">
-        <LanguageSelect key={language} id="language" defaultValue={language} />
-        <Button type="submit" variant="secondary">
-          {t(lang, "common.save")}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-async function Content({ params }: Params) {
+async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
   const { id } = await params;
+  const sp = await searchParams;
   const biz = await getBusiness(id);
   if (!biz) notFound();
   const lang = uiLang(biz.language);
+  const tab: Tab = TABS.includes(sp.tab as Tab) ? (sp.tab as Tab) : "profile";
   const p = biz.profile;
-  const mates = await listTeammates(id);
-  const spend = await getSpend(id);
-  const browserMates = mates.filter((t) => t.browserAccess).map((t) => t.name);
-  const shellMates = mates.filter((t) => t.shellAccess).map((t) => t.name);
-  const waMates = mates.filter((t) => t.whatsappAccess).map((t) => t.name);
-  if (!p) {
-    return (
-      <Card className="p-6 max-w-xl">
-        <h1 className="font-semibold mb-1">{t(lang, "profile.noProfileTitle")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t(lang, "profile.noProfileBefore")}{" "}
-          <Link href={`/b/${id}/onboarding`} className="text-primary underline">
-            {t(lang, "profile.noProfileLink")}
-          </Link>
-          .
-        </p>
-        <div className="mt-5">
-          <LanguageForm id={id} language={biz.language} />
-        </div>
-      </Card>
-    );
-  }
+  const mates = (await listTeammates(id)).filter((m) => m.kind !== "human");
+  const names = (pick: (m: (typeof mates)[number]) => boolean) => mates.filter(pick).map((m) => m.name);
+
+  const tabs: { key: Tab; label: string; icon: ReactNode }[] = [
+    { key: "profile", label: t(lang, "profile.tab.profile"), icon: <Store /> },
+    { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
+    { key: "browser", label: t(lang, "profile.tab.browser"), icon: <MonitorSmartphone /> },
+    { key: "credentials", label: t(lang, "profile.tab.credentials"), icon: <KeyRound /> },
+    { key: "budget", label: t(lang, "profile.tab.budget"), icon: <PiggyBank /> },
+  ];
 
   return (
-    <div>
-      <PageHeader title={p.name} subtitle={p.oneLiner} />
-      <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-        <Card className="p-6 grid gap-5 content-start">
-          {p.website && (
-            <a href={p.website} target="_blank" rel="noreferrer" className="text-sm text-primary underline">
-              {p.website}
-            </a>
-          )}
-          <Prose>{p.description}</Prose>
-          <Section title={t(lang, "profile.goals")}>
-            {p.goals.length ? (
-              <div className="grid gap-2">
-                {p.goals.map((g, i) => (
-                  <div key={i} className="rounded-lg border border-border p-3 text-sm">
-                    <div className="font-medium">{g.goal}</div>
-                    <div className="text-muted-foreground text-xs mt-0.5">
-                      {g.metric} → {g.target}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t(lang, "profile.none")}</p>
-            )}
-          </Section>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Section title={t(lang, "profile.products")}>
-              <List items={p.products} lang={lang} />
-            </Section>
-            <Section title={t(lang, "profile.targetCustomers")}>
-              <List items={p.targetCustomers} lang={lang} />
-            </Section>
-            <Section title={t(lang, "profile.channels")}>
-              <List items={p.channels} lang={lang} />
-            </Section>
-            <Section title={t(lang, "profile.competitors")}>
-              <List items={p.competitors} lang={lang} />
-            </Section>
-            <Section title={t(lang, "profile.constraints")}>
-              <List items={p.constraints} lang={lang} />
-            </Section>
-            <Section title={t(lang, "profile.teamNeeds")}>
-              <List items={p.teamNeeds} lang={lang} />
-            </Section>
-          </div>
-          <Section title={t(lang, "profile.brandVoice")}>
-            <Prose>{p.brandVoice}</Prose>
-          </Section>
-        </Card>
-        <div className="grid gap-6 content-start">
-        <Card className="p-6 grid gap-3">
-          <SpendPanel businessId={id} spend={spend} lang={lang} />
-          <p className="text-xs text-muted-foreground">
-            <Link href={`/b/${id}/health`} className="underline">
-              {t(lang, "profile.healthLink")}
-            </Link>
-            {t(lang, "profile.healthHint")}
-          </p>
-        </Card>
-        <Card className="p-6">
-          <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} lang={lang} />
-        </Card>
-        <Card className="p-6">
-          <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} lang={lang} />
-        </Card>
-        <Card className="p-6">
-          <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={shellMates} lang={lang} />
-        </Card>
-        <Card className="p-6 grid gap-6 content-start">
-          <LanguageForm id={id} language={biz.language} />
-          <details>
-            <summary className="cursor-pointer font-medium">{t(lang, "profile.editProfile")}</summary>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
-              {t(lang, "profile.editHintBefore")}{" "}
-              <Link href={`/b/${id}/onboarding`} className="underline">
-                {t(lang, "profile.editHintLink")}
-              </Link>{" "}
-              {t(lang, "profile.editHintAfter")}
-            </p>
-            <ProfileForm
+    <PageBody>
+      <PageHeader
+        title={p?.name ?? biz.name}
+        description={p?.oneLiner || undefined}
+        actions={
+          tab === "profile" && p ? (
+            <EditProfileDialog
               action={saveProfile.bind(null, id)}
+              interviewHref={`/b/${id}/onboarding`}
               initial={{
                 name: p.name,
                 website: p.website ?? "",
@@ -189,10 +93,99 @@ async function Content({ params }: Params) {
                 teamNeeds: joinLines(p.teamNeeds),
               }}
             />
-          </details>
-        </Card>
-        </div>
-      </div>
-    </div>
+          ) : undefined
+        }
+      />
+      <LineTabs
+        className="mb-8"
+        label={t(lang, "nav.business")}
+        items={tabs.map((x) => ({ href: x.key === "profile" ? "?" : `?tab=${x.key}`, label: x.label, icon: x.icon, active: tab === x.key }))}
+      />
+
+      {tab === "profile" &&
+        (p ? (
+          <>
+            <PropertyList
+              items={[
+                {
+                  icon: <Globe />,
+                  label: t(lang, "profile.form.website"),
+                  value: p.website ? (
+                    <a href={p.website} target="_blank" rel="noreferrer" className="truncate text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">
+                      {p.website.replace(/^https?:\/\//, "")}
+                    </a>
+                  ) : (
+                    <span className="text-tertiary">{t(lang, "profile.none")}</span>
+                  ),
+                },
+                { icon: <Languages />, label: t(lang, "profile.language.label"), value: languageName(biz.language) },
+                { icon: <UserRound />, label: t(lang, "profile.readBy"), value: t(lang, "profile.readByValue") },
+              ]}
+            />
+            <div className="mt-6 text-[15px] leading-[26px]">
+              <Prose>{p.description}</Prose>
+            </div>
+            <Section title={t(lang, "profile.goals")} className="mt-10">
+              {p.goals.length ? (
+                <ul className="divide-y divide-border border-y border-border">
+                  {p.goals.map((g, i) => (
+                    <li key={i} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5">
+                      <span className="text-sm leading-[22px] font-medium text-foreground">{g.goal}</span>
+                      <span className="text-[13px] text-muted-foreground tabular-nums">
+                        {g.metric} → {g.target}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-tertiary">{t(lang, "profile.none")}</p>
+              )}
+            </Section>
+            <div className="mt-8 grid gap-x-10 sm:grid-cols-2">
+              <Section title={t(lang, "profile.products")}>
+                <List items={p.products} lang={lang} />
+              </Section>
+              <Section title={t(lang, "profile.targetCustomers")} className="sm:mt-0">
+                <List items={p.targetCustomers} lang={lang} />
+              </Section>
+              <Section title={t(lang, "profile.channels")} className="mt-8">
+                <List items={p.channels} lang={lang} />
+              </Section>
+              <Section title={t(lang, "profile.competitors")} className="mt-8">
+                <List items={p.competitors} lang={lang} />
+              </Section>
+              <Section title={t(lang, "profile.constraints")} className="mt-8">
+                <List items={p.constraints} lang={lang} />
+              </Section>
+              <Section title={t(lang, "profile.teamNeeds")} className="mt-8">
+                <List items={p.teamNeeds} lang={lang} />
+              </Section>
+            </div>
+            <Section title={t(lang, "profile.brandVoice")}>
+              <div className="text-sm leading-[22px]">
+                <Prose>{p.brandVoice}</Prose>
+              </div>
+            </Section>
+          </>
+        ) : (
+          <EmptyState
+            icon={<Store />}
+            title={t(lang, "profile.noProfileTitle")}
+            body={t(lang, "profile.noProfileBody")}
+            action={
+              <Button asChild size="sm" variant="secondary">
+                <Link href={`/b/${id}/onboarding`}>{t(lang, "profile.openInterview")}</Link>
+              </Button>
+            }
+          />
+        ))}
+
+      {tab === "whatsapp" && (
+        <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={names((m) => m.whatsappAccess)} lang={lang} />
+      )}
+      {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
+      {tab === "credentials" && <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={names((m) => m.shellAccess)} lang={lang} />}
+      {tab === "budget" && <SpendPanel businessId={id} spend={await getSpend(id)} language={biz.language} lang={lang} />}
+    </PageBody>
   );
 }
