@@ -18,7 +18,8 @@ export function normalizePhone(input: string, language = "en") {
   let digits = input.replace(/[^\d+]/g, "");
   if (digits.startsWith("+")) digits = digits.slice(1);
   else if (digits.startsWith("00")) digits = digits.slice(2);
-  else if (digits.startsWith("0")) {
+  // "+0812…": a local number with a stray plus.
+  if (digits.startsWith("0")) {
     const cc: Record<string, string> = { id: "62", ms: "60" };
     if (!cc[language]) return null;
     digits = cc[language] + digits.slice(1);

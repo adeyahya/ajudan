@@ -53,7 +53,10 @@ export function fileType(rel: string): FileType {
 
 /** "work/images/x.png" → normalized, or null if it's outside what may be browsed. */
 export function cleanRel(rel: string | undefined | null) {
-  const clean = path.posix.normalize(String(rel ?? "").replace(/\\/g, "/")).replace(/^\/+|\/+$/g, "");
+  const raw = String(rel ?? "").replace(/\\/g, "/");
+  // Refuse ".." before normalizing: "work/.." would otherwise become the folder root.
+  if (raw.split("/").includes("..")) return null;
+  const clean = path.posix.normalize(raw).replace(/^\/+|\/+$/g, "");
   if (!clean || clean === ".") return "";
   const parts = clean.split("/");
   if (parts.some((p) => p === ".." || p.startsWith("."))) return null;

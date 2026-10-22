@@ -65,9 +65,43 @@ export async function notifyOwner(approvalId: string) {
   }
 }
 
+// A refusal right after a yes-word ("ya tidak jadi", "iya, jangan dulu") wins; "ok gapapa" stays a yes.
+const NO_AFTER_YES = /^(tidak|nggak|gak|enggak|ga|jangan|batal|tolak)\b(?![\s-]*(apa|papa|masalah))/i;
+
+/**
+ * The owner's answer: decision, target ("a7f2", "semua"/"all" or "") and note, or null.
+ * A 4-character word after the yes/no counts as a code only when it mixes digits and
+ * letters ("A7F2") or is an open request's code, so "ok cabe 5kg" and "ok 1000 pcs" are notes.
+ */
+export function parseAnswer(raw: string, isOpenCode: (code: string) => boolean) {
+  const text = raw.replace(/^🎤\s*/, "");
+  const yes = YES.exec(text);
+  let m = yes ?? NO.exec(text);
+  if (!m) return null;
+  let decision: "approved" | "rejected" = yes ? "approved" : "rejected";
+  if (yes) {
+    const rest = text.replace(/^\s*/, "").slice(yes[1].length).replace(/^[\s,.:!-]+/, "");
+    if (NO_AFTER_YES.test(rest)) {
+      m = NO.exec(rest) ?? m;
+      decision = "rejected";
+    }
+  }
+  const word = (m[2] ?? "").replace("#", "");
+  let target = word.toLowerCase();
+  let note = (m[3] ?? "").trim();
+  const mixed = /\d/.test(target) && /[a-f]/.test(target);
+  if (target && target !== "semua" && target !== "all" && !mixed && !isOpenCode(target)) {
+    note = [word, note].filter(Boolean).join(" ");
+    target = "";
+  }
+  // "ya?" is a question back, not an answer.
+  if (!target && note.startsWith("?")) return null;
+  return { decision, target, note };
+}
+
 /** Is this message only an approval answer (so it can be handled without the usual wait)? */
 export function isApprovalAnswer(text: string) {
-  return YES.test(text) || NO.test(text);
+  return parseAnswer(text, () => true) !== null;
 }
 
 /**
@@ -88,18 +122,13 @@ export async function handleOwnerAnswers(business: Business, owner: Teammate, te
   const reply = (text: string) => sendToHuman({ business, human: owner, from: null, text }).catch((err) => console.error("[owner-approvals]", err));
 
   for (const raw of texts) {
-    const text = raw.replace(/^🎤\s*/, "");
-    const yes = YES.exec(text);
-    const m = yes ?? NO.exec(text);
-    if (!m) {
+    const answer = parseAnswer(raw, (code) => findPendingByCode(business.id, code).length > 0);
+    if (!answer) {
       rest.push(raw);
       continue;
     }
-    const decision = yes ? "approved" : "rejected";
-    let target = (m[2] ?? "").replace("#", "").toLowerCase();
-    // "ok 1000 pcs": a number that isn't an open request's code is just a number.
-    if (/^\d{4}$/.test(target) && !findPendingByCode(business.id, target).length) target = "";
-    const note = (m[3] ?? "").trim() || null;
+    const { decision, target } = answer;
+    const note = answer.note || null;
     // "ok, sekarang bikin post buat TikTok…" without a code is an instruction, not an answer.
     if (!target && note && note.split(/\s+/).length > 8) {
       rest.push(raw);

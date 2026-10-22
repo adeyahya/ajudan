@@ -40,9 +40,8 @@ describe("cleanRel", () => {
     expect(cleanRel("..\\work")).toBeNull();
   });
 
-  it("'work/..' normalizes to the folder root (current behaviour)", () => {
-    // normalize() collapses "work/.." before the ".." check runs, so this means "the root".
-    expect(cleanRel("work/..")).toBe("");
+  it("refuses 'work/..' (it would normalize to the folder root)", () => {
+    expect(cleanRel("work/..")).toBeNull();
   });
 
   it("refuses dotfiles and dot-folders at any depth", () => {
@@ -87,7 +86,6 @@ describe("resolveBrowsable", () => {
 
   it("returns the folder itself for the empty rel", () => {
     expect(resolveBrowsable("", dir)).toBe(dir);
-    expect(resolveBrowsable("work/..", dir)).toBe(dir);
   });
 
   it("returns null without a folder", () => {
@@ -119,23 +117,10 @@ describe("resolveBrowsable", () => {
     expect(resolveBrowsable("work/same-root.md", dir)).toBe(path.join(dir, "work", "same-root.md"));
   });
 
-  // cleanRel("work/..") becomes "" (browse.ts: normalize runs before the ".." check), and
-  // listDir treats a non-empty rel that resolves to the folder itself as a directory to
-  // list: the business folder's root (ajudan.db, backups/, browser/) shows up as entries.
-  // Their contents stay unreachable (child rels are refused), but the names leak.
-  it.fails("listDir('work/..') must not list the business folder root", () => {
+  it("listDir('work/..') doesn't list the business folder root", () => {
     process.env.AJUDAN_DATA_DIR = dir;
     try {
       expect(listDir("work/..")).toBeNull();
-    } finally {
-      delete process.env.AJUDAN_DATA_DIR;
-    }
-  });
-
-  it("listDir('work/..') lists the folder root today (current behaviour)", () => {
-    process.env.AJUDAN_DATA_DIR = dir;
-    try {
-      expect(listDir("work/..")?.map((e) => e.name)).toContain("ajudan.db");
     } finally {
       delete process.env.AJUDAN_DATA_DIR;
     }

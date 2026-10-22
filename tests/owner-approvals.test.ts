@@ -4,15 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 process.env.AJUDAN_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "ajudan-oa-"));
-const { NO, YES, isApprovalAnswer } = await import("../worker/owner-approvals");
+const { isApprovalAnswer, parseAnswer } = await import("../worker/owner-approvals");
 
-/** What handleOwnerAnswers extracts: the decision, the code/"semua"/"all" target and the note. */
-function parse(text: string) {
-  const yes = YES.exec(text);
-  const m = yes ?? NO.exec(text);
-  if (!m) return null;
-  return { decision: yes ? "approved" : "rejected", target: (m[2] ?? "").replace("#", "").toLowerCase(), note: (m[3] ?? "").trim() };
-}
+/** What handleOwnerAnswers extracts; by default every 4-character word is an open code. */
+const parse = (text: string, isOpenCode = (_code: string) => true) => parseAnswer(text, isOpenCode);
 
 describe("YES", () => {
   it.each(["ya", "iya", "y", "yes", "ok", "oke", "okay", "setuju", "approve", "approved", "acc", "gas", "lanjut", "boleh"])("accepts %j", (w) => {
@@ -96,33 +91,33 @@ describe("isApprovalAnswer", () => {
     expect(isApprovalAnswer("OK semua")).toBe(true);
   });
 
-  it("doesn't strip the voice-note prefix that handleOwnerAnswers strips (current behaviour)", () => {
-    // handleOwnerAnswers removes a leading "🎤 " before matching; isApprovalAnswer doesn't,
-    // so a transcribed voice "ya" still goes through the normal wait.
-    expect(isApprovalAnswer("🎤 ya")).toBe(false);
+  it("reads a transcribed voice answer", () => {
+    expect(isApprovalAnswer("🎤 ya")).toBe(true);
   });
 });
 
-describe("known weak spots in the regexes (owner-approvals.ts:15-16)", () => {
-  // Recorded as it.fails: these document reasonable inputs the current regexes get wrong.
-  // handleOwnerAnswers only rescues an all-digit false code (a 4-digit number that isn't a
-  // pending code is dropped); a 4-letter hex word like "cabe", "beda", "baca" or "face" is
-  // taken as the code and the owner is told it isn't found.
-  it.fails("a 4-letter hex-looking Indonesian word after 'ok' is not a code", () => {
-    expect(parse("ok cabe 5kg")).toEqual({ decision: "approved", target: "", note: "cabe 5kg" });
+describe("ambiguous answers", () => {
+  const none = () => false;
+  it("a 4-letter hex-looking word that isn't an open code is part of the note", () => {
+    expect(parse("ok cabe 5kg", none)).toEqual({ decision: "approved", target: "", note: "cabe 5kg" });
+    expect(parse("ya beda dikit", none)).toEqual({ decision: "approved", target: "", note: "beda dikit" });
+    expect(parse("ok 1000 pcs", none)).toEqual({ decision: "approved", target: "", note: "1000 pcs" });
   });
-  it.fails("'ya beda dikit' is a yes with a note, not code 'beda'", () => {
-    expect(parse("ya beda dikit")).toEqual({ decision: "approved", target: "", note: "beda dikit" });
+  it("a code that mixes digits and letters stays a code even when it's not open", () => {
+    expect(parse("ya A7F2", none)).toEqual({ decision: "approved", target: "a7f2", note: "" });
   });
-  // YES is tried before NO, so a yes-word followed by a refusal still approves.
-  it.fails("'ya tidak jadi' is a refusal", () => {
-    expect(parse("ya tidak jadi")).toMatchObject({ decision: "rejected" });
-  });
-  it.fails("'iya, jangan dulu' is a refusal", () => {
+  it("a refusal right after a yes-word is a refusal", () => {
+    expect(parse("ya tidak jadi")).toMatchObject({ decision: "rejected", note: "jadi" });
     expect(parse("iya, jangan dulu")).toMatchObject({ decision: "rejected" });
+    expect(parse("ya tidak A7F2 kemahalan")).toEqual({ decision: "rejected", target: "a7f2", note: "kemahalan" });
   });
-  // "?" is not in the separator class, so "ya?" (a question) approves with note "?".
-  it.fails("'ya?' is a question, not an approval", () => {
+  it("'it's fine' after a yes-word stays a yes", () => {
+    expect(parse("ok gapapa")).toMatchObject({ decision: "approved" });
+    expect(parse("ya ga papa")).toMatchObject({ decision: "approved" });
+    expect(parse("oke tidak masalah")).toMatchObject({ decision: "approved" });
+  });
+  it("'ya?' is a question, not an approval", () => {
     expect(parse("ya?")).toBeNull();
+    expect(isApprovalAnswer("ya?")).toBe(false);
   });
 });

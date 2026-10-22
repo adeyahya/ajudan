@@ -43,9 +43,8 @@ describe("normalizePhone", () => {
     expect(normalizePhone("tel: +62 812 3456 7890")).toBe("6281234567890");
   });
 
-  it("'+0…' keeps the 0 instead of swapping in the country code (current behaviour)", () => {
-    // The + branch wins and the leading 0 is never looked at again (humans.ts:19-21).
-    expect(normalizePhone("+081234567890", "id")).toBe("081234567890");
+  it("'+0…' is a local number with a stray plus", () => {
+    expect(normalizePhone("+081234567890", "id")).toBe("6281234567890");
   });
 });
 
