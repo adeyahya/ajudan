@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ActivityEvent, TeammateState } from "@/db/schema";
+import { readRest, type RestState } from "@/lib/rest";
 
 /** What the office needs to render. Shared by the page (initial props) and GET /api/b/[id]/state. */
 export type OfficeTeammate = {
@@ -22,6 +23,8 @@ export type OfficeState = {
   queuedTasks: number;
   /** Saved deliverables, shown as binders on the office's Work shelf. */
   deliverableCount: number;
+  /** Out of Claude usage: the team sleeps and queued work waits (src/lib/rest.ts). */
+  rest: RestState | null;
 };
 
 /** Synchronous SQLite read. Server Components must `await connection()` before calling it. */
@@ -64,6 +67,7 @@ export function queryOfficeState(businessId: string): OfficeState {
     teammates,
     deliverableCount,
     pendingApprovals,
+    rest: readRest(),
     runningTasks: taskRows.filter((t) => t.status === "running").length,
     queuedTasks: taskRows.filter((t) => t.status === "queued").length,
   };

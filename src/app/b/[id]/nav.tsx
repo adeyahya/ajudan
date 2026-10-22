@@ -8,6 +8,7 @@ const TABS = [
   { href: "/manager", label: "Manager", icon: "★" },
   { href: "", label: "Office", icon: "▦" },
   { href: "/approvals", label: "Approvals", icon: "✉" },
+  { href: "/desk", label: "Desk", icon: "☎" },
   { href: "/deliverables", label: "Work", icon: "▤" },
   { href: "/files", label: "Files", icon: "▥" },
   { href: "/team", label: "Team", icon: "☺" },

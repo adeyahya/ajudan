@@ -37,11 +37,24 @@ export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
   return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 
-/** Atomically claim the oldest queued job (of a lane, if given). */
-export function claimJob(lane?: Lane) {
+/** False only for requests to human teammates (they go out on WhatsApp): those run while the team rests. */
+export function needsClaude(job: Pick<Job, "kind" | "payload">) {
+  if (job.kind !== "run_task") return true;
+  const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
+  const row = db
+    .select({ kind: schema.teammates.kind })
+    .from(schema.tasks)
+    .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.kind !== "human";
+}
+
+/** Atomically claim the oldest queued job (of a lane, if given; only ones `allow` accepts, if given). */
+export function claimJob(lane?: Lane, allow?: (job: Job) => boolean) {
   return db.transaction((tx) => {
     const queued = tx.select().from(schema.jobs).where(eq(schema.jobs.status, "queued")).orderBy(asc(schema.jobs.id)).limit(200).all();
-    const job = lane ? queued.find((j) => laneOf(j) === lane) : queued[0];
+    const job = queued.find((j) => (!lane || laneOf(j) === lane) && (!allow || allow(j)));
     if (!job) return undefined;
     tx.update(schema.jobs)
       .set({ status: "running", startedAt: new Date(), attempts: job.attempts + 1 })
