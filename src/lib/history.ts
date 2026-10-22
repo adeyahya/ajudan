@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Task } from "@/db/schema";
 import { HUMAN } from "@/lib/humans";
-import { DECISION, REPORT } from "@/lib/manager";
+import { DECISION, REPORT, RESULTS, REVISION } from "@/lib/manager";
 
 /**
  * A teammate's recent tasks as a conversation, for continuity between runs: what was
@@ -46,6 +46,8 @@ export function taskHistory(teammateId: string, beforeTask: Pick<Task, "id" | "c
 
 function askedBy(createdBy: string) {
   if (createdBy === DECISION) return "Owner's approval decision";
+  if (createdBy === RESULTS) return "Results of work you handed on";
+  if (createdBy === REVISION) return "Revision requested";
   if (createdBy === "user") return "Owner";
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === "system:capability") return "Owner (approved your request)";

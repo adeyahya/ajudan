@@ -12,14 +12,15 @@ import { enqueueJob, type JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
 import { describeMedia, linkIntoWorkspace, mediaInfo, mediaKind } from "@/lib/media";
 import { memoryNeedsConsolidation } from "@/lib/memory";
-import { getRole, isVideoRole, MANAGER_ROLE } from "@/lib/roles";
+import { getRole, isVideoRole, MANAGER_ROLE, PLANNING_ROLES, roleChecklist } from "@/lib/roles";
 import os from "node:os";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { HUMAN, humanThread, listHumans } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { isReminderTask, REPLY } from "../replies";
-import { DECISION, onTaskFinished, REPORT } from "@/lib/manager";
+import { canReview, DECISION, onTaskFinished, REPORT, RESULTS, REVISION } from "@/lib/manager";
+import { delegationDepth, MAX_DELEGATION_DEPTH } from "@/lib/tasks";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { isInside, resolveReal } from "../fs-guard";
@@ -125,9 +126,14 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       // Humans are asked on WhatsApp (ask_human), not given AI tasks.
       .filter((r) => r.kind !== "human");
     const humans = teammate.autonomy === "draft" ? [] : listHumans(business.id);
-    // Delegated tasks and manager reports don't delegate further: keeps the team from
-    // ping-ponging work (and cost).
-    const canDelegate = !task.createdBy.startsWith("teammate:") && task.createdBy !== REPORT;
+    // One level of sub-delegation within the depth cap; follow-ups (reports, results
+    // coming back, revisions) and planners don't hand work on: keeps the team from
+    // ping-ponging work (and cost). The manager's first report may send work back once
+    // with request_revision instead.
+    const canDelegate =
+      ![REPORT, RESULTS, REVISION].includes(task.createdBy) &&
+      !PLANNING_ROLES.has(teammate.roleKey) &&
+      delegationDepth(task.id) + 1 <= MAX_DELEGATION_DEPTH;
     const delegationRoster = canDelegate ? roster : [];
 
     const useBrowser = teammate.browserAccess;
@@ -143,6 +149,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       isManager,
       signal: ac.signal,
       humans,
+      reviewRequestId: isManager && canReview(task) ? task.parentTaskId : null,
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
@@ -535,7 +542,7 @@ The owner talks to you instead of to each teammate, in a chat. Each message:
 3. Tiny asks you can finish in one go (a one-line caption, a short reply to a customer message, rewording a sentence, a yes/no with a reason): do them yourself, and save_deliverable when it's a piece of work the owner will use. Anything that needs research, images, video, browsing, WhatsApp, or more than a few lines of writing is not tiny.
 4. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
 5. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
-When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
+When a "Report back" task arrives, first review the team's actual work as it says (once per request), then summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
 If nobody on the team can do something (a missing credential, shell, browser or WhatsApp), have the teammate who'd do it ask with request_capability (or ask yourself), and tell the owner to look at the Approvals page.`;
 }
 
@@ -620,7 +627,7 @@ function buildSystemPrompt(
         : `Only ${channels} really reach the outside world, and you're draft-only there: you never send, post or change anything, only read and prepare.`;
 
   return `You are ${teammate.name}, the ${teammate.title} on the AI team of ${business.name}${business.website ? ` (${business.website})` : ""}.
-You work for the business owner. Your working folder contains BUSINESS.md (everything about the business) and memory.md (your own long-term notes). Read both first.
+You work for the business owner. Your working folder contains BUSINESS.md (everything about the business), TEAM.md (the owner's feedback and preferences for the whole team: follow them) and memory.md (your own long-term notes). Read all three first. TEAM.md is a read-only copy, refreshed every task: don't edit it.
 
 ## Your role
 ${role?.instructions ?? ""}
@@ -633,10 +640,20 @@ ${list(teammate.kpis)}
 
 ## Your team
 ${team}
-${canDelegate && roster.length ? "Delegate work that fits someone else's role with assign_task (by first name, with self-contained instructions)." : "Do this task yourself; don't delegate it."}
+${
+  canDelegate && roster.length
+    ? teammate.roleKey === MANAGER_ROLE.key
+      ? "Delegate work that fits someone else's role with assign_task (by first name, with self-contained instructions)."
+      : "Do your part yourself. Only when a clearly separate piece fits someone else's role better, hand it on with assign_task (by first name, with self-contained instructions); their results come back to you as a new task to fold into your work."
+    : "Do this task yourself; don't delegate it."
+}
+
+## Before you save
+Check every piece of work against this list before save_deliverable or update_deliverable, and fix what fails:
+${list(roleChecklist(teammate.roleKey))}
 
 ## Rules
-- Save every piece of work (posts, articles, emails, plans, reports) with save_deliverable. Work that isn't saved is lost.
+- Save every piece of work (posts, articles, emails, plans, reports) with save_deliverable. Work that isn't saved is lost. To change a piece that's already saved (a revision), use read_deliverable and update_deliverable instead of saving a new one.
 - Ajudan can't post to Instagram, blogs, email, DMs or any other channel for you. When a piece is finished, call mark_ready_to_post(deliverable_id, channel); write emails, DMs and outreach with draft_outbound_message. Both only prepare the text for the owner, who posts or sends it from the Work page. Never claim you posted or sent something. ${outward}
 - Use set_status to keep a short, current status line for the office.
 - You can only read and write files inside your working folder. Keep scratch files under work/.
@@ -681,6 +698,10 @@ function buildPrompt(task: Task, history = "", files = "", resumed = false) {
       ? "Your team finished work you delegated. Report back to the owner in this chat."
       : task.createdBy === DECISION
         ? "The owner just made an approval decision. React to it in this chat, briefly."
+      : task.createdBy === RESULTS
+        ? "Work you handed on to teammates is finished. Fold it into your work."
+      : task.createdBy === REVISION
+        ? "Your work came back with feedback. Revise it."
       : task.createdBy === REPLY
         ? "News on a WhatsApp conversation the team started: a reply, or no reply in time."
       : task.createdBy === "schedule"

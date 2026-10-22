@@ -66,14 +66,14 @@ ${roles}
 </role_templates>
 ${currentBlock}
 Requirements:
-- Propose ${active.length ? `up to ${MAX_TEAM} teammates in total (counting the active ones)` : "3-5 teammates"}. ${hasLead ? "The team already has a growth lead." : 'Always include exactly one "growth_lead" who coordinates the others.'} Pick the other roles that best serve this business's goals and the owner's stated team needs; do not add roles just to fill seats.
+- Propose ${active.length ? `up to ${MAX_TEAM} teammates in total (counting the active ones)` : "3-5 teammates"}. ${hasLead ? "The team already has a growth strategist." : 'Always include exactly one "growth_lead" (the growth strategist), who owns the strategy and the weekly plan; a manager is added automatically and hands out the work, so the strategist plans but never delegates.'} Pick the other roles that best serve this business's goals and the owner's stated team needs; do not add roles just to fill seats. Propose "operations_assistant" when the owner handles orders, stock, invoices or bookkeeping by hand, and "customer_support" when customers ask questions (for example on WhatsApp) that the owner answers today.
 - roleKey must be one of the template keys above. Use the template title or a slightly more specific variant.
 - name: a friendly, distinct first name per teammate.
 - why: 1-2 sentences tied to this business's goals.
 - persona: 3-6 sentences of business-specific instructions (products, customers, brand voice, channels, what to focus on, what to avoid). Do not repeat the generic template instructions.
 - responsibilities: 3-5 concrete items. kpis: 2-4 measurable items tied to the goals.
 - autonomy: "ask" by default; "draft" for anything customer-facing that is sensitive. Avoid "auto" unless the work is purely internal research.
-- schedule: optionally a weekly 5-field cron expression (e.g. "0 9 * * 1" = Mondays 09:00) with a concrete schedulePrompt describing the recurring work; otherwise null for both. Give the growth lead a weekly planning schedule.
+- schedule: optionally a weekly 5-field cron expression (e.g. "0 9 * * 1" = Mondays 09:00) with a concrete schedulePrompt describing the recurring work; otherwise null for both. Give the growth strategist a weekly planning schedule (a plan for the week saved on the Work page; it never delegates).
 - summary: 2-4 sentences for the owner explaining how this team will reach the goals${current.length ? " and what changed from the current team" : ""}.
 - Language: write title, why, persona, responsibilities, kpis, schedulePrompt and summary in ${getLanguage(biz.language).nativeLabel}. Names may be any fitting first names. roleKey, autonomy and schedule stay as specified.`,
       systemPrompt: `You are Ajudan's team designer. You design small, focused teams of AI teammates for small businesses, picking from a fixed library of role templates and customizing them to the business.\n\n${languageInstruction(biz.language)}`,
@@ -153,12 +153,12 @@ function defaultGrowthLead(profile: BusinessProfile): TeammateProposal {
     name: "Maya",
     roleKey: role.key,
     title: role.title,
-    why: "Coordinates the team and keeps the work aligned with your goals.",
+    why: "Keeps the team's work aligned with your goals: a clear plan every week that you (and the manager) can act on.",
     persona: defaultPersona(role, profile),
-    responsibilities: ["Turn the goals into a weekly plan", "Delegate tasks to the team", "Report progress to the owner"],
+    responsibilities: ["Turn the goals into a weekly plan with priorities", "Review last week's results against the goals", "Recommend what each channel should focus on next"],
     kpis: role.defaultKpis,
     autonomy: "ask",
     schedule: "0 9 * * 1",
-    schedulePrompt: "Review last week's work, write a short progress report and plan this week's tasks for the team.",
+    schedulePrompt: "Review last week's work against the goals and save this week's plan: priorities, what each teammate should work on, and what to measure. Don't assign tasks; the manager hands the work out.",
   };
 }

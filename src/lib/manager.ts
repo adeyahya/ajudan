@@ -1,7 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Approval } from "@/db/schema";
-import { MANAGER_ROLE } from "@/lib/roles";
+import type { Approval, Task } from "@/db/schema";
+import { describeDeliverable } from "@/lib/deliverables";
+import { MANAGER_ROLE, roleChecklist } from "@/lib/roles";
 import { createTask } from "@/lib/tasks";
 import { initTeammateWorkspace } from "@/lib/workspace";
 
@@ -9,10 +10,14 @@ import { initTeammateWorkspace } from "@/lib/workspace";
  * The manager: the owner's single point of contact. The owner talks to the manager;
  * the manager answers or delegates (assign_task links the child tasks to the owner's
  * request via parentTaskId) and, when all delegated work is finished, gets a
- * "system:report" task to report back in the same chat.
+ * "system:report" task to review it and report back in the same chat.
  */
 
 export const REPORT = "system:report";
+/** Work a teammate handed on is finished: back to that teammate (not the manager). */
+export const RESULTS = "system:results";
+/** Rework a saved deliverable: the owner's "Needs changes" or the manager's review (src/lib/feedback.ts). */
+export const REVISION = "system:revision";
 
 export function getManager(businessId: string) {
   return db
@@ -63,73 +68,174 @@ export function ensureManager(businessId: string) {
 }
 
 const FINISHED = ["done", "failed", "cancelled"] as const;
+const finished = (t: Pick<Task, "status">) => (FINISHED as readonly string[]).includes(t.status);
+
+/** Where new results go into a follow-up that's still queued (see followUp). */
+const NEXT = "\n\n## What to do now\n";
+
+const getTask = (id: string) => db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
+const childrenOf = (ids: string[]) => (ids.length ? db.select().from(schema.tasks).where(inArray(schema.tasks.parentTaskId, ids)).all() : []);
 
 /**
- * Call when a task finishes. If it was delegated by the manager and it was the last
- * open piece of that request, queue the manager's report to the owner.
+ * Call when a task finishes. Whoever delegated it hears back once everything they
+ * handed on is finished: the manager reports to the owner (REPORT), a teammate who
+ * sub-delegated folds the results into its own work (RESULTS). A sub-delegation also
+ * counts towards the manager's request above it, so the manager reports on it too.
  */
 export function onTaskFinished(taskId: string) {
-  const task = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
+  const task = getTask(taskId);
   if (!task?.parentTaskId || task.createdBy === REPORT) return;
-  const parent = db.select().from(schema.tasks).where(eq(schema.tasks.id, task.parentTaskId)).get();
+  const parent = getTask(task.parentTaskId);
   if (!parent) return;
-  const manager = getManager(task.businessId);
-  if (!manager || parent.teammateId !== manager.id) return;
+  followUp(parent);
+  // Depth is capped at 2 (src/lib/tasks.ts), so the grandparent is the furthest up.
+  const grand = parent.parentTaskId ? getTask(parent.parentTaskId) : undefined;
+  if (grand) followUp(grand);
+}
 
-  // Requests to human teammates stay open until closed; they don't hold up the report.
+/**
+ * The work a delegator waits for: what it handed on, plus what those teammates handed
+ * on in turn (one level, the cap). Its own follow-ups and requests to human teammates
+ * (open until closed) don't count.
+ */
+export function delegatedWork(parentId: string, kind: string, humanIds: Set<string>) {
+  const children = childrenOf([parentId]);
+  const counts = (t: Task) => t.createdBy !== REPORT && !humanIds.has(t.teammateId);
+  const direct = children.filter((c) => c.createdBy !== kind && counts(c));
+  const nested = childrenOf(direct.map((c) => c.id)).filter(counts);
+  return { work: [...direct, ...nested], followUps: children.filter((c) => c.createdBy === kind) };
+}
+
+/** Queue (or extend) the delegator's follow-up when everything it handed on is finished. */
+function followUp(parent: Task) {
+  const delegator = db.select().from(schema.teammates).where(eq(schema.teammates.id, parent.teammateId)).get();
+  if (!delegator || delegator.kind !== "ai" || delegator.status !== "active") return;
+  const isManager = delegator.roleKey === MANAGER_ROLE.key;
+  const kind = isManager ? REPORT : RESULTS;
+
   const humanIds = new Set(
     db
       .select({ id: schema.teammates.id })
       .from(schema.teammates)
-      .where(and(eq(schema.teammates.businessId, task.businessId), eq(schema.teammates.kind, "human")))
+      .where(and(eq(schema.teammates.businessId, parent.businessId), eq(schema.teammates.kind, "human")))
       .all()
       .map((t) => t.id),
   );
-  const all = db.select().from(schema.tasks).where(eq(schema.tasks.parentTaskId, parent.id)).all();
-  const work = all.filter((c) => c.createdBy !== REPORT && !humanIds.has(c.teammateId));
-  if (work.some((c) => !(FINISHED as readonly string[]).includes(c.status))) return;
-  // Report again when more work finished since the last report (e.g. a teammate
-  // continued after a human teammate sent footage).
-  const lastReport = all
-    .filter((c) => c.createdBy === REPORT)
-    .reduce<number>((m, c) => Math.max(m, c.createdAt.getTime()), 0);
-  const children = work.filter((c) => (c.finishedAt?.getTime() ?? 0) > lastReport);
-  if (!children.length) return;
+  const { work, followUps } = delegatedWork(parent.id, kind, humanIds);
+  if (!work.length || work.some((c) => !finished(c))) return;
+  // Report again when more work finished since the last follow-up (e.g. a teammate
+  // continued after a human teammate sent footage, or a revision came back).
+  const last = followUps.reduce<number>((m, c) => Math.max(m, c.createdAt.getTime()), 0);
+  const fresh = work.filter((c) => (c.finishedAt?.getTime() ?? 0) > last);
+  if (!fresh.length) return;
 
-  const names = new Map(
-    db
-      .select({ id: schema.teammates.id, name: schema.teammates.name })
-      .from(schema.teammates)
-      .where(inArray(schema.teammates.id, [...new Set(children.map((c) => c.teammateId))]))
-      .all()
-      .map((t) => [t.id, t.name]),
-  );
-  const results = children
-    .map(
-      (c) =>
-        `### ${names.get(c.teammateId) ?? "Teammate"}: ${c.title} (${c.status})\n${(c.result ?? "").slice(0, 2500)}`,
-    )
-    .join("\n\n");
-
-  // Children that finish together: one report, not two. A report still queued for
-  // this request gets the new results added instead of a second task.
-  const queued = all.find((c) => c.createdBy === REPORT && c.status === "queued");
+  const block = describeResults(fresh);
+  // Work that finishes together: one follow-up, not two. One still queued gets the new
+  // results added instead of a second task.
+  const queued = followUps.find((c) => c.status === "queued");
   if (queued) {
-    db.update(schema.tasks)
-      .set({ instructions: queued.instructions.replace("\n\nReport back to the owner now:", `\n\n${results}\n\nReport back to the owner now:`) })
-      .where(eq(schema.tasks.id, queued.id))
-      .run();
+    db.update(schema.tasks).set({ instructions: queued.instructions.replace(NEXT, `\n\n${block}${NEXT}`) }).where(eq(schema.tasks.id, queued.id)).run();
     return;
   }
 
+  if (isManager) {
+    // The manager reviews the work once per request: the first report may send pieces
+    // back (request_revision); every later one reports as is, so it can't loop.
+    const review = !followUps.length;
+    createTask({
+      businessId: parent.businessId,
+      teammateId: delegator.id,
+      title: `Report: ${parent.title}`.slice(0, 80),
+      createdBy: REPORT,
+      parentTaskId: parent.id,
+      instructions: `Your team has finished ${last ? "more of " : ""}the work you delegated for the owner's request:\n\n> ${quote(parent.instructions, 1500)}\n\n${block}${NEXT}${review ? REVIEW_STEP : FINAL_REPORT}${REPORT_STEP}`,
+    });
+    return;
+  }
+
+  const manager = getManager(parent.businessId);
+  const forManager = !!manager && !!parent.parentTaskId && getTask(parent.parentTaskId)?.teammateId === manager.id;
   createTask({
-    businessId: task.businessId,
-    teammateId: manager.id,
-    title: `Report: ${parent.title}`.slice(0, 80),
-    createdBy: REPORT,
+    businessId: parent.businessId,
+    teammateId: delegator.id,
+    title: `Results: ${parent.title}`.slice(0, 80),
+    createdBy: RESULTS,
+    // Stays in the request it belongs to, so the manager waits for it and reports it.
     parentTaskId: parent.id,
-    instructions: `Your team has finished ${lastReport ? "more of " : ""}the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
+    // Carries on in the conversation that handed the work on.
+    sessionId: parent.sessionId,
+    instructions: `Work you handed on is finished. Your task was:\n\n> ${quote(parent.instructions, 1500)}\n\n${block}${NEXT}Check their work against your brief and your checklist (read_deliverable(id) shows a piece in full, with its images). Fold it into your own work: if a piece of yours should include it, change that piece with update_deliverable instead of saving a duplicate. You can't hand it on again: fix small things yourself and say what's still missing. Finish with a short summary of the combined result${forManager ? `; ${manager!.name} (the manager) passes it on to the owner` : " for the owner"}.`,
   });
+}
+
+const REVIEW_STEP = `1. Review before you report (once per request). Check each piece of saved work above against what the owner asked, the business goals and KPIs in BUSINESS.md, the owner's preferences in TEAM.md and the maker's checklist. Use read_deliverable(id) to read a piece in full and look at its images. If a piece clearly misses (wrong facts or prices, ignores the request, off-brand, unfinished or placeholder text), send it back with request_revision(deliverable_id, exactly what to fix). That's the only revision round, so be specific, and only for real problems, not taste. If you sent something back, tell the owner in one or two lines what's done and what's being polished; you'll report again when the fixes are in. Otherwise:
+2. `;
+
+const FINAL_REPORT = `The team already had its revision round for this request: don't send anything back again. Note anything still imperfect for the owner.
+`;
+
+const REPORT_STEP = `Report back to the owner: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`;
+
+const quote = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text).replace(/\n/g, "\n> ");
+
+/**
+ * The finished tasks' results and the work they saved (or revised), with each maker's
+ * KPIs and checklist so the delegator can review the actual pieces, not just a summary.
+ */
+function describeResults(tasks: Task[]) {
+  const mates = new Map(
+    db
+      .select()
+      .from(schema.teammates)
+      .where(inArray(schema.teammates.id, [...new Set(tasks.map((c) => c.teammateId))]))
+      .all()
+      .map((t) => [t.id, t]),
+  );
+  const revised = tasks.map((c) => c.deliverableId).filter((d): d is string => !!d);
+  const saved = db
+    .select()
+    .from(schema.deliverables)
+    .where(
+      revised.length
+        ? or(inArray(schema.deliverables.taskId, tasks.map((c) => c.id)), inArray(schema.deliverables.id, revised))
+        : inArray(schema.deliverables.taskId, tasks.map((c) => c.id)),
+    )
+    .all();
+  let budget = 12_000; // the whole block stays readable on the fast model
+  return tasks
+    .map((c) => {
+      const m = mates.get(c.teammateId);
+      const pieces = saved.filter((d) => d.taskId === c.id || d.id === c.deliverableId);
+      const work = pieces.map((d) => {
+        const text = describeDeliverable(d, m?.name).slice(0, Math.max(300, Math.min(1500, budget)));
+        budget -= text.length;
+        return text.length < describeDeliverable(d, m?.name).length ? `${text}\n… (read_deliverable("${d.id}") for the rest)` : text;
+      });
+      const checks = m ? roleChecklist(m.roleKey) : [];
+      return [
+        `### ${m?.name ?? "Teammate"}: ${c.title} (${c.status})`,
+        (c.result ?? "").slice(0, 2500),
+        m?.kpis.length ? `KPIs: ${m.kpis.join("; ")}` : "",
+        checks.length ? `Checklist: ${checks.join("; ")}` : "",
+        work.length ? `Saved work:\n\n${work.join("\n\n---\n\n")}` : "No saved work.",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    })
+    .join("\n\n");
+}
+
+/**
+ * Whether a REPORT may still send work back: only the request's first report does
+ * (FINAL_REPORT says so in later ones). Checked again by request_revision.
+ */
+export function canReview(report: Pick<Task, "id" | "createdBy" | "parentTaskId" | "createdAt">) {
+  if (report.createdBy !== REPORT || !report.parentTaskId) return false;
+  return !db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.parentTaskId, report.parentTaskId), eq(schema.tasks.createdBy, REPORT), lt(schema.tasks.createdAt, report.createdAt)))
+    .get();
 }
 
 export const DECISION = "system:decision";

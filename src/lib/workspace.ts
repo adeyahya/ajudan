@@ -44,9 +44,32 @@ ${list(p.teamNeeds)}
 `;
 }
 
+/** The shared notes file: the owner's feedback and preferences for the whole team (src/lib/feedback.ts). */
+export const TEAM_NOTES = "TEAM.md";
+
+/** teammates/TEAM.md, created with its header if missing. Returns the path. */
+export function ensureTeamNotes(businessName: string) {
+  const root = teammatesRoot();
+  fs.mkdirSync(root, { recursive: true });
+  const file = path.join(root, TEAM_NOTES);
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(
+      file,
+      `# Team notes for ${businessName}
+
+What the owner told the team about its work: shared by every teammate and read before each task, next to BUSINESS.md. Newest at the bottom. Ajudan writes it from the owner's feedback on the Work and Approvals pages; the owner can edit it too.
+
+## Owner feedback and preferences
+`,
+    );
+  }
+  return file;
+}
+
 /**
  * Create (or refresh) a teammate's working folder. Claude Code runs inside it:
- * BUSINESS.md is rewritten from the profile each time; memory.md is the teammate's
+ * BUSINESS.md is rewritten from the profile and TEAM.md copied from teammates/TEAM.md
+ * each time (teammates can only read inside their folder); memory.md is the teammate's
  * own long-term notes and is never overwritten.
  */
 export function initTeammateWorkspace(
@@ -60,6 +83,7 @@ export function initTeammateWorkspace(
   fs.writeFileSync(path.join(dir, ".teammate-id"), t.id);
   fs.mkdirSync(path.join(dir, "work"), { recursive: true });
   fs.writeFileSync(path.join(dir, "BUSINESS.md"), renderProfileMarkdown(profile, language));
+  fs.copyFileSync(ensureTeamNotes(profile.name), path.join(dir, TEAM_NOTES));
   const memory = path.join(dir, "memory.md");
   if (!fs.existsSync(memory)) {
     fs.writeFileSync(

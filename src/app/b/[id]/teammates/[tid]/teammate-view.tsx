@@ -13,7 +13,7 @@ import { Avatar, Badge, Button, Card, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
-import { DECISION, REPORT } from "@/lib/manager";
+import { DECISION, REPORT, RESULTS, REVISION } from "@/lib/manager";
 import { activeWatches, watchState } from "@/lib/watches";
 import { cancelTaskAction, retryTaskAction, runScheduledNow, sendTaskMessage } from "./actions";
 
@@ -143,6 +143,8 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === REPORT) return "Team update";
   if (createdBy === DECISION) return "After your decision";
+  if (createdBy === RESULTS) return "Delegated work back";
+  if (createdBy === REVISION) return "Revision";
   if (createdBy === "system:reply") return "WhatsApp reply";
   if (createdBy === "system:capability") return "You approved";
   if (createdBy.startsWith("human:")) {
