@@ -141,10 +141,10 @@ describe("requeue", () => {
     expect(jobRow(running).attempts).toBe(2);
   });
 
-  it("requeueJob resets one job's status and start time", () => {
+  it("requeueJob resets one job's status and start time, and a pause doesn't count as a try", () => {
     const id = enqueueJob("design_team", { businessId });
     claimJob();
     requeueJob(id);
-    expect(jobRow(id)).toMatchObject({ status: "queued", startedAt: null, attempts: 1 });
+    expect(jobRow(id)).toMatchObject({ status: "queued", startedAt: null, attempts: 0 });
   });
 });

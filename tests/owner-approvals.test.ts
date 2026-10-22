@@ -7,7 +7,7 @@ process.env.AJUDAN_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "ajudan-oa-"
 const { isApprovalAnswer, parseAnswer } = await import("../worker/owner-approvals");
 
 /** What handleOwnerAnswers extracts; by default every 4-character word is an open code. */
-const parse = (text: string, isOpenCode = (_code: string) => true) => parseAnswer(text, isOpenCode);
+const parse = (text: string, isOpenCode: (code: string) => boolean = () => true) => parseAnswer(text, isOpenCode);
 
 describe("YES", () => {
   it.each(["ya", "iya", "y", "yes", "ok", "oke", "okay", "setuju", "approve", "approved", "acc", "gas", "lanjut", "boleh"])("accepts %j", (w) => {
