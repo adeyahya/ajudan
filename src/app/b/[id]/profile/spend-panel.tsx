@@ -31,7 +31,7 @@ export function SpendPanel({ businessId, spend }: { businessId: string; spend: {
       <form action={saveDailyBudget.bind(null, businessId)} className="grid gap-2">
         <Label htmlFor="budget">Daily budget (USD)</Label>
         <div className="flex items-center gap-2">
-          <Input id="budget" name="budget" type="number" min={1} max={MAX_DAILY_BUDGET_USD} step="1" defaultValue={spend.cap} className="w-32" required />
+          <Input id="budget" name="budget" type="number" min={1} max={MAX_DAILY_BUDGET_USD} step="0.01" defaultValue={spend.cap} className="w-32" required />
           <Button type="submit" variant="secondary">
             Save
           </Button>

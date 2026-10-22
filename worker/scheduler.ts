@@ -10,6 +10,8 @@ import { createTask } from "@/lib/tasks";
 
 const SYNC_MS = 60_000;
 const jobs = new Map<string, { pattern: string; prompt: string; cron: Cron }>();
+/** Teammates whose schedule was refused (logged once, not every sync). */
+const rejected = new Set<string>();
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -61,9 +63,11 @@ export function syncSchedules() {
     jobs.delete(t.id);
     // A schedule saved before the hourly minimum existed (or edited by hand) doesn't run.
     if (!validCron(pattern)) {
-      console.error(`[scheduler] schedule "${pattern}" for ${t.name} is invalid or runs more than once an hour; skipped`);
+      if (!rejected.has(t.id)) console.error(`[scheduler] schedule "${pattern}" for ${t.name} is invalid or runs more than once an hour; skipped`);
+      rejected.add(t.id);
       continue;
     }
+    rejected.delete(t.id);
     try {
       const cron = new Cron(pattern, { protect: true, catch: (e) => console.error("[scheduler]", e) }, () => {
         fire(t.id);
