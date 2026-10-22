@@ -83,9 +83,16 @@ export function OfficeCanvas({
     engineRef.current = eng;
     const ctx = canvas.getContext("2d")!;
 
+    // Preview the lighting at another hour: /b/<id>?hour=18.
+    if (process.env.NODE_ENV !== "production") {
+      const hour = new URLSearchParams(window.location.search).get("hour");
+      if (hour) eng.hourOverride = Number(hour);
+    }
+
     const blit = () => {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(eng.world, 0, 0, canvas.width, canvas.height);
+      eng.renderHD(ctx, canvas.width, canvas.height);
     };
     const fit = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 3);

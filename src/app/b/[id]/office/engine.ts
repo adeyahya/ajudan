@@ -17,6 +17,7 @@ import {
   ICON_HEART,
   ICON_Z,
   lookFor,
+  mix,
   rgba,
   type Sheet,
   shade,
@@ -129,6 +130,37 @@ const C = {
   chairL: "#525a6b",
 };
 
+/** How the room is lit at one moment of the day. `tint` multiplies everything; the rest is light added on top. */
+type Light = {
+  tint: string;
+  sun: string;
+  /** Strength of the beams through the windows (moonlight at night). */
+  beam: number;
+  /** Beams lean right in the morning, left in the afternoon. */
+  slant: number;
+  /** 0 by day, 1 at night: how much lamps and screens glow. */
+  night: number;
+  skyTop: string;
+  skyBot: string;
+  land: string;
+};
+const NIGHT: Light = { tint: "#7d86bd", sun: "#9db4ff", beam: 0.22, slant: 0.3, night: 1, skyTop: "#141c3a", skyBot: "#2a3866", land: "#1d2a45" };
+const DAY: Light = { tint: "#fffaf2", sun: "#fff4d6", beam: 0.55, slant: 0.6, night: 0, skyTop: "#8fd0f5", skyBot: "#cdeefd", land: "#7fb38a" };
+const LIGHT_KEYS: [number, Light][] = [
+  [0, NIGHT],
+  [5.6, NIGHT],
+  [6.4, { tint: "#f6d9c8", sun: "#ffc49a", beam: 0.45, slant: 0.9, night: 0.3, skyTop: "#f6a96b", skyBot: "#fbd39a", land: "#6f8f74" }],
+  [8.5, DAY],
+  [13, { ...DAY, tint: "#ffffff", beam: 0.45, slant: 0 }],
+  [16, { ...DAY, tint: "#fff3e2", sun: "#ffe2b0", beam: 0.6, slant: -0.6 }],
+  [17.6, { tint: "#ffd6b0", sun: "#ffad66", beam: 0.9, slant: -1.1, night: 0.1, skyTop: "#f59a5c", skyBot: "#fcd79a", land: "#8a8a5a" }],
+  [18.8, { tint: "#b9a6cf", sun: "#ff8f7a", beam: 0.3, slant: -1.3, night: 0.6, skyTop: "#4a3f7a", skyBot: "#d98a7a", land: "#3a3f5a" }],
+  [20, NIGHT],
+  [24, NIGHT],
+];
+
+type Mote = { x: number; y: number; vx: number; vy: number; phase: number };
+
 const BINDER_COLORS = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"];
 
 const FONT3: Record<string, string[]> = {
@@ -172,7 +204,9 @@ export class OfficeEngine {
   private shelfBump = 0;
   private inboxBump = 0;
   private nextSteam = 0;
-  private sky = { kind: "day" as "day" | "dusk" | "night", checkedAt: -999 };
+  private motes: Mote[] = [];
+  /** For previewing the lighting at another hour (dev only). */
+  hourOverride: number | null = null;
   private cat: {
     sheet: CatSheet;
     x: number;
@@ -206,7 +240,6 @@ export class OfficeEngine {
   sync(teammates: OfficeTeammate[], pendingApprovals: number, deliverableCount: number, resting = false) {
     this.pending = pendingApprovals;
     this.deliverables = deliverableCount;
-    if (resting !== this.resting) this.sky.checkedAt = -999;
     this.resting = resting;
     if (teammates.length !== this.L.desks.length) {
       this.L = layoutFor(teammates.length);
@@ -532,8 +565,27 @@ export class OfficeEngine {
       }
     }
     this.flyers = this.flyers.filter((f) => f.t < f.dur);
+    this.stepMotes(dt);
     this.shelfBump = Math.max(0, this.shelfBump - dt);
     this.inboxBump = Math.max(0, this.inboxBump - dt);
+  }
+
+  /** Dust drifting in the window light. */
+  private stepMotes(dt: number) {
+    const lt = this.light();
+    const want = lt.beam > 0.3 && lt.night < 0.5 ? 34 : 0;
+    while (this.motes.length < want) {
+      const wx = this.L.windows[this.motes.length % this.L.windows.length] * TILE + 2;
+      const y = 32 + Math.random() * 70;
+      this.motes.push({ x: wx + Math.random() * 28 + (y - 30) * lt.slant * 0.5, y, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 1.5, phase: Math.random() * 6 });
+    }
+    if (this.motes.length > want) this.motes.length = want;
+    for (const m of this.motes) {
+      m.phase += dt;
+      m.x += (m.vx + Math.sin(m.phase * 0.7) * 1.2) * dt;
+      m.y += (m.vy + Math.cos(m.phase * 0.5) * 0.8) * dt;
+      if (m.y < 30 || m.y > 105) m.vy = -m.vy;
+    }
   }
 
   // ---------- particles ----------
@@ -633,7 +685,6 @@ export class OfficeEngine {
     const ctx = this.wctx;
     if (!this.bg) this.bg = this.paintBackground();
     ctx.drawImage(this.bg, 0, 0);
-    this.updateSky();
     this.drawWindows(ctx);
     this.drawClock(ctx);
 
@@ -666,7 +717,6 @@ export class OfficeEngine {
 
     this.drawParticles(ctx);
     this.drawFlyers(ctx);
-    this.drawLighting(ctx);
   }
 
   private rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string) {
@@ -825,11 +875,27 @@ export class OfficeEngine {
     return c;
   }
 
-  private updateSky() {
-    if (this.t - this.sky.checkedAt < 30 && this.sky.checkedAt > 0) return;
-    this.sky.checkedAt = this.t || 0.001;
-    const h = new Date().getHours();
-    this.sky.kind = this.resting ? "night" : h >= 7 && h < 17 ? "day" : (h >= 17 && h < 19) || (h >= 6 && h < 7) ? "dusk" : "night";
+  /** The light of the hour, from the clock; the lights go down while the team rests. */
+  private light(): Light {
+    if (this.resting) return { ...NIGHT, tint: "#6b72a3", beam: 0.15 };
+    const d = new Date();
+    const h = this.hourOverride ?? d.getHours() + d.getMinutes() / 60;
+    let i = 0;
+    while (i < LIGHT_KEYS.length - 2 && h >= LIGHT_KEYS[i + 1][0]) i++;
+    const [h0, a] = LIGHT_KEYS[i];
+    const [h1, b] = LIGHT_KEYS[i + 1];
+    const f = Math.min(1, Math.max(0, (h - h0) / (h1 - h0)));
+    const n = (k: "beam" | "slant" | "night") => a[k] + (b[k] - a[k]) * f;
+    return {
+      tint: mix(a.tint, b.tint, f),
+      sun: mix(a.sun, b.sun, f),
+      beam: n("beam"),
+      slant: n("slant"),
+      night: n("night"),
+      skyTop: mix(a.skyTop, b.skyTop, f),
+      skyBot: mix(a.skyBot, b.skyBot, f),
+      land: mix(a.land, b.land, f),
+    };
   }
 
   private drawWindows(ctx: CanvasRenderingContext2D) {
@@ -841,11 +907,10 @@ export class OfficeEngine {
       const h = 23;
       R(x - 2, y - 2, w + 4, h + 4, "#f8f3ea");
       R(x - 2, y + h + 1, w + 4, 2, "#d9cbb4");
-      const sk = this.sky.kind;
-      const top = sk === "day" ? "#8fd0f5" : sk === "dusk" ? "#f6a96b" : "#1e2a52";
-      const bot = sk === "day" ? "#cdeefd" : sk === "dusk" ? "#fbd39a" : "#34477a";
-      for (let i = 0; i < h; i++) R(x, y + i, w, 1, i < h / 2 ? top : bot);
-      if (sk === "night") {
+      const lt = this.light();
+      const dark = lt.night > 0.55;
+      for (let i = 0; i < h; i++) R(x, y + i, w, 1, mix(lt.skyTop, lt.skyBot, i / (h - 1)));
+      if (dark) {
         for (let i = 0; i < 6; i++) {
           const sx = x + ((hashStr(`s${wx}${i}`) % w) | 0);
           const sy = y + ((hashStr(`t${wx}${i}`) % (h - 6)) | 0);
@@ -866,8 +931,14 @@ export class OfficeEngine {
         ctx.restore();
         // Distant city/trees silhouette.
       }
-      R(x, y + h - 5, w, 5, sk === "night" ? "#22304f" : "#7fb38a");
-      for (let i = 0; i < w; i += 5) R(x + i, y + h - 7 - (i % 3), 4, 3, sk === "night" ? "#22304f" : "#6aa178");
+      if (!dark && lt.beam > 0.3 && wx === this.L.windows[this.L.windows.length - 1]) {
+        // The sun, sinking as the day goes on.
+        const sy = y + 3 + Math.round(Math.max(0, -lt.slant) * 7);
+        R(x + 19, sy, 4, 4, mix(lt.sun, "#ffffff", 0.4));
+        R(x + 18, sy + 1, 6, 2, mix(lt.sun, "#ffffff", 0.4));
+      }
+      R(x, y + h - 5, w, 5, lt.land);
+      for (let i = 0; i < w; i += 5) R(x + i, y + h - 7 - (i % 3), 4, 3, shade(lt.land, -0.12));
       R(x + w / 2 - 1, y, 2, h, "#f8f3ea");
       R(x, y + h / 2 - 1, w, 2, "#f8f3ea");
       // Curtains.
@@ -1507,43 +1578,114 @@ export class OfficeEngine {
     }
   }
 
-  private drawLighting(ctx: CanvasRenderingContext2D) {
-    const sk = this.sky.kind;
+  /**
+   * Light drawn over the upscaled pixels at full screen resolution, so it stays soft while the art stays
+   * crisp: contact shadows, the hour's colour, window beams with dust, lamps and screens, focus on the
+   * selected teammate and a vignette. `w`/`h` are the display canvas's size.
+   */
+  renderHD(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const sx = w / this.world.width;
+    const sy = h / this.world.height;
+    const lt = this.light();
     const L = this.L;
-    if (sk === "day") {
-      // Soft sunbeams from the windows.
-      ctx.fillStyle = "rgba(255,244,214,0.10)";
-      for (const wx of this.L.windows) {
-        const x = wx * TILE + 2;
-        ctx.beginPath();
-        ctx.moveTo(x, 3 * TILE);
-        ctx.lineTo(x + 28, 3 * TILE);
-        ctx.lineTo(x + 44, 3 * TILE + 40);
-        ctx.lineTo(x + 12, 3 * TILE + 40);
-        ctx.closePath();
-        ctx.fill();
-      }
-      return;
-    }
-    ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.fillStyle = sk === "night" ? "rgb(178,184,222)" : "rgb(252,224,196)";
-    ctx.fillRect(0, 0, this.world.width, this.world.height);
-    ctx.globalCompositeOperation = "lighter";
-    const glow = (x: number, y: number, r: number, col: string, a: number) => {
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const blob = (x: number, y: number, rx: number, ry: number, col: string, a: number) => {
+      if (a <= 0.004) return;
+      ctx.save();
+      ctx.translate(x * sx, y * sy);
+      ctx.scale(rx * sx, ry * sy);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
       g.addColorStop(0, rgba(col, a));
       g.addColorStop(1, rgba(col, 0));
       ctx.fillStyle = g;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     };
+    ctx.save();
+
+    // Soft contact shadows under people and furniture.
+    ctx.globalCompositeOperation = "multiply";
+    const ink = "#4a2a1a";
     for (const a of this.actors.values()) {
-      const c = a.tm.state === "working" ? a.tm.color : a.tm.state === "error" ? "#ef4444" : a.tm.state === "waiting" ? "#f59e0b" : "#64748b";
-      glow(a.slot.dx * TILE + 16, a.slot.dy * TILE - 3, 22, c, a.tm.state === "idle" ? 0.08 : 0.22);
+      blob(a.slot.dx * TILE + 16, a.slot.dy * TILE + 15, 21, 5, ink, 0.32);
+      blob(a.x, a.y + 0.5, 8, 3, ink, a.sitting || this.atSeat(a) ? 0.2 : 0.38);
     }
-    const o = this.L.owner;
-    glow(o.dx * TILE + 6, o.dy * TILE - 4, 26, "#fbbf24", 0.25);
-    glow((L.lounge.sofaX - 1) * TILE + 8, L.lounge.y * TILE - 10, 30, "#fbbf24", 0.28);
+    const m = L.meeting;
+    blob(m.x * TILE + (m.w * TILE) / 2, m.y * TILE + 28, (m.w * TILE) / 2 + 10, 8, ink, 0.3);
+    blob(L.lounge.sofaX * TILE + 24, L.lounge.y * TILE + 14, 30, 5, ink, 0.3);
+    blob(L.owner.dx * TILE + 24, L.owner.dy * TILE + 15, 28, 5, ink, 0.32);
+    blob(L.shelf.x * TILE + 16, 4 * TILE, 20, 4, ink, 0.3);
+    blob(L.counter.x * TILE + 24, 4 * TILE, 28, 4, ink, 0.3);
+    for (const p of L.plants) blob(p.x * TILE + 8, (p.y + 1) * TILE - 1, 9, 3, ink, 0.3);
+    if (this.cat) blob(this.cat.x, this.cat.y, 7, 2.5, ink, 0.3);
+
+    // The colour of the hour.
+    ctx.fillStyle = lt.tint;
+    ctx.fillRect(0, 0, w, h);
+
+    // Light through the windows: a beam, then the bright window shape on the floor.
+    ctx.globalCompositeOperation = "screen";
+    for (const wx of L.windows) {
+      const x = wx * TILE + 2;
+      const len = 78;
+      const lean = lt.slant * 40;
+      const g = ctx.createLinearGradient(0, 30 * sy, 0, (30 + len) * sy);
+      g.addColorStop(0, rgba(lt.sun, 0.4 * lt.beam));
+      g.addColorStop(1, rgba(lt.sun, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(x * sx, 30 * sy);
+      ctx.lineTo((x + 28) * sx, 30 * sy);
+      ctx.lineTo((x + 28 + lean) * sx, (30 + len) * sy);
+      ctx.lineTo((x + lean) * sx, (30 + len) * sy);
+      ctx.closePath();
+      ctx.fill();
+      // Four panes of light on the floor, sheared with the beam.
+      ctx.save();
+      ctx.scale(sx, sy);
+      ctx.translate(x + lean * 0.35, 3 * TILE + 6);
+      ctx.transform(1, 0, lt.slant * 0.7, 1, 0, 0);
+      ctx.fillStyle = rgba(lt.sun, 0.3 * lt.beam);
+      for (const [px, py] of [[0, 0], [15, 0], [0, 13], [15, 13]]) ctx.fillRect(px, py, 13, 11);
+      ctx.restore();
+    }
+    for (const mt of this.motes) blob(mt.x, mt.y, 0.9, 0.9, mix(lt.sun, "#ffffff", 0.5), lt.beam * 0.7 * (0.45 + 0.55 * Math.sin(mt.phase * 2.1)));
+
+    // Screens and lamps, stronger as the evening comes. "screen" keeps light floors from burning out.
+    ctx.globalCompositeOperation = "screen";
+    const n = lt.night;
+    for (const a of this.actors.values()) {
+      const st = a.tm.state;
+      const sleeping = this.resting && st === "idle";
+      const col = st === "working" ? a.tm.color : st === "waiting" ? "#f59e0b" : st === "error" ? "#ef4444" : "#64748b";
+      const k = sleeping ? 0 : st === "idle" ? 0.04 + 0.08 * n : st === "error" ? (0.25 + 0.2 * n) * (0.7 + 0.3 * Math.sin(this.t * 9)) : 0.1 + 0.4 * n;
+      blob(a.slot.dx * TILE + 16, a.slot.dy * TILE - 4, 30, 22, col, k);
+      if (st === "working" && this.atSeat(a)) blob(a.x, a.y - 14, 10, 9, col, 0.1 + 0.2 * n);
+    }
+    blob(L.owner.dx * TILE + 5, L.owner.dy * TILE - 7, 40, 30, "#ffcf7a", 0.06 + 0.42 * n);
+    blob((L.lounge.sofaX - 1) * TILE + 8, L.lounge.y * TILE - 9, 46, 34, "#ffcf7a", 0.05 + 0.5 * n);
+    blob(L.counter.x * TILE + 17, 4 * TILE - 42, 4, 4, "#ff5a5a", 0.15 + 0.3 * n);
+    for (const wx of L.windows) blob(wx * TILE + 16, 18, 30, 20, lt.sun, 0.12 * lt.beam);
+
+    // Focus on the selected teammate.
+    ctx.globalCompositeOperation = "source-over";
+    const sel = this.selectedId ? this.actors.get(this.selectedId) : undefined;
+    if (sel) {
+      const cx = sel.x * sx;
+      const cy = (sel.y - 12) * sy;
+      const g = ctx.createRadialGradient(cx, cy, 34 * sx, cx, cy, 170 * sx);
+      g.addColorStop(0, "rgba(20,12,30,0)");
+      g.addColorStop(1, "rgba(20,12,30,0.24)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }
+    // Vignette.
+    const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.42, w / 2, h / 2, Math.max(w, h) * 0.78);
+    vg.addColorStop(0, "rgba(30,14,8,0)");
+    vg.addColorStop(1, "rgba(30,14,8,0.32)");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
     ctx.restore();
   }
 }

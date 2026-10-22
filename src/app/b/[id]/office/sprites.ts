@@ -25,6 +25,12 @@ export function shade(hex: string, f: number) {
   const [r, g, b] = hexToRgb(hex);
   return f < 0 ? toHex(r * (1 + f), g * (1 + f), b * (1 + f)) : toHex(r + (255 - r) * f, g + (255 - g) * f, b + (255 - b) * f);
 }
+/** Blend two colors: f = 0 is `a`, f = 1 is `b`. */
+export function mix(a: string, b: string, f: number) {
+  const [r1, g1, b1] = hexToRgb(a);
+  const [r2, g2, b2] = hexToRgb(b);
+  return toHex(r1 + (r2 - r1) * f, g1 + (g2 - g1) * f, b1 + (b2 - b1) * f);
+}
 export function rgba(hex: string, a: number) {
   const [r, g, b] = hexToRgb(hex);
   return `rgba(${r},${g},${b},${a})`;
