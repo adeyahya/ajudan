@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useLang, useT } from "@/components/i18n";
 import { DataTable, DataTableToolbar, TableSearch, type Column } from "@/components/data-table";
 import { Badge, Button, EmptyState, IconButton, LineTabs, PageBody, Textarea } from "@/components/kit";
+import { useBreadcrumb } from "@/components/breadcrumb";
 import { SidePeek, SidePeekLayout, useUrlPeek } from "@/components/side-peek";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -61,18 +62,19 @@ export function People({
   const shown = contacts.filter((c) => inView(c, view) && (!s || `${c.name} ${c.company ?? ""} ${c.phone ?? ""} ${c.email ?? ""} ${c.notes} ${c.tags.join(" ")}`.toLowerCase().includes(s)));
   const creating = peek.value === "new";
   const open = creating ? undefined : contacts.find((c) => c.id === peek.value);
+  useBreadcrumb([{ label: t("context.people.title"), href: base }, ...(open ? [{ label: open.name }] : [])]);
   const date = (iso: string) => new Date(iso).toLocaleDateString(dateLocale(lang), { day: "numeric", month: "short", year: "numeric" });
 
   const columns: Column<PersonRow>[] = [
     { key: "name", header: t("context.col.name"), icon: <Type />, cell: (c) => c.name, title: (c) => c.name },
-    { key: "kind", header: t("context.col.kind"), icon: <Tag />, width: 120, cell: (c) => <Badge tone={KIND_TONE[c.kind]}>{t(`context.kind.${c.kind}` as MessageKey)}</Badge> },
-    { key: "phone", header: t("context.col.phone"), icon: <Phone />, width: 160, cell: (c) => (c.phone ? <span className="font-mono text-[13px] text-muted-foreground">+{c.phone}</span> : null) },
-    { key: "company", header: t("context.col.company"), icon: <Building2 />, width: 160, cell: (c) => <span className="text-muted-foreground">{c.company}</span>, title: (c) => c.company ?? undefined },
+    { key: "kind", header: t("context.col.kind"), icon: <Tag />, width: 112, cell: (c) => <Badge tone={KIND_TONE[c.kind]}>{t(`context.kind.${c.kind}` as MessageKey)}</Badge> },
+    { key: "phone", header: t("context.col.phone"), icon: <Phone />, width: 150, cell: (c) => (c.phone ? <span className="font-mono text-[13px] text-muted-foreground">+{c.phone}</span> : null) },
+    { key: "company", header: t("context.col.company"), icon: <Building2 />, width: 140, cell: (c) => <span className="text-muted-foreground">{c.company}</span>, title: (c) => c.company ?? undefined },
     {
       key: "tags",
       header: t("context.col.tags"),
       icon: <Hash />,
-      width: 180,
+      width: 160,
       cell: (c) => (
         <span className="flex gap-1 overflow-hidden">
           {c.tags.map((x) => (
@@ -84,7 +86,7 @@ export function People({
       ),
       title: (c) => c.tags.join(", "),
     },
-    { key: "added", header: t("context.col.added"), icon: <Calendar />, width: 120, cell: (c) => <span className="text-xs text-tertiary">{date(c.createdAt)}</span> },
+    { key: "added", header: t("context.col.added"), icon: <Calendar />, width: 110, cell: (c) => <span className="text-xs text-tertiary">{date(c.createdAt)}</span> },
   ];
 
   const peekPane = (
@@ -127,7 +129,7 @@ export function People({
             />
           }
         >
-          <TableSearch value={q} onChange={setQ} placeholder={t("context.search")} />
+          <TableSearch value={q} onChange={setQ} placeholder={t("context.search")} className="w-36 sm:w-56" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton label={t("context.people.more")}>
@@ -179,7 +181,7 @@ export function People({
             getRowId={(c) => c.id}
             onRowOpen={(c) => peek.open(c.id)}
             selectedId={open?.id ?? null}
-            minWidth={820}
+            minWidth={900}
             empty={<EmptyState compact title={t("context.people.noMatch")} />}
           />
         )}

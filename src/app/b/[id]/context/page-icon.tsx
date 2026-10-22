@@ -143,7 +143,7 @@ export function PageIcon({ icon, kind = "page", size = 16, className }: { icon: 
 
 /**
  * The icon picker: Emoji / Icons tabs, a filter for icon names, Random and Remove.
- * `onPick(null)` removes the icon. Wraps `children` as the trigger (or pass `open` to
+ * Remove picks "" (no icon). Wraps `children` as the trigger (or pass `open` to
  * control it from a menu item, with `anchor` as the trigger).
  */
 export function IconPicker({

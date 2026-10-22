@@ -157,7 +157,7 @@ type Editor = typeof schema.BlockNoteEditor;
 type Blocks = typeof schema.PartialBlock;
 
 /** Blocks the owner doesn't need here (uploads aren't wired to the library). */
-const HIDDEN = new Set(["image", "video", "audio", "file", "toggle_heading", "toggle_list"]);
+const HIDDEN = new Set(["image", "video", "audio", "file", "toggle_heading", "toggle_heading_2", "toggle_heading_3", "toggle_list", "heading_4", "heading_5", "heading_6"]);
 
 type Loose = { type?: string; props?: Record<string, unknown>; content?: unknown; children?: Loose[]; text?: string; href?: string };
 

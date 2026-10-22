@@ -657,7 +657,7 @@ function TreeRow({
             {page.pending}
           </span>
         )}
-        <div className={cn("ml-auto hidden shrink-0 items-center group-focus-within/row:flex group-hover/row:flex", menuOpen && "flex")}>
+        <div className={cn("ml-auto hidden shrink-0 items-center group-focus-within/row:flex group-hover/row:flex", (menuOpen || iconOpen) && "flex", active && "[@media(hover:none)]:flex")}>
           <DropdownMenu open={menuOpen} onOpenChange={onMenu}>
             <DropdownMenuTrigger asChild>
               <button

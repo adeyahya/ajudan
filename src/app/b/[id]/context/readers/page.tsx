@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { SetBreadcrumb } from "@/components/breadcrumb";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, EmptyState, LineTabs, PageBody, PageSkeleton, Prose, Section } from "@/components/kit";
 import { SECTIONS } from "@/lib/context";
@@ -67,6 +68,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
   return (
     <PageBody width="wide">
       <LiveRefresh businessId={id} types={["context_ask_done", "task_started", "task_done"]} />
+      <SetBreadcrumb items={[{ label: t(lang, "context.tab.readers"), href: `/b/${id}/context/readers` }, { label: mate.name }]} />
       <header className="mb-6">
         <Eye aria-hidden className="mb-3 size-8 text-foreground" strokeWidth={1.5} />
         <h1 className="text-[28px] leading-[34px] font-bold tracking-tight">{t(lang, "context.tab.readers")}</h1>
@@ -83,7 +85,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
         }))}
       />
 
-      <div className="grid gap-x-12 gap-y-8 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-x-12 gap-y-8 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
           <Section title={t(lang, "context.readers.title", { name: mate.name })} description={task ? t(lang, "context.readers.latest", { title: task.title }) : undefined}>
             {task ? (
