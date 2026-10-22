@@ -17,6 +17,7 @@ import { getManager } from "@/lib/manager";
 import { isServablePath, mediaKind, newMediaPath } from "@/lib/media";
 import { transcribe } from "@/lib/speech";
 import { pollWatches } from "./replies";
+import { handleOwnerAnswers, isApprovalAnswer } from "./owner-approvals";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { downloadMedia, isLinked, isRealMessage, listMessages, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
@@ -144,8 +145,10 @@ async function pollHuman(business: Business, human: Teammate) {
     )
     .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp));
   if (!fresh.length) return;
-  // Still typing / sending files: wait for a quiet moment.
-  if (Date.now() - new Date(fresh.at(-1)!.Timestamp).getTime() < QUIET_MS) return;
+  // Still typing / sending files: wait for a quiet moment (the owner's "ya A7F2" doesn't wait).
+  const isOwner = business.ownerHumanId === human.id;
+  const quickAnswer = isOwner && fresh.every((m) => isApprovalAnswer(m.Text || m.DisplayText || ""));
+  if (!quickAnswer && Date.now() - new Date(fresh.at(-1)!.Timestamp).getTime() < QUIET_MS) return;
 
   const request = openRequest(human.id);
   const texts: string[] = [];
@@ -176,7 +179,10 @@ async function pollHuman(business: Business, human: Teammate) {
     .set({ state: request ? "waiting" : "idle", currentActivity: `Replied on WhatsApp${files.length ? ` (${files.length} files)` : ""}` })
     .where(eq(schema.teammates.id, human.id))
     .run();
-  routeReply(business, human, request, texts, files);
+  // The owner can approve or reject on WhatsApp; anything else goes on as usual.
+  const rest = isOwner ? await handleOwnerAnswers(business, human, texts) : texts;
+  if (!rest.length && !files.length) return;
+  routeReply(business, human, request, rest, files);
 }
 
 /**

@@ -24,6 +24,7 @@ import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished } from "@/lib/manager";
 import { sendToHuman } from "./humans";
+import { notifyOwner } from "./owner-approvals";
 import { speechAvailable, transcribe } from "@/lib/speech";
 import { renderVideo } from "./video";
 
@@ -573,7 +574,8 @@ export function createBizServer(ctx: BizContext) {
           default:
             request = { kind: a.kind, why: a.why };
         }
-        const { duplicate } = requestCapability({ businessId, teammate, taskId, request });
+        const { approval, duplicate } = requestCapability({ businessId, teammate, taskId, request });
+        if (!duplicate) void notifyOwner(approval.id);
         return ok(
           `${duplicate ? "That request is already waiting" : "Asked the owner"} on the Approvals page. Don't wait: finish what you can now, tell the owner what you asked for and why. If they approve, you'll get a new task to carry on.`,
         );

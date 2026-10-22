@@ -202,3 +202,9 @@ export async function updateHuman(businessId: string, teammateId: string, _prev:
   refresh();
   return { ok: true };
 }
+
+/** Mark a person on the team as the owner (approval requests go to their WhatsApp), or unmark. */
+export async function setOwnerHuman(businessId: string, humanId: string | null) {
+  db.update(schema.businesses).set({ ownerHumanId: humanId }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}

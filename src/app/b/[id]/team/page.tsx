@@ -9,7 +9,7 @@ import { lastEventOf } from "@/lib/onboarding/data";
 import { AUTONOMY_OPTIONS, describeCron } from "@/lib/onboarding/schedule";
 import { openRequests } from "@/lib/humans";
 import { ROLE_TEMPLATES } from "@/lib/roles";
-import { addHuman, addTeammate, hireTeam, redesignTeam, removeTeammate, updateHuman, updateTeammate } from "./actions";
+import { addHuman, addTeammate, hireTeam, redesignTeam, removeTeammate, setOwnerHuman, updateHuman, updateTeammate } from "./actions";
 import { AddTeammateForm, HumanForm, PendingSubmit, TeammateEditor } from "./forms";
 
 type Params = { params: Promise<{ id: string }> };
@@ -140,7 +140,7 @@ async function Content({ params }: Params) {
       {humans.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 mb-6">
           {humans.map((h) => (
-            <HumanCard key={h.id} t={h} businessId={id} open={open.filter((r) => r.teammateId === h.id).length} />
+            <HumanCard key={h.id} t={h} businessId={id} open={open.filter((r) => r.teammateId === h.id).length} isOwner={biz.ownerHumanId === h.id} />
           ))}
         </div>
       )}
@@ -152,7 +152,7 @@ async function Content({ params }: Params) {
   );
 }
 
-function HumanCard({ t, businessId, open }: { t: Teammate; businessId: string; open: number }) {
+function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: string; open: number; isOwner: boolean }) {
   return (
     <Card className="p-5 flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -165,10 +165,20 @@ function HumanCard({ t, businessId, open }: { t: Teammate; businessId: string; o
           <div className="text-xs text-muted-foreground">WhatsApp +{t.phone}</div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Badge tone="blue">Person</Badge>
+          <Badge tone={isOwner ? "green" : "blue"}>{isOwner ? "Owner" : "Person"}</Badge>
           {open > 0 && <Badge tone="amber">{open} open request{open === 1 ? "" : "s"}</Badge>}
         </div>
       </div>
+      <form action={setOwnerHuman.bind(null, businessId, isOwner ? null : t.id)} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {isOwner ? (
+          <>
+            <span>Approval requests also go to this WhatsApp. Answer &ldquo;ya &lt;code&gt;&rdquo; or &ldquo;tidak &lt;code&gt;&rdquo;.</span>
+            <PendingSubmit variant="ghost">Stop</PendingSubmit>
+          </>
+        ) : (
+          <PendingSubmit variant="secondary">This is me: send me approvals on WhatsApp</PendingSubmit>
+        )}
+      </form>
       {t.responsibilities.length > 0 && (
         <div>
           <div className="text-xs font-medium text-muted-foreground mb-1">The team can ask them for</div>

@@ -57,6 +57,13 @@
       "when": 1792661344041,
       "tag": "0007_wa_watches",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792663430134,
+      "tag": "0008_owner_whatsapp",
+      "breakpoints": true
     }
   ]
 }

@@ -40,6 +40,8 @@ export const businesses = sqliteTable("businesses", {
     .$type<{ jid: string; name: string }[]>()
     .notNull()
     .default([]),
+  /** The owner as a person on the team (WhatsApp): approval requests also go there. */
+  ownerHumanId: text("owner_human_id"),
   /** Domains teammates' sandboxed shell may reach (e.g. "api.orucraft.com"). */
   networkDomains: text("network_domains", { mode: "json" }).$type<string[]>().notNull().default([]),
   createdAt: createdAt(),

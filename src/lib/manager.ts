@@ -160,12 +160,17 @@ export const DECISION = "system:decision";
  * what happens next and, only if something urgent follows, get the team on it.
  * Several decisions in a row become one reply.
  */
-export function reactToDecision(approval: Pick<Approval, "teammateId" | "taskId" | "summary" | "status" | "note" | "businessId">) {
+export function reactToDecision(
+  approval: Pick<Approval, "teammateId" | "taskId" | "summary" | "status" | "note" | "businessId">,
+  via: "app" | "whatsapp" = "app",
+) {
   const manager = getManager(approval.businessId);
   if (!manager || approval.teammateId === manager.id) return; // the manager's own run carries on by itself
+  const ownerId = db.select({ o: schema.businesses.ownerHumanId }).from(schema.businesses).where(eq(schema.businesses.id, approval.businessId)).get()?.o;
+  const owner = ownerId ? db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, ownerId)).get() : undefined;
   const task = approval.taskId ? db.select().from(schema.tasks).where(eq(schema.tasks.id, approval.taskId)).get() : undefined;
   const mate = db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, approval.teammateId)).get();
-  const line = `- ${approval.status === "approved" ? "APPROVED" : "REJECTED"}: ${approval.summary}${approval.note ? ` (owner's note: "${approval.note}")` : ""}${task ? ` [${mate?.name ?? "teammate"}'s task: "${task.title}"]` : ""}`;
+  const line = `- ${approval.status === "approved" ? "APPROVED" : "REJECTED"}${via === "whatsapp" ? " (on WhatsApp)" : ""}: ${approval.summary}${approval.note ? ` (owner's note: "${approval.note}")` : ""}${task ? ` [${mate?.name ?? "teammate"}'s task: "${task.title}"]` : ""}`;
   const queued = db
     .select()
     .from(schema.tasks)
@@ -180,6 +185,8 @@ export function reactToDecision(approval: Pick<Approval, "teammateId" | "taskId"
     teammateId: manager.id,
     title: approval.status === "approved" ? `Approved: ${approval.summary}`.slice(0, 80) : `Rejected: ${approval.summary}`.slice(0, 80),
     createdBy: DECISION,
-    instructions: `The owner just decided on the Approvals page:\n${line}\n\nWhat to do: reply to the owner now in 1–3 short lines: what happens next and when they'll see the result. If approved, the teammate is already carrying on: don't redo or duplicate their work. If rejected, say how it'll be adjusted (the teammate gets the note). Only use assign_task if something new and time-sensitive follows from this decision (for example, after a post goes live, someone should watch and answer the replies); otherwise don't delegate. Check team_status if you're unsure what's happening.`,
+    instructions: `The owner just decided${via === "whatsapp" ? " on WhatsApp" : " on the Approvals page"}:\n${line}\n\n${
+      via === "whatsapp" && owner ? `They're away from the app: send your reply to them on WhatsApp with message_human("${owner.name}") (that's what they'll read), and keep it to a line or two.\n\n` : ""
+    }What to do: reply to the owner now in 1–3 short lines: what happens next and when they'll see the result. If approved, the teammate is already carrying on: don't redo or duplicate their work. If rejected, say how it'll be adjusted (the teammate gets the note). Only use assign_task if something new and time-sensitive follows from this decision (for example, after a post goes live, someone should watch and answer the replies); otherwise don't delegate. Check team_status if you're unsure what's happening.`,
   });
 }

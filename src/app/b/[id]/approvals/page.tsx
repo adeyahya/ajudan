@@ -47,13 +47,14 @@ async function Content({ params }: Params) {
   const pending = data.approvals.filter((a) => a.status === "pending");
   const decided = data.approvals.filter((a) => a.status !== "pending");
   const mate = (tid: string) => data.mates.find((m) => m.id === tid);
+  const owner = biz.ownerHumanId ? data.mates.find((m) => m.id === biz.ownerHumanId) : undefined;
 
   return (
     <div className="space-y-8">
       <LiveRefresh businessId={id} types={["approval_requested", "approval_granted", "approval_rejected", "task_done", "task_failed"]} />
       <PageHeader
         title="Approvals"
-        subtitle="Teammates with “ask” autonomy wait here before publishing or sending anything outside the business."
+        subtitle={`Teammates with “ask” autonomy wait here before publishing or sending anything outside the business.${owner ? ` Each request also goes to ${owner.name}'s WhatsApp: answer “ya <code>” or “tidak <code>”.` : " Mark yourself as the owner on the Team page to approve on WhatsApp too."}`}
       />
 
       <section className="space-y-3">

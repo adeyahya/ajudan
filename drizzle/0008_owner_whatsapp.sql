@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `owner_human_id` text;

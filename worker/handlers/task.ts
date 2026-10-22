@@ -22,6 +22,7 @@ import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBro
 import { PausedError, runAbortController } from "../session";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
+import { notifyOwner } from "../owner-approvals";
 import { BIZ_SERVER, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
@@ -178,6 +179,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         .values({ businessId: business.id, teammateId: teammate.id, taskId: task.id, toolName, input, summary })
         .returning()
         .get();
+      void notifyOwner(approval.id); // also on the owner's WhatsApp, if set up
       setTask({ status: "waiting_approval" });
       setMate({ state: "waiting", currentActivity: `Waiting for approval: ${summary}`.slice(0, 140) });
       ev("approval_requested", summary, { approvalId: approval.id, toolName });

@@ -1,0 +1,134 @@
+/**
+ * Approvals on WhatsApp for the owner (businesses.ownerHumanId, a person on the team).
+ * Every new approval request is also sent to the owner's WhatsApp with a short code;
+ * the owner answers "ya A7F2" / "tidak A7F2 <why>" (a bare "ya" works for the request
+ * just sent). Decisions go through the same path as the Approvals page (src/lib/approvals.ts).
+ */
+import { and, desc, eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import type { Approval, Business, Teammate } from "@/db/schema";
+import { approvalCode, decide, findPendingByCode } from "@/lib/approvals";
+import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
+import { isLinked } from "@/lib/whatsapp";
+import { sendToHuman } from "./humans";
+
+const YES = /^\s*(ya|iya|y|yes|ok|oke|okay|setuju|approve|approved|acc|gas|lanjut|boleh)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
+const NO = /^\s*(tidak|nggak|gak|enggak|ga|no|n|tolak|reject|rejected|jangan|batal)\b[\s,.:!-]*(semua|all|#?[0-9a-f]{4}\b)?[\s,.:!-]*([\s\S]*)$/i;
+const PROMPT = "🔔";
+
+const t = (business: Pick<Business, "language">, id: string, en: string) => (business.language === "id" ? id : en);
+
+export function ownerOf(business: Pick<Business, "ownerHumanId">) {
+  if (!business.ownerHumanId) return undefined;
+  const h = db.select().from(schema.teammates).where(eq(schema.teammates.id, business.ownerHumanId)).get();
+  return h && h.kind === "human" && h.status === "active" && h.phone ? h : undefined;
+}
+
+/** What the owner needs to see to decide: the exact text that would go out. */
+function details(a: Approval) {
+  const i = a.input as Record<string, unknown>;
+  const s = (v: unknown, n = 700) => String(v ?? "").trim().slice(0, n);
+  if (a.toolName === CAPABILITY) return s((i as CapabilityRequest).why, 300);
+  if (a.toolName.endsWith("__publish_deliverable")) {
+    const d = db.select().from(schema.deliverables).where(eq(schema.deliverables.id, String(i.deliverable_id ?? ""))).get();
+    return d ? `*${d.title}*\n${s(d.content)}` : "";
+  }
+  return s(i.message ?? i.body ?? i.details ?? i.caption ?? i.action ?? "");
+}
+
+/** Send a new approval request to the owner's WhatsApp (if set up). */
+export async function notifyOwner(approvalId: string) {
+  const a = db.select().from(schema.approvals).where(eq(schema.approvals.id, approvalId)).get();
+  if (!a || a.status !== "pending") return;
+  const business = db.select().from(schema.businesses).where(eq(schema.businesses.id, a.businessId)).get();
+  const owner = business && ownerOf(business);
+  if (!business || !owner || !(await isLinked())) return;
+  const code = approvalCode(a);
+  const secret = a.toolName === CAPABILITY && (a.input as CapabilityRequest).kind === "secret";
+  const body = details(a);
+  const how = secret
+    ? t(business, "Ini kunci/API key: masukkan lewat aplikasi (halaman Approvals), jangan lewat chat.", "This is an API key: enter it in the app (Approvals page), never in a chat.")
+    : t(business, `Balas *ya ${code}* untuk setuju, atau *tidak ${code}* + alasannya.`, `Reply *yes ${code}* to approve, or *no ${code}* + why.`);
+  const text = `${PROMPT} *${t(business, "Perlu persetujuan", "Needs your approval")}* · ${code}\n${a.summary}${body ? `\n\n${body}` : ""}\n\n${how}`;
+  try {
+    await sendToHuman({ business, human: owner, from: null, text });
+  } catch (err) {
+    console.error("[owner-approvals] couldn't notify the owner", err);
+  }
+}
+
+/** Is this message only an approval answer (so it can be handled without the usual wait)? */
+export function isApprovalAnswer(text: string) {
+  return YES.test(text) || NO.test(text);
+}
+
+/**
+ * Apply the owner's yes/no answers among their new messages. Returns the messages that
+ * weren't answers (they go to the manager as usual).
+ */
+export async function handleOwnerAnswers(business: Business, owner: Teammate, texts: string[]) {
+  const rest: string[] = [];
+  const pending = () =>
+    db.select().from(schema.approvals).where(and(eq(schema.approvals.businessId, business.id), eq(schema.approvals.status, "pending"))).all();
+  const lastOut = db
+    .select({ text: schema.humanMessages.text })
+    .from(schema.humanMessages)
+    .where(and(eq(schema.humanMessages.humanId, owner.id), eq(schema.humanMessages.direction, "out")))
+    .orderBy(desc(schema.humanMessages.sentAt))
+    .get();
+  const answeringPrompt = !!lastOut?.text.startsWith(PROMPT);
+  const reply = (text: string) => sendToHuman({ business, human: owner, from: null, text }).catch((err) => console.error("[owner-approvals]", err));
+
+  for (const raw of texts) {
+    const text = raw.replace(/^🎤\s*/, "");
+    const yes = YES.exec(text);
+    const m = yes ?? NO.exec(text);
+    if (!m) {
+      rest.push(raw);
+      continue;
+    }
+    const decision = yes ? "approved" : "rejected";
+    let target = (m[2] ?? "").replace("#", "").toLowerCase();
+    // "ok 1000 pcs": a number that isn't an open request's code is just a number.
+    if (/^\d{4}$/.test(target) && !findPendingByCode(business.id, target).length) target = "";
+    const note = (m[3] ?? "").trim() || null;
+    // "ok, sekarang bikin post buat TikTok…" without a code is an instruction, not an answer.
+    if (!target && note && note.split(/\s+/).length > 8) {
+      rest.push(raw);
+      continue;
+    }
+    const open = pending();
+    let chosen: Approval[] = [];
+    if (target === "semua" || target === "all") chosen = open;
+    else if (target) chosen = findPendingByCode(business.id, target);
+    else if (answeringPrompt && open.length === 1) chosen = open;
+    else {
+      // Not clearly an answer to an approval: treat it as a normal message.
+      if (!target && !answeringPrompt) {
+        rest.push(raw);
+        continue;
+      }
+      await reply(
+        open.length
+          ? t(business, `Yang mana? Masih menunggu: ${open.map((a) => `*${approvalCode(a)}* ${a.summary}`).join("; ")}. Balas dengan kodenya, mis. *ya ${approvalCode(open[0])}*.`, `Which one? Still waiting: ${open.map((a) => `*${approvalCode(a)}* ${a.summary}`).join("; ")}. Reply with its code, e.g. *yes ${approvalCode(open[0])}*.`)
+          : t(business, "Tidak ada yang menunggu persetujuan sekarang.", "Nothing is waiting for your approval right now."),
+      );
+      continue;
+    }
+    if (!chosen.length) {
+      await reply(t(business, `Kode *${target.toUpperCase()}* tidak ditemukan atau sudah diputuskan.`, `No open request with code *${target.toUpperCase()}* (or it was already decided).`));
+      continue;
+    }
+    for (const a of chosen) {
+      const r = await decide({ businessId: business.id, approvalId: a.id, decision, note, via: "whatsapp" });
+      await reply(
+        r.ok
+          ? decision === "approved"
+            ? `✅ ${t(business, "Disetujui", "Approved")}: ${a.summary}`
+            : `❌ ${t(business, "Ditolak", "Rejected")}: ${a.summary}${note ? ` (“${note}”)` : ""}`
+          : `⚠️ ${approvalCode(a)}: ${r.error}`,
+      );
+    }
+  }
+  return rest;
+}
