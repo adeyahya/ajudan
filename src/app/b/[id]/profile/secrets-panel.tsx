@@ -24,7 +24,7 @@ export async function SecretsPanel({
   const secrets = listSecrets(businessId);
   return (
     <div className="grid gap-4">
-      <h2 className="text-lg text-primary">{t(lang, "profile.secrets.title")}</h2>
+      <h2 className="text-lg text-foreground">{t(lang, "profile.secrets.title")}</h2>
       <p className="text-xs text-muted-foreground">{t(lang, "profile.secrets.help")}</p>
       {secrets.length > 0 && (
         <ul className="grid gap-2 text-sm">

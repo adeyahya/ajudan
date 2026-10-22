@@ -260,7 +260,7 @@ function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
       </div>
       <MessageContent className="pixel-panel relative min-w-0 flex-1 gap-2 px-4 pb-3 pt-5">
         <MessageHeader className="absolute -top-3 left-3 flex items-center gap-2 px-0">
-          <span className="font-pixel bg-primary px-2 py-0.5 text-sm text-primary-foreground shadow-[-2px_0_0_var(--frame),2px_0_0_var(--frame),0_-2px_0_var(--frame),0_2px_0_var(--frame)]">
+          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-medium text-primary-foreground">
             {agent.name}
           </span>
           {m.meta && !m.pending && (

@@ -25,7 +25,7 @@ export async function BrowserPanel({
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg text-primary">{t(lang, "profile.browser.title")}</h2>
+        <h2 className="text-lg text-foreground">{t(lang, "profile.browser.title")}</h2>
         <Badge tone={status.running ? "green" : "neutral"}>{t(lang, status.running ? "profile.browser.open" : "profile.browser.closed")}</Badge>
       </div>
       <p className="text-xs text-muted-foreground">{t(lang, "profile.browser.help")}</p>

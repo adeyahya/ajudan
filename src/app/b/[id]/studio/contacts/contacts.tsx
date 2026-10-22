@@ -40,7 +40,7 @@ export function Contacts({ businessId, contacts }: { businessId: string; contact
               key={k}
               type="button"
               onClick={() => setKind(k as ContactKind | "all")}
-              className={cn("font-pixel rounded-[3px] border-2 border-frame px-2 py-0.5 text-xs", kind === k ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground")}
+              className={cn("font-pixel rounded-md border border-border px-2 py-0.5 text-xs", kind === k ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground")}
             >
               {k === "all" ? `All ${contacts.length}` : `${KINDS[k as ContactKind].label} ${contacts.filter((c) => c.kind === k).length}`}
             </button>

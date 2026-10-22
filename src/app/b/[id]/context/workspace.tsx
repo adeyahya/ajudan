@@ -118,7 +118,7 @@ function PageTree({ businessId, pages, currentId }: { businessId: string; pages:
         return (
           <div key={s}>
             <div className="group flex items-center justify-between px-2 pb-1">
-              <span className="font-pixel text-xs uppercase tracking-wide text-primary">{t(`context.section.${s}`)}</span>
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t(`context.section.${s}`)}</span>
               <button
                 type="button"
                 disabled={pending}
@@ -193,7 +193,7 @@ function PageView({ businessId, page, mates, readers, contactsCount, editor }: {
           onBlur={() => title.trim() && title !== page.title && start(() => renamePageAction(businessId, page.id, title))}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           readOnly={page.kind === "database"}
-          className="font-pixel min-w-0 flex-1 bg-transparent text-2xl text-primary outline-none drop-shadow-[2px_2px_0_var(--frame)]"
+          className="min-w-0 flex-1 bg-transparent text-[34px] font-bold leading-tight text-foreground outline-none"
           aria-label="Title"
         />
         <span className="pt-2 text-xs text-muted-foreground">
@@ -256,7 +256,7 @@ function PageView({ businessId, page, mates, readers, contactsCount, editor }: {
       {page.kind === "database" ? (
         <Card className="space-y-3 p-5">
           <div className="flex items-center gap-2">
-            <DatabaseIcon className="size-5 text-primary" />
+            <DatabaseIcon className="size-5 text-muted-foreground" />
             <Badge tone="blue">{t("context.database")}</Badge>
             <span className="text-sm text-muted-foreground">{tn("context.dbCount", contactsCount)}</span>
           </div>
@@ -288,7 +288,7 @@ function PageView({ businessId, page, mates, readers, contactsCount, editor }: {
 export function ModeSwitch({ value, onChange }: { value: ReaderMode; onChange: (m: ReaderMode) => void }) {
   const t = useT();
   return (
-    <div className="flex shrink-0 border-2 border-frame text-[11px]">
+    <div className="flex shrink-0 border border-border text-[11px]">
       {(["always", "when_needed", "never"] as const).map((m) => (
         <button
           key={m}

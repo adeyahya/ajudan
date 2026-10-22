@@ -18,7 +18,7 @@ export function StudioNav() {
   const base = `/b/${id}/studio`;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="font-pixel mr-2 text-lg text-primary drop-shadow-[2px_2px_0_var(--frame)]">✦ Studio</span>
+      <span className="font-pixel mr-2 text-lg text-primary">✦ Studio</span>
       {TABS.map((t) => {
         const href = base + t.href;
         const active = t.href === "" ? pathname === base : pathname.startsWith(href);
@@ -27,7 +27,7 @@ export function StudioNav() {
             key={t.href}
             href={href}
             className={cn(
-              "font-pixel inline-flex items-center gap-1.5 rounded-[3px] border-2 border-frame px-2.5 py-0.5 text-sm",
+              "font-pixel inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-0.5 text-sm",
               active ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground",
             )}
           >

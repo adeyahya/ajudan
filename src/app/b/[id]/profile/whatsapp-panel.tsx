@@ -44,7 +44,7 @@ export async function WhatsappPanel({
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg text-primary">WhatsApp</h2>
+        <h2 className="text-lg text-foreground">WhatsApp</h2>
         <Badge tone={linked ? "green" : linking ? "amber" : "neutral"}>
           {linked
             ? t(lang, sync.running ? "profile.wa.linkedSyncing" : "profile.wa.linked")

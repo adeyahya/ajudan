@@ -6,61 +6,62 @@
 @source "../../node_modules/@blocknote/shadcn/dist/*.js";
 
 /*
- * Ajudan game theme: a cozy pixel office at night, matched to the office canvas.
- * One fixed palette (no light/dark switch): plum-dark room, warm wood panels,
- * gold highlights, cream text. Corners are square; panels get notched pixel frames.
+ * Ajudan theme: clean and quiet, in the spirit of Notion. White pages, a light grey
+ * sidebar, ink text, hairline borders and soft hovers. The pixel art lives only in the
+ * office (and the small game badges that belong to it).
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #1b1520;
-  --foreground: #f8f0e3;
-  --card: #2c2131;
-  --card-foreground: #f8f0e3;
-  --popover: #2c2131;
-  --popover-foreground: #f8f0e3;
-  --primary: #f4b942;
-  --primary-foreground: #2a1d22;
-  --secondary: #3a2c40;
-  --secondary-foreground: #f8f0e3;
-  --muted: #3a2c40;
-  --muted-foreground: #b9a99c;
-  --accent: #3f7d74;
-  --accent-foreground: #f8f0e3;
-  --destructive: #e05a4f;
-  --border: #120c15;
-  --input: #120c15;
-  --ring: #f4b942;
-  --chart-1: #f4b942;
-  --chart-2: #7cc58a;
-  --chart-3: #60a5fa;
-  --chart-4: #f472b6;
-  --chart-5: #d97a5b;
-  --radius: 0rem;
-  --sidebar: #2c2131;
-  --sidebar-foreground: #f8f0e3;
-  --sidebar-primary: #f4b942;
-  --sidebar-primary-foreground: #2a1d22;
-  --sidebar-accent: #3a2c40;
-  --sidebar-accent-foreground: #f8f0e3;
-  --sidebar-border: #120c15;
-  --sidebar-ring: #f4b942;
+  --background: #ffffff;
+  --foreground: #37352f;
+  --card: #ffffff;
+  --card-foreground: #37352f;
+  --popover: #ffffff;
+  --popover-foreground: #37352f;
+  --primary: #2383e2;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1ef;
+  --secondary-foreground: #37352f;
+  --muted: #f7f7f5;
+  --muted-foreground: #787774;
+  --accent: #efefed;
+  --accent-foreground: #37352f;
+  --destructive: #e03e3e;
+  --border: #e9e9e7;
+  --input: #e3e2e0;
+  --ring: #2383e2;
+  --chart-1: #2383e2;
+  --chart-2: #0f7b6c;
+  --chart-3: #d9730d;
+  --chart-4: #ad1a72;
+  --chart-5: #6940a5;
+  --radius: 0.5rem;
+  --sidebar: #f7f7f5;
+  --sidebar-foreground: #5f5e5b;
+  --sidebar-primary: #37352f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ebebea;
+  --sidebar-accent-foreground: #37352f;
+  --sidebar-border: #e9e9e7;
+  --sidebar-ring: #2383e2;
 
-  /* Pixel-art extras */
-  --frame: #120c15; /* outer pixel frame */
-  --frame-hi: #4b3a52; /* top-left bevel */
-  --frame-lo: #1e1622; /* bottom-right bevel */
+  /* Kept for components written for the old pixel theme; they now resolve to quiet values. */
+  --frame: #e9e9e7;
+  --frame-hi: transparent;
+  --frame-lo: transparent;
   --wood: #c48f5f;
   --wood-d: #6e452c;
   --wood-dd: #4a2e1f;
-  --parchment: #f8f0e3;
-  --ink: #2a1d22;
-  --good: #7cc58a;
-  --warn: #f4b942;
-  --bad: #e05a4f;
-  --info: #60a5fa;
-  --px: 3px; /* one "pixel" of UI chrome */
+  --parchment: #ffffff;
+  --ink: #37352f;
+  --good: #0f7b6c;
+  --warn: #f5c451;
+  --warn-ink: #b4570b;
+  --bad: #e03e3e;
+  --info: #2383e2;
+  --px: 1px;
 }
 
 @theme inline {
@@ -102,90 +103,76 @@
   --color-ink: var(--ink);
   --color-good: var(--good);
   --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
   --color-bad: var(--bad);
   --color-info: var(--info);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
-  --font-pixel: var(--font-pixelify);
-  --font-heading: var(--font-pixelify);
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-3xl: 0px;
-  --radius-4xl: 0px;
+  --font-heading: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    scrollbar-color: #4b3a52 #1e1622;
+    scrollbar-color: #d3d1cb transparent;
   }
   html {
     @apply font-sans;
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
     @apply bg-background text-foreground;
-    /* Subtle checkered "floor tiles" behind everything. */
-    background-image: repeating-conic-gradient(#1e1724 0 25%, #1b1520 0 50%);
-    background-size: 24px 24px;
   }
   h1,
   h2,
   h3 {
-    font-family: var(--font-pixelify), var(--font-geist-sans), system-ui;
-    letter-spacing: 0.01em;
+    font-family: var(--font-heading);
+    font-weight: 650;
+    letter-spacing: -0.01em;
   }
   ::selection {
-    background: var(--primary);
-    color: var(--primary-foreground);
+    background: rgb(35 131 226 / 0.22);
   }
 }
 
+/* Old pixel-theme surfaces, now plain bordered cards. */
 @utility pixel-frame {
-  /*
-   * Notched pixel frame: four offset shadows draw the border but leave the corners
-   * empty, so the panel reads as pixel art. Inset shadows add a 1-step bevel.
-   */
-  box-shadow:
-    calc(var(--px) * -1) 0 0 0 var(--frame),
-    var(--px) 0 0 0 var(--frame),
-    0 calc(var(--px) * -1) 0 0 var(--frame),
-    0 var(--px) 0 0 var(--frame),
-    inset var(--px) var(--px) 0 0 var(--frame-hi),
-    inset calc(var(--px) * -1) calc(var(--px) * -1) 0 0 var(--frame-lo);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 @utility pixel-panel {
   @apply pixel-frame bg-card text-card-foreground;
-  margin: var(--px);
 }
 
-/* A parchment "paper" panel for reading documents. */
+/* A document surface: the page itself. */
 @utility pixel-paper {
-  background: var(--parchment);
-  color: var(--ink);
-  box-shadow:
-    calc(var(--px) * -1) 0 0 0 var(--wood-dd),
-    var(--px) 0 0 0 var(--wood-dd),
-    0 calc(var(--px) * -1) 0 0 var(--wood-dd),
-    0 var(--px) 0 0 var(--wood-dd),
-    inset 0 calc(var(--px) * -2) 0 0 #e6d6bd;
-  margin: var(--px);
+  background: var(--card);
+  color: var(--foreground);
 }
 
-/* Wooden plank strip, like the office's furniture. */
 @utility pixel-wood {
-  background:
-    repeating-linear-gradient(0deg, transparent 0 10px, rgb(0 0 0 / 0.12) 10px 12px),
-    linear-gradient(var(--wood), #b07b48);
-  color: var(--ink);
+  background: var(--background);
+  color: var(--foreground);
 }
 
+/* Former pixel-font labels: now ordinary medium-weight text. */
 @utility font-pixel {
-  font-family: var(--font-pixelify), var(--font-geist-sans), system-ui;
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* The game's own lettering, for the office and its level badges only. */
+@utility font-game {
+  font-family: var(--font-pixelify), ui-monospace, monospace;
+  font-weight: 400;
 }
 
 @utility pixelated {
@@ -193,95 +180,20 @@
 }
 
 @layer components {
-  /* Chunky game buttons (shadcn Button, all filled variants). */
-  [data-slot="button"],
-  [data-slot="input-group-button"] {
-    font-family: var(--font-pixelify), var(--font-geist-sans), system-ui;
-    letter-spacing: 0.02em;
-    border-radius: 0 !important;
-    transition:
-      transform 60ms,
-      box-shadow 60ms,
-      background-color 120ms;
+  [data-slot="button"] {
+    font-weight: 500;
   }
-  [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"], [data-variant="destructive"]) {
-    box-shadow:
-      calc(var(--px) * -1) 0 0 0 var(--frame),
-      var(--px) 0 0 0 var(--frame),
-      0 calc(var(--px) * -1) 0 0 var(--frame),
-      0 var(--px) 0 0 var(--frame),
-      inset 0 calc(var(--px) * -1) 0 0 rgb(0 0 0 / 0.28),
-      inset 0 var(--px) 0 0 rgb(255 255 255 / 0.18);
-    margin: var(--px);
-    border: 0;
-  }
-  [data-slot="button"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"], [data-variant="destructive"]):active:not(:disabled) {
-    transform: translateY(2px);
-    box-shadow:
-      calc(var(--px) * -1) 0 0 0 var(--frame),
-      var(--px) 0 0 0 var(--frame),
-      0 calc(var(--px) * -1) 0 0 var(--frame),
-      0 var(--px) 0 0 var(--frame),
-      inset 0 var(--px) 0 0 rgb(0 0 0 / 0.28);
-  }
-  [data-slot="button"][data-variant="outline"] {
-    background: var(--secondary);
-  }
-  [data-slot="button"][data-variant="destructive"] {
-    background: var(--bad);
-    color: #fff;
-  }
-
-  /* Inputs look like sunken slots. */
-  [data-slot="input"],
-  [data-slot="textarea"],
-  [data-slot="select-trigger"],
-  [data-slot="input-group"],
   select.pixel-select {
-    border-radius: 0 !important;
-    border: 0 !important;
-    background: #140e17 !important;
-    box-shadow:
-      calc(var(--px) * -1) 0 0 0 var(--frame),
-      var(--px) 0 0 0 var(--frame),
-      0 calc(var(--px) * -1) 0 0 var(--frame),
-      0 var(--px) 0 0 var(--frame),
-      inset var(--px) var(--px) 0 0 #0b070d,
-      inset calc(var(--px) * -1) calc(var(--px) * -1) 0 0 #2a2030 !important;
-    margin: var(--px);
+    border: 1px solid var(--input);
+    border-radius: var(--radius-md);
+    background: var(--background);
   }
-  [data-slot="input-group"] [data-slot="textarea"],
-  [data-slot="input-group"] [data-slot="input"] {
-    box-shadow: none !important;
-    margin: 0;
-    background: transparent !important;
-  }
-  [data-slot="input"]:focus-visible,
-  [data-slot="textarea"]:focus-visible,
-  [data-slot="input-group"]:focus-within {
-    outline: var(--px) solid var(--primary);
-    outline-offset: var(--px);
-  }
-
-  /* shadcn cards and popovers pick up the frame too. */
   [data-slot="card"],
   [data-slot="dialog-content"],
   [data-slot="sheet-content"],
-  [data-slot="dropdown-menu-content"],
-  [data-slot="tooltip-content"] {
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow:
-      calc(var(--px) * -1) 0 0 0 var(--frame),
-      var(--px) 0 0 0 var(--frame),
-      0 calc(var(--px) * -1) 0 0 var(--frame),
-      0 var(--px) 0 0 var(--frame),
-      inset var(--px) var(--px) 0 0 var(--frame-hi),
-      inset calc(var(--px) * -1) calc(var(--px) * -1) 0 0 var(--frame-lo);
-  }
-
-  [data-slot="bubble-content"] {
-    border-radius: 0 !important;
+  [data-slot="dropdown-menu-content"] {
+    border-color: var(--border);
+    box-shadow: 0 1px 2px rgb(15 15 15 / 0.04), 0 4px 16px rgb(15 15 15 / 0.06);
   }
 }
 
@@ -321,13 +233,15 @@
   }
 }
 
-/* The Context page editor sits on parchment: no second background, ink-colored text. */
+/* The Context page editor: a plain page, like Notion. */
 .ajudan-page-editor .bn-editor {
   background: transparent;
-  color: var(--ink);
+  color: var(--foreground);
+  padding-inline: 0;
 }
 .ajudan-page-editor .bn-editor h1,
 .ajudan-page-editor .bn-editor h2,
 .ajudan-page-editor .bn-editor h3 {
-  color: var(--wood-dd);
+  color: var(--foreground);
+  font-weight: 650;
 }

@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Pixelify_Sans } from "next/font/google";
+import { Geist_Mono, Inter, Pixelify_Sans } from "next/font/google";
 import Link from "next/link";
 import { Suspense } from "react";
 import { HeaderTagline, OpenFolderBadge } from "@/components/open-folder-badge";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-/** Game UI font: headings, tabs, buttons, badges. Long text stays in Geist. */
+/** The office's lettering: only for game badges (levels, streaks). */
 const pixelify = Pixelify_Sans({
   variable: "--font-pixelify",
   subsets: ["latin"],
@@ -56,13 +56,13 @@ function PixelLogo() {
 // business layout and home page put `lang` on their own wrapper for the server HTML.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${pixelify.variable} h-full antialiased`}>
+    <html lang="en" className={`${inter.variable} ${geistMono.variable} ${pixelify.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <header className="pixel-wood relative z-10 h-12 shrink-0 shadow-[0_3px_0_var(--frame),0_6px_0_rgb(0_0_0/0.3)]">
+        <header className="relative z-10 h-12 shrink-0 border-b border-border bg-background">
           <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:px-6">
             <Link href="/" className="flex items-center gap-2">
               <PixelLogo />
-              <span className="font-pixel text-xl leading-none text-ink drop-shadow-[1px_1px_0_#fff3c4]">Ajudan</span>
+              <span className="text-[15px] font-semibold leading-none text-foreground">Ajudan</span>
             </Link>
             <Suspense fallback={null}>
               <HeaderTagline />

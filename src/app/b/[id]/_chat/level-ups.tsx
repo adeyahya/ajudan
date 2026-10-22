@@ -32,7 +32,7 @@ export function LevelUps({ businessId, ups, now }: { businessId: string; ups: Le
           {u.mate ? (
             <Avatar seed={u.mate.id} name={u.mate.name} color={u.mate.color} size={28} />
           ) : (
-            <span aria-hidden className="font-pixel flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-foreground tabular-nums">
+            <span aria-hidden className="font-game flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-foreground tabular-nums">
               {u.level}
             </span>
           )}

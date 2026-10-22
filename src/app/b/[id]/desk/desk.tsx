@@ -130,7 +130,7 @@ export function Desk({ businessId, language, initial }: { businessId: string; la
           <Badge tone="violet">💤 Team resting until {new Date(data.rest.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Badge>
         )}
         {xpPop > 0 && (
-          <span key={xpPop} className="font-pixel pointer-events-none absolute right-6 top-1 animate-[xp-pop_1.2s_ease-out_forwards] text-lg text-primary drop-shadow-[2px_2px_0_var(--frame)]">
+          <span key={xpPop} className="font-pixel pointer-events-none absolute right-6 top-1 animate-[xp-pop_1.2s_ease-out_forwards] text-lg text-primary">
             +10 XP
           </span>
         )}

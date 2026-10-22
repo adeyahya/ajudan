@@ -23,7 +23,7 @@ export function LoadBar({ loads, businessId }: { loads: Load[]; businessId: stri
   const total = loads.reduce((n, l) => n + l.chars, 0) || 1;
   return (
     <div className="space-y-2">
-      <div className="flex h-4 w-full overflow-hidden border-2 border-frame bg-background">
+      <div className="flex h-4 w-full overflow-hidden border border-border bg-background">
         {loads.map((l) => (
           <span key={l.id} className={cn(COLOR[l.mode], "h-full border-r border-frame/60 last:border-r-0")} style={{ width: `${(l.chars / total) * 100}%` }} title={`${l.label}: ${l.chars}`} />
         ))}

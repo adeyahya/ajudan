@@ -56,7 +56,7 @@ export function People({ businessId, contacts, openId, history, mates, managerId
               key={v.key}
               type="button"
               onClick={() => setView(v.key)}
-              className={cn("font-pixel rounded-[3px] border-2 border-frame px-2 py-0.5 text-xs", view === v.key ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground")}
+              className={cn("font-pixel rounded-md border border-border px-2 py-0.5 text-xs", view === v.key ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
               {v.label} <span className="opacity-70">{contacts.filter((c) => inView(c, v.key)).length}</span>
             </button>
@@ -135,7 +135,7 @@ function Peek({ businessId, c, history, mates, managerId, onClose }: { businessI
       <Card className="space-y-3 p-4">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <h2 className="font-pixel truncate text-xl text-primary">{c.name}</h2>
+            <h2 className="font-pixel truncate text-xl text-foreground">{c.name}</h2>
             {c.company && <p className="text-xs text-muted-foreground">{c.company}</p>}
           </div>
           <button type="button" onClick={onClose} aria-label={t("context.peek.close")} className="text-muted-foreground hover:text-foreground">

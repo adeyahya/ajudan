@@ -43,7 +43,7 @@ export function ContextSuggestionCard({ businessId, s }: { businessId: string; s
     );
   }
   return (
-    <div className="w-full space-y-2 border-2 border-frame bg-secondary/60 p-3">
+    <div className="w-full space-y-2 border border-border bg-secondary/60 p-3">
       <div className="flex items-center gap-2 text-sm font-medium">
         <BookmarkPlusIcon className="size-4 text-primary" />
         {s.kind === "new_page" ? t("context.card.newPage", { title: s.pageTitle }) : t("context.card.title", { page: s.pageTitle })}

@@ -85,7 +85,7 @@ export function BusinessRail({ hideInterview = false, pendingApprovals = 0 }: { 
         className={cn(
           "group relative flex w-full flex-col items-center gap-1 rounded-md px-1 text-center transition-colors duration-200",
           small ? "py-1.5" : "py-2",
-          active ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[inset_0_-2px_0_rgb(0_0_0/0.25)]" : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+          active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
         )}
       >
         <Icon aria-hidden className={small ? "size-4" : "size-5"} strokeWidth={1.75} />
@@ -99,7 +99,7 @@ export function BusinessRail({ hideInterview = false, pendingApprovals = 0 }: { 
     <>
       <nav
         aria-label={t("nav.menu")}
-        className="sticky top-0 hidden h-[calc(100dvh-3rem)] w-[4.75rem] shrink-0 flex-col gap-1 self-start overflow-y-auto border-r-[3px] border-sidebar-border bg-sidebar px-1.5 py-3 md:flex"
+        className="sticky top-0 hidden h-[calc(100dvh-3rem)] w-[4.75rem] shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-3 md:flex"
       >
         {PRIMARY.map((i) => railLink(i))}
         <div className="mt-auto space-y-0.5 border-t border-sidebar-accent pt-2">{secondary.map((i) => railLink(i, true))}</div>
@@ -107,7 +107,7 @@ export function BusinessRail({ hideInterview = false, pendingApprovals = 0 }: { 
 
       <nav
         aria-label={t("nav.menu")}
-        className="fixed inset-x-0 bottom-0 z-40 border-t-[3px] border-sidebar-border bg-sidebar pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-sidebar-border bg-sidebar pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {moreOpen && (
           <div className="absolute inset-x-2 bottom-full mb-2 grid grid-cols-4 gap-1 rounded-md border-2 border-sidebar-border bg-sidebar p-2 shadow-[0_-6px_24px_rgb(0_0_0/0.35)]">
@@ -122,7 +122,7 @@ export function BusinessRail({ hideInterview = false, pendingApprovals = 0 }: { 
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "flex flex-col items-center gap-1 rounded-md px-1 py-2 text-[11px]",
-                    active ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground/80 hover:bg-sidebar-accent",
+                    active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/70",
                   )}
                 >
                   <Icon aria-hidden className="size-5" strokeWidth={1.75} />
@@ -185,7 +185,7 @@ function BarItem({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex flex-1 flex-col items-center justify-center gap-1 text-[11px] transition-colors",
-        active ? "text-sidebar-primary" : "text-sidebar-foreground/70",
+        active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
       )}
     >
       <Icon aria-hidden className="size-5" strokeWidth={active ? 2.25 : 1.75} />

@@ -51,13 +51,13 @@ async function Content() {
           {IN_APP ? <AppFolderList lang={lang} /> : <FolderList lang={lang} />}
 
           <Card className="p-5">
-            <h2 className="mb-1 text-lg text-primary">{t(lang, "home.newTitle")}</h2>
+            <h2 className="mb-1 text-lg text-foreground">{t(lang, "home.newTitle")}</h2>
             <p className="mb-4 text-sm text-muted-foreground">{t(lang, "home.newBody")}</p>
             <NewBusinessForm home={AJUDAN_HOME} defaultLanguage={lang} />
           </Card>
 
           <Card className="p-5">
-            <h2 className="mb-1 text-lg text-primary">{t(lang, "home.openTitle")}</h2>
+            <h2 className="mb-1 text-lg text-foreground">{t(lang, "home.openTitle")}</h2>
             <p className="mb-4 text-sm text-muted-foreground">{t(lang, "home.openBody")}</p>
             <OpenFolderForm />
           </Card>

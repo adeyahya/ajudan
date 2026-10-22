@@ -20,7 +20,7 @@ export function ContextNav() {
   const base = `/b/${id}/context`;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="font-pixel mr-2 text-lg text-primary drop-shadow-[2px_2px_0_var(--frame)]">❖ {t("context.title")}</span>
+      <span className="mr-2 text-lg font-semibold text-foreground">❖ {t("context.title")}</span>
       {TABS.map((tab) => {
         const href = base + tab.href;
         const active = tab.href === "" ? pathname === base : pathname.startsWith(href);
@@ -29,8 +29,8 @@ export function ContextNav() {
             key={tab.href}
             href={href}
             className={cn(
-              "font-pixel inline-flex items-center gap-1.5 rounded-[3px] border-2 border-frame px-2.5 py-0.5 text-sm",
-              active ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground",
+              "font-pixel inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-0.5 text-sm",
+              active ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
             )}
           >
             <span aria-hidden className="text-xs opacity-80">

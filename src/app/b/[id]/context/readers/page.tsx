@@ -67,8 +67,8 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
             key={m.id}
             href={`/b/${id}/context/readers?t=${m.id}`}
             className={cn(
-              "font-pixel flex items-center gap-1.5 rounded-[3px] border-2 border-frame px-2 py-0.5 text-sm",
-              m.id === mate.id ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground",
+              "font-pixel flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-sm",
+              m.id === mate.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Avatar seed={m.id} name={m.name} color={m.color} size={18} />
@@ -80,7 +80,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 space-y-4">
           <Card className="space-y-3 p-4">
-            <h2 className="font-pixel text-lg text-primary">{t(lang, "context.readers.title", { name: mate.name })}</h2>
+            <h2 className="font-pixel text-lg text-foreground">{t(lang, "context.readers.title", { name: mate.name })}</h2>
             <p className="text-xs text-muted-foreground">{t(lang, "context.readers.help")}</p>
             {task ? (
               <>

@@ -70,7 +70,7 @@ function LevelBadge({ level, lang }: { level: LevelInfo; lang: UiLang }) {
   return (
     <span
       title={t(lang, "chathome.levelTitle", { level: level.level, xp: level.xp })}
-      className="font-pixel shrink-0 rounded-sm bg-secondary px-1 text-[10px] leading-4 text-secondary-foreground tabular-nums"
+      className="font-game shrink-0 rounded-sm bg-secondary px-1 text-[10px] leading-4 text-secondary-foreground tabular-nums"
     >
       {t(lang, "chathome.level", { level: level.level })}
     </span>
@@ -176,7 +176,7 @@ export function ConversationList({ data, activeId, className }: { data: Conversa
           {streak.best > 0 && <span className="text-[11px] text-muted-foreground tabular-nums">{t(lang, "chathome.streakBest", { count: streak.best })}</span>}
         </div>
         <div className="mt-0.5 flex items-baseline gap-1.5">
-          <span className="font-pixel text-2xl leading-none text-primary tabular-nums">{streak.current}</span>
+          <span className="font-game text-2xl leading-none text-foreground tabular-nums">{streak.current}</span>
           <span className="text-sm">{tn(lang, "chathome.streakUnit", streak.current)}</span>
         </div>
         <Link

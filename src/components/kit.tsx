@@ -32,7 +32,7 @@ export function Button({
   return <ShadcnButton variant={variantMap[variant]} size={size} {...props} />;
 }
 
-/** A framed game panel. */
+/** A bordered panel. */
 export function Card({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("pixel-panel", className)} {...props} />;
 }
@@ -54,17 +54,17 @@ export function Badge({
   className?: string;
 }) {
   const tones = {
-    neutral: "bg-muted text-foreground",
-    green: "bg-good text-ink",
-    amber: "bg-warn text-ink",
-    red: "bg-bad text-white",
-    blue: "bg-info text-ink",
-    violet: "bg-violet-400 text-ink",
+    neutral: "bg-[#f1f1ef] text-[#37352f]",
+    green: "bg-[#dbeddb] text-[#1c3829]",
+    amber: "bg-[#fdecc8] text-[#402c1b]",
+    red: "bg-[#ffe2dd] text-[#5d1715]",
+    blue: "bg-[#d3e5ef] text-[#183347]",
+    violet: "bg-[#e8deee] text-[#412454]",
   };
   return (
     <span
       className={cn(
-        "font-pixel inline-flex items-center px-1.5 py-px text-[11px] leading-4 tracking-wide shadow-[inset_0_-2px_0_rgb(0_0_0/0.25)] outline-2 outline-frame",
+        "inline-flex items-center rounded-sm px-1.5 py-px text-xs font-medium leading-4",
         tones[tone],
         className,
       )}
@@ -78,10 +78,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl text-primary drop-shadow-[2px_2px_0_var(--frame)]">
-          <span aria-hidden className="inline-block size-2.5 bg-primary shadow-[2px_2px_0_var(--frame)]" />
-          {title}
-        </h1>
+        <h1 className="text-[28px] font-bold leading-tight text-foreground">{title}</h1>
         {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
       </div>
       {actions}
