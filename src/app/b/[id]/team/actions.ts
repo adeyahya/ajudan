@@ -10,6 +10,7 @@ import { HUMAN_ROLE_KEY, normalizePhone } from "@/lib/humans";
 import { ensureManager } from "@/lib/manager";
 import { isOnWhatsapp } from "@/lib/whatsapp";
 import { getRole } from "@/lib/roles";
+import { defaultPersona, parseLines } from "@/lib/team";
 import { initTeammateWorkspace } from "@/lib/workspace";
 
 export type FormState = { error?: string; ok?: boolean };
@@ -36,14 +37,27 @@ export async function updateTeammate(
   const browserAccess = formData.get("browserAccess") === "on";
   const whatsappAccess = formData.get("whatsappAccess") === "on";
   const shellAccess = formData.get("shellAccess") === "on";
+  const persona = String(formData.get("persona") ?? "").trim();
+  const responsibilities = parseLines(String(formData.get("responsibilities") ?? ""));
   if (!name) return { error: "Name can't be empty" };
   if (!isAutonomy(autonomy)) return { error: "Pick an autonomy level" };
   const schedule = rawSchedule ? validCron(rawSchedule) : null;
   if (rawSchedule && !schedule) return { error: `"${rawSchedule}" isn't a valid cron expression (e.g. 0 9 * * 1)` };
   if (schedule && !schedulePrompt) return { error: "Describe what to do on each scheduled run" };
+  if (!responsibilities.length) return { error: "List at least one responsibility" };
 
   db.update(schema.teammates)
-    .set({ name, autonomy, schedule, schedulePrompt: schedule ? schedulePrompt : null, browserAccess, whatsappAccess, shellAccess })
+    .set({
+      name,
+      autonomy,
+      schedule,
+      schedulePrompt: schedule ? schedulePrompt : null,
+      browserAccess,
+      whatsappAccess,
+      shellAccess,
+      persona,
+      responsibilities,
+    })
     .where(ownTeammate(businessId, teammateId))
     .run();
   refresh();
@@ -78,7 +92,13 @@ export async function hireTeam(businessId: string) {
     .from(schema.teammates)
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "proposed")))
     .all();
-  if (!proposed.length) throw new Error("There is no one to hire");
+  // A redesign that only kept the existing team has no one new to hire; the team just carries on.
+  const activeCount = db
+    .select({ id: schema.teammates.id })
+    .from(schema.teammates)
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
+    .all().length;
+  if (!proposed.length && !activeCount) throw new Error("There is no one to hire");
 
   for (const t of proposed) {
     const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
@@ -96,6 +116,8 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
   if (!role) return { error: "Pick a role" };
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Give your teammate a name" };
+  // The brief the teammate works from: the owner's words, or a default built from the profile.
+  const persona = String(formData.get("persona") ?? "").trim() || defaultPersona(role, biz.profile);
 
   const top = db
     .select({ m: max(schema.teammates.deskIndex) })
@@ -110,7 +132,7 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
       roleKey: role.key,
       title: role.title,
       color: role.color,
-      persona: "",
+      persona,
       why: `Added by the owner: ${role.summary}`,
       responsibilities: [role.summary],
       kpis: role.defaultKpis,
@@ -137,11 +159,7 @@ function humanFields(formData: FormData, language: string) {
   const name = String(formData.get("name") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
   const phoneRaw = String(formData.get("phone") ?? "").trim();
-  const helps = String(formData.get("helps") ?? "")
-    .split(/\n|;/)
-    .map((l) => l.replace(/^[-*•]\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 8);
+  const helps = parseLines(String(formData.get("helps") ?? ""));
   if (!name) return { error: "Give them a name" };
   const phone = normalizePhone(phoneRaw, language);
   if (!phone) return { error: "Enter their WhatsApp number with the country code, e.g. +62 812 3456 7890" };

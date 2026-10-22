@@ -365,6 +365,16 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
           </Card>
         )}
 
+        {t.persona && (
+          <Card className="space-y-2 p-4">
+            <h2 className="text-sm font-semibold">Brief</h2>
+            <p className="whitespace-pre-line text-sm">{t.persona}</p>
+            <Link href={`/b/${id}/team`} className="text-xs text-muted-foreground hover:text-foreground">
+              Edit on the Team page →
+            </Link>
+          </Card>
+        )}
+
         <Card className="space-y-2 p-4">
           <h2 className="text-sm font-semibold">Responsibilities</h2>
           <ul className="list-disc space-y-1 pl-4 text-sm">

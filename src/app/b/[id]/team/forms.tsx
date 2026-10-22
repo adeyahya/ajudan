@@ -25,7 +25,17 @@ export function TeammateEditor({
   initial,
 }: {
   action: Action;
-  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean; whatsappAccess?: boolean; shellAccess?: boolean };
+  initial: {
+    name: string;
+    persona: string;
+    responsibilities: string[];
+    autonomy: Autonomy;
+    schedule: string | null;
+    schedulePrompt: string | null;
+    browserAccess?: boolean;
+    whatsappAccess?: boolean;
+    shellAccess?: boolean;
+  };
 }) {
   const [state, formAction] = useActionState(action, {});
   const [autonomy, setAutonomy] = useState<Autonomy>(initial.autonomy);
@@ -36,6 +46,20 @@ export function TeammateEditor({
       <div className="grid gap-1">
         <Label>Name</Label>
         <Input name="name" defaultValue={initial.name} required />
+      </div>
+      <div className="grid gap-1">
+        <Label>Brief</Label>
+        <Textarea
+          name="persona"
+          rows={4}
+          defaultValue={initial.persona}
+          placeholder="What this teammate should know and focus on for your business: products, customers, voice, what to avoid."
+        />
+        <p className="text-xs text-muted-foreground">Read before every task, together with your business profile.</p>
+      </div>
+      <div className="grid gap-1">
+        <Label>Responsibilities (one per line)</Label>
+        <Textarea name="responsibilities" rows={3} defaultValue={initial.responsibilities.join("\n")} required />
       </div>
       <div className="grid gap-1">
         <Label>How much freedom?</Label>
@@ -118,7 +142,7 @@ export function TeammateEditor({
 export function AddTeammateForm({ action, roles }: { action: Action; roles: { key: string; title: string; summary: string }[] }) {
   const [state, formAction] = useActionState(action, {});
   return (
-    <form action={formAction} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end text-sm">
+    <form action={formAction} className="grid gap-3 sm:grid-cols-2 text-sm">
       <div className="grid gap-1">
         <Label>Role</Label>
         <select name="roleKey" required className="h-9 rounded-lg border border-border bg-card px-2 text-sm">
@@ -133,8 +157,19 @@ export function AddTeammateForm({ action, roles }: { action: Action; roles: { ke
         <Label>Name</Label>
         <Input name="name" required placeholder="e.g. Sam" />
       </div>
-      <Submit>Add teammate</Submit>
-      {state.error && <p className="text-xs text-red-600 dark:text-red-400 sm:col-span-3">{state.error}</p>}
+      <div className="grid gap-1 sm:col-span-2">
+        <Label>What should they focus on? (optional)</Label>
+        <Textarea
+          name="persona"
+          rows={2}
+          placeholder="e.g. Weekly TikTok scripts for our wooden toys, playful tone, never mention competitors by name."
+        />
+        <p className="text-xs text-muted-foreground">Leave it empty and we write a brief from your business profile. You can edit it any time.</p>
+      </div>
+      <div className="flex items-center gap-3 sm:col-span-2">
+        <Submit>Add teammate</Submit>
+        {state.error && <span className="text-xs text-red-600 dark:text-red-400">{state.error}</span>}
+      </div>
     </form>
   );
 }

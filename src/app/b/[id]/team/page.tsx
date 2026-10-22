@@ -88,7 +88,7 @@ async function Content({ params }: Params) {
         <LiveRefresh businessId={id} types={LIVE_TYPES} />
         <PageHeader
           title="Meet your proposed team"
-          subtitle="Rename anyone, adjust how much freedom they get, then hire the team."
+          subtitle="Read each brief, rename anyone, adjust how much freedom they get, then hire the team."
           actions={
             <div className="flex gap-2">
               <form action={redesignTeam.bind(null, id)}>
@@ -321,6 +321,14 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
         </div>
       </div>
       {t.why && <p className="text-sm">{t.why}</p>}
+      <div>
+        <div className="text-xs font-medium text-muted-foreground mb-1">Brief</div>
+        {t.persona ? (
+          <p className="text-sm whitespace-pre-line">{t.persona}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">No brief yet: {t.name} only gets the business profile and the role&apos;s standard instructions. Add one under Edit.</p>
+        )}
+      </div>
       {t.responsibilities.length > 0 && (
         <div>
           <div className="text-xs font-medium text-muted-foreground mb-1">Responsibilities</div>
@@ -350,6 +358,8 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
             action={updateTeammate.bind(null, businessId, t.id)}
             initial={{
               name: t.name,
+              persona: t.persona,
+              responsibilities: t.responsibilities,
               autonomy: t.autonomy,
               schedule: t.schedule,
               schedulePrompt: t.schedulePrompt,
