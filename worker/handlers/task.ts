@@ -1,23 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CanUseTool, McpServerConfig, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Business, Task, Teammate } from "@/db/schema";
 import { sameAction } from "@/lib/approvals";
-import { describeToolUse, runAgent } from "@/lib/claude";
+import { describeToolUse, MODELS, runAgent } from "@/lib/claude";
 import { taskHistory } from "@/lib/history";
 import { logEvent } from "@/lib/events";
-import type { JobPayloads } from "@/lib/jobs";
+import { enqueueJob, type JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
 import { describeMedia, linkIntoWorkspace, mediaInfo, mediaKind } from "@/lib/media";
-import { getRole, MANAGER_ROLE } from "@/lib/roles";
+import { memoryNeedsConsolidation } from "@/lib/memory";
+import { getRole, isVideoRole, MANAGER_ROLE } from "@/lib/roles";
 import os from "node:os";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { HUMAN, humanThread, listHumans } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
-import { REPLY } from "../replies";
+import { isReminderTask, REPLY } from "../replies";
 import { DECISION, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
@@ -34,6 +35,10 @@ const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
 const BUDGET_USD = Number(process.env.AJUDAN_TASK_BUDGET_USD ?? 3) || 3;
 /** Video work takes more rounds (edit, render, look, fix). */
 const VIDEO_BUDGET_USD = Number(process.env.AJUDAN_VIDEO_BUDGET_USD ?? 6) || 6;
+/** Quick reactions on the fast model (decisions, reports, reminders). */
+const QUICK_BUDGET_USD = 1;
+/** Attached files that make a task video work: footage to cut, photos to animate. */
+const VIDEO_INPUTS = new Set(["video"]);
 
 /** Skills teammates can load (agent-plugins/ in this repo; ~/.claude is never read). */
 const PLUGIN_DIR = path.resolve(import.meta.dirname, "..", "..", "agent-plugins", "ajudan-video");
@@ -70,7 +75,16 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
   // The decision this run continues from: approved, that one call is allowed once.
   const decided = approvalId ? db.select().from(schema.approvals).where(eq(schema.approvals.id, approvalId)).get() : undefined;
   if (approvalId && (!decided || decided.status === "pending")) return;
-  let grant: Approval | undefined = decided?.status === "approved" ? decided : undefined;
+  // Already used before a crash or restart: the approved call went out, so it isn't allowed twice.
+  const used =
+    decided &&
+    db
+      .select({ data: schema.activityEvents.data })
+      .from(schema.activityEvents)
+      .where(and(eq(schema.activityEvents.taskId, task.id), eq(schema.activityEvents.type, "approval_used")))
+      .all()
+      .some((e) => e.data?.approvalId === decided.id);
+  let grant: Approval | undefined = decided?.status === "approved" && !used ? decided : undefined;
 
   const ac = runAbortController();
   runningTasks.set(task.id, ac);
@@ -87,9 +101,14 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
     const cwd = prepareWorkspace(teammate, business);
     // The owner's files for this task, readable in the teammate's folder at the same path.
     const attachments = linkIntoWorkspace(task.attachments, cwd);
-    const videoWork =
-      teammate.roleKey === "video_editor" || attachments.some((f) => mediaKind(f) === "video") || /\b(video|reel|tiktok)\b/i.test(task.instructions);
     const isManager = teammate.roleKey === MANAGER_ROLE.key;
+    // Video editing (skills, long runs, bigger budget) goes by role or by the footage
+    // and photos attached, never by words in the request. The manager only passes
+    // files along, so it never edits.
+    const videoWork = !isManager && (isVideoRole(teammate.roleKey) || attachments.some((f) => VIDEO_INPUTS.has(mediaKind(f))));
+    // Short reactions (an approval decision, reporting the team's results, a
+    // "no reply yet" nudge) run on the fast model.
+    const quickWork = task.createdBy === DECISION || task.createdBy === REPORT || isReminderTask(task);
     const roster = db
       .select()
       .from(schema.teammates)
@@ -272,7 +291,8 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       const attempt = (resume: string | undefined) =>
         runAgent({
           cwd,
-          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans),
+          model: quickWork ? MODELS.fast : undefined,
+          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork),
           prompt: resume
             ? decided
               ? decisionPrompt(decided)
@@ -280,18 +300,18 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
             : `${buildPrompt(task, taskHistory(teammate.id, task), files)}${decided ? `\n\n${decisionRecap(decided)}` : ""}`,
           tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
           sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
-          plugins: [PLUGIN_DIR],
-          skills: SKILLS,
+          plugins: videoWork ? [PLUGIN_DIR] : undefined,
+          skills: videoWork ? SKILLS : undefined,
           allowedTools,
           disallowedTools,
           mcpServers,
           canUseTool,
           onMessage,
           resume,
-          maxTurns: useBrowser || videoWork ? 80 : 40,
+          maxTurns: useBrowser || videoWork ? 80 : quickWork ? 20 : 40,
           // Reacting to an approval is a quick note to the owner: answer fast.
           effort: task.createdBy === DECISION ? "low" : undefined,
-          maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
+          maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : quickWork ? Math.min(BUDGET_USD, QUICK_BUDGET_USD) : BUDGET_USD,
           abortController: ac,
         });
       // The conversation to continue: this task's own run (after an approval) or the one
@@ -324,6 +344,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
     setMate({ state: "idle", currentActivity: null });
     ev("task_done", `${teammate.name} finished "${task.title}"`, { costUsd: r.costUsd });
     onTaskFinished(task.id);
+    scheduleMemoryConsolidation(teammate, cwd);
   } catch (err) {
     const reason = ac.signal.aborted ? ac.signal.reason : undefined;
     if (reason instanceof ApprovalWait) {
@@ -379,6 +400,27 @@ function decisionRecap(a: Approval) {
   return a.status === "approved"
     ? `## Earlier in this task\nYou asked the owner for approval to: ${a.summary}. They approved.${note} That call is allowed once, with exactly these arguments (anything different needs approval again):\n\`\`\`json\n${JSON.stringify(a.input)}\n\`\`\`\nMake it when you reach that step, then finish the task.`
     : `## Earlier in this task\nYou asked the owner for approval to: ${a.summary}. They rejected it.${note} Don't do it and don't ask again for the same thing; adjust or leave that step out, and say so in your summary.`;
+}
+
+/**
+ * memory.md grows with every run and is read whole each time. Once it's big, queue a
+ * fast-model rewrite (worker/handlers/memory.ts) after the task: it never holds up the
+ * owner, and never fails the task.
+ */
+function scheduleMemoryConsolidation(teammate: Teammate, cwd: string) {
+  try {
+    const file = path.join(cwd, "memory.md");
+    if (!fs.existsSync(file) || !memoryNeedsConsolidation(fs.statSync(file).size)) return;
+    const queued = db
+      .select({ payload: schema.jobs.payload })
+      .from(schema.jobs)
+      .where(and(eq(schema.jobs.kind, "consolidate_memory"), inArray(schema.jobs.status, ["queued", "running"])))
+      .all()
+      .some((j) => (j.payload as { teammateId?: string }).teammateId === teammate.id);
+    if (!queued) enqueueJob("consolidate_memory", { teammateId: teammate.id });
+  } catch (err) {
+    console.error(`[task] couldn't queue memory consolidation for ${teammate.name}`, err);
+  }
 }
 
 /**
@@ -490,8 +532,9 @@ function managerRules() {
 The owner talks to you instead of to each teammate, in a chat. Each message:
 1. Understand what they want (ask one short question back only if you truly can't act).
 2. Quick questions, status ("what is Sinta doing?"), advice or decisions: answer yourself. Use team_status, task_results and pending_approvals instead of guessing.
-3. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
-4. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
+3. Tiny asks you can finish in one go (a one-line caption, a short reply to a customer message, rewording a sentence, a yes/no with a reason): do them yourself, and save_deliverable when it's a piece of work the owner will use. Anything that needs research, images, video, browsing, WhatsApp, or more than a few lines of writing is not tiny.
+4. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
+5. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
 When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
 If nobody on the team can do something (a missing credential, shell, browser or WhatsApp), have the teammate who'd do it ask with request_capability (or ask yourself), and tell the owner to look at the Approvals page.`;
 }
@@ -535,6 +578,20 @@ You can drive ${business.name}'s own Chrome browser with the browser_* tools. It
 - Save what you found or prepared with save_deliverable, and say in your summary what (if anything) you changed on which site.`;
 }
 
+/** The video tools and skill are loaded for this run (video role, or footage attached). */
+function videoRules() {
+  return `## Making videos
+You can edit real videos (TikTok, Reels, Shorts, ads) from the owner's footage and photos with Remotion: load the campaign-video skill first (Skill tool), then follow it. The owner's uploads are in the media library (list_media; files attached to a task are listed in it). Look at footage with inspect_media and extract_frames, write the video as one TSX file, render_video, check frames of the result, fix, and attach the MP4 with save_deliverable(images=[…]). Add music and sound effects with find_free_assets and download_free_asset (free, business-safe licenses; credit CC BY tracks in the caption) or use music the owner uploaded.
+If the work needs footage you don't have, ask the owner for it with a precise shot list (what to film, how long, vertical) instead of inventing it, and say they can drop the clips into the chat.`;
+}
+
+/** No video skill this run: say who edits videos and how a task gets the tools. */
+function videoNote(roster: Teammate[]) {
+  const editor = roster.find((r) => isVideoRole(r.roleKey));
+  return `## Videos
+${editor ? `${editor.name} (${editor.title}) edits videos.` : "There's no video editor on the team."} Video editing tools aren't loaded for this task: a task gets them when footage or photos are attached to it. If a video is needed, ${editor ? `hand it to ${editor.name} with the files attached (assign_task files=[…]) or` : ""} tell the owner what to film and ask them to drop the clips into the chat.`;
+}
+
 function buildSystemPrompt(
   teammate: Teammate,
   business: Business,
@@ -543,6 +600,7 @@ function buildSystemPrompt(
   useBrowser = false,
   useWhatsapp = false,
   humans: Teammate[] = [],
+  videoWork = false,
 ) {
   const role = getRole(teammate.roleKey);
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none)");
@@ -589,9 +647,7 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 ## Making images
 You can make real images (social posts, carousel slides, posters, banners) with render_image: design each one as a self-contained HTML page (inline CSS, Google Fonts, product photos by URL from the business's website), usually 1080×1350 for Instagram/TikTok portrait or 1080×1080 square. Big readable text, the brand's colors and voice, one idea per slide. Read each PNG afterwards to check it looks right, fix and re-render if needed, then attach the images in order with save_deliverable(images=[…]) so the owner can see them on the Work page.
 
-## Making videos
-You can edit real videos (TikTok, Reels, Shorts, ads) from the owner's footage and photos with Remotion: load the campaign-video skill first (Skill tool), then follow it. The owner's uploads are in the media library (list_media; files attached to a task are listed in it). Look at footage with inspect_media and extract_frames, write the video as one TSX file, render_video, check frames of the result, fix, and attach the MP4 with save_deliverable(images=[…]). Add music and sound effects with find_free_assets and download_free_asset (free, business-safe licenses; credit CC BY tracks in the caption) or use music the owner uploaded.
-If the work needs footage you don't have, ask the owner for it with a precise shot list (what to film, how long, vertical) instead of inventing it, and say they can drop the clips into the chat.
+${videoWork ? videoRules() : videoNote(roster)}
 
 ## APIs and credentials
 - Call web APIs with http_request (JSON, CSV…). For APIs that need a key, use the credentials the owner stored (list_secrets) as {{secret.NAME}} in the URL, headers or body; Ajudan fills them in only for the hosts allowed for that secret, and you never see the value. Save big responses (save_as) and analyse the file.

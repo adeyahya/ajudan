@@ -1,6 +1,7 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
+import { formatUsd, overBudget, spentToday, startOfDay } from "@/lib/budget";
 import { logEvent } from "@/lib/events";
 import { MANAGER_ROLE } from "@/lib/roles";
 
@@ -14,6 +15,8 @@ export type JobPayloads = {
   design_team: { businessId: string };
   /** `approvalId`: continue a task that waited for this (now decided) approval. */
   run_task: { taskId: string; approvalId?: string };
+  /** Rewrite a teammate's grown memory.md into sections (worker/handlers/memory.ts). */
+  consolidate_memory: { teammateId: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */
@@ -29,28 +32,77 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
 export type Lane = "owner" | "team";
 
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
+  if (job.kind === "consolidate_memory") return "team";
   if (job.kind !== "run_task") return "owner";
+  return taskOf(job)?.role === MANAGER_ROLE.key ? "owner" : "team";
+}
+
+/** The task a run_task job runs, with its teammate's role. */
+function taskOf(job: Pick<Job, "payload">) {
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
-  const row = db
-    .select({ role: schema.teammates.roleKey })
+  return db
+    .select({ businessId: schema.tasks.businessId, role: schema.teammates.roleKey })
     .from(schema.tasks)
     .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
     .where(eq(schema.tasks.id, taskId))
     .get();
-  return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 
-/** Atomically claim the oldest queued job (of a lane, if given). */
+/**
+ * Atomically claim the oldest queued job (of a lane, if given). Task jobs of a
+ * business that has spent its daily budget stay queued: they're picked up again
+ * tomorrow, or as soon as the owner raises the cap on the Business page.
+ */
 export function claimJob(lane?: Lane) {
-  return db.transaction((tx) => {
+  const paused = new Set<string>();
+  const job = db.transaction((tx) => {
     const queued = tx.select().from(schema.jobs).where(eq(schema.jobs.status, "queued")).orderBy(asc(schema.jobs.id)).limit(200).all();
-    const job = lane ? queued.find((j) => laneOf(j) === lane) : queued[0];
+    const budgets = new Map<string, boolean>();
+    const withinBudget = (j: Job) => {
+      if (j.kind !== "run_task") return true;
+      const businessId = taskOf(j)?.businessId;
+      if (!businessId) return true;
+      if (!budgets.has(businessId)) {
+        const biz = tx.select({ cap: schema.businesses.dailyBudgetUsd }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+        const over = !!biz && overBudget(spentToday(businessId), biz.cap);
+        budgets.set(businessId, !over);
+        if (over) paused.add(businessId);
+      }
+      return budgets.get(businessId)!;
+    };
+    const job = queued.find((j) => (!lane || laneOf(j) === lane) && withinBudget(j));
     if (!job) return undefined;
     tx.update(schema.jobs)
       .set({ status: "running", startedAt: new Date(), attempts: job.attempts + 1 })
       .where(eq(schema.jobs.id, job.id))
       .run();
     return job;
+  });
+  for (const businessId of paused) noteBudgetReached(businessId);
+  return job;
+}
+
+/** One "budget reached" line in the activity feed per business per day. */
+function noteBudgetReached(businessId: string) {
+  const today = startOfDay();
+  const already = db
+    .select({ id: schema.activityEvents.id })
+    .from(schema.activityEvents)
+    .where(
+      and(
+        eq(schema.activityEvents.businessId, businessId),
+        eq(schema.activityEvents.type, "budget_reached"),
+        gte(schema.activityEvents.createdAt, today),
+      ),
+    )
+    .get();
+  if (already) return;
+  const cap = db.select({ cap: schema.businesses.dailyBudgetUsd }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.cap ?? 0;
+  logEvent({
+    businessId,
+    type: "budget_reached",
+    message: `Today's budget of ${formatUsd(cap)} is spent: queued tasks wait until tomorrow, or until you raise the daily budget on the Business page.`,
+    data: { dailyBudgetUsd: cap, spentUsd: spentToday(businessId) },
   });
 }
 

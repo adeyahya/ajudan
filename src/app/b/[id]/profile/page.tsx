@@ -2,13 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { Button, Card, Label, PageHeader, PageSkeleton, Prose } from "@/components/kit";
-import { getBusiness, listTeammates } from "@/lib/data";
+import { getBusiness, getSpend, listTeammates } from "@/lib/data";
 import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { LanguageSelect } from "@/app/language-select";
 import { saveLanguage, saveProfile } from "./actions";
 import { BrowserPanel } from "./browser-panel";
 import { SecretsPanel } from "./secrets-panel";
+import { SpendPanel } from "./spend-panel";
 import { WhatsappPanel } from "./whatsapp-panel";
 import { ProfileForm } from "./profile-form";
 
@@ -65,6 +66,7 @@ async function Content({ params }: Params) {
   if (!biz) notFound();
   const p = biz.profile;
   const mates = await listTeammates(id);
+  const spend = await getSpend(id);
   const browserMates = mates.filter((t) => t.browserAccess).map((t) => t.name);
   const shellMates = mates.filter((t) => t.shellAccess).map((t) => t.name);
   const waMates = mates.filter((t) => t.whatsappAccess).map((t) => t.name);
@@ -138,6 +140,9 @@ async function Content({ params }: Params) {
           </Section>
         </Card>
         <div className="grid gap-6 content-start">
+        <Card className="p-6">
+          <SpendPanel businessId={id} spend={spend} />
+        </Card>
         <Card className="p-6">
           <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} />
         </Card>

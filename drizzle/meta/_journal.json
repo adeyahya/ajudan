@@ -78,6 +78,13 @@
       "when": 1792670190316,
       "tag": "0010_task_session",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792671071428,
+      "tag": "0011_daily_budget",
+      "breakpoints": true
     }
   ]
 }

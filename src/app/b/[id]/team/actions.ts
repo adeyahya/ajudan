@@ -42,7 +42,7 @@ export async function updateTeammate(
   if (!name) return { error: "Name can't be empty" };
   if (!isAutonomy(autonomy)) return { error: "Pick an autonomy level" };
   const schedule = rawSchedule ? validCron(rawSchedule) : null;
-  if (rawSchedule && !schedule) return { error: `"${rawSchedule}" isn't a valid cron expression (e.g. 0 9 * * 1)` };
+  if (rawSchedule && !schedule) return { error: `"${rawSchedule}" isn't a valid cron expression (e.g. 0 9 * * 1), or runs more than once an hour` };
   if (schedule && !schedulePrompt) return { error: "Describe what to do on each scheduled run" };
   if (!responsibilities.length) return { error: "List at least one responsibility" };
 

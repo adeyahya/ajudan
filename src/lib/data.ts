@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
+import { overBudget, spentThisWeek, spentToday } from "@/lib/budget";
 import { currentDataDir } from "@/lib/paths";
 
 /**
@@ -24,6 +25,14 @@ export async function listTeammates(businessId: string, status: "proposed" | "ac
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, status)))
     .orderBy(asc(schema.teammates.deskIndex))
     .all();
+}
+
+/** Today's and this week's team spend, against the daily cap (src/lib/budget.ts). */
+export async function getSpend(businessId: string) {
+  await connection();
+  const cap = db.select({ cap: schema.businesses.dailyBudgetUsd }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.cap ?? 0;
+  const today = spentToday(businessId);
+  return { today, week: spentThisWeek(businessId), cap, over: overBudget(today, cap) };
 }
 
 export async function pendingApprovalCount(businessId: string) {
