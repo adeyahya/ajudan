@@ -15,6 +15,7 @@ import { slugify } from "@/lib/folders";
 import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from "@/lib/free-assets";
 import { renderHtmlToPng } from "@/lib/images";
 import { assetRows, describeOrganization } from "@/lib/assets";
+import { describeContact, searchAddressBook } from "@/lib/contacts";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
@@ -39,6 +40,7 @@ export const SAFE_BIZ_TOOLS = [
   "set_status",
   "render_image",
   "list_media",
+  "search_contacts",
   "inspect_media",
   "extract_frames",
   "render_video",
@@ -202,6 +204,20 @@ export function createBizServer(ctx: BizContext) {
           }),
         );
         return ok(lines.join("\n"));
+      },
+    ),
+
+    tool(
+      "search_contacts",
+      "Look people up in the business's address book that the owner keeps: customers, suppliers, partners, with phone, email, company, tags and the owner's notes about them. Words must all match (name, company, tag, notes…); empty query lists everyone.",
+      {
+        query: z.string().describe('e.g. "Rina", "reseller", "#vip", "kertas supplier"'),
+        kind: z.enum(["customer", "supplier", "partner", "team", "other"]).optional(),
+      },
+      async (a) => {
+        const found = searchAddressBook(ctx.businessId, a.query, a.kind, 30);
+        if (!found.length) return ok("Nobody in the address book matches. The owner adds people in Studio → Contacts.");
+        return ok(found.map(describeContact).join("\n"));
       },
     ),
 

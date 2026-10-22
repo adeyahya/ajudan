@@ -3,6 +3,7 @@
  * allowed WhatsApp chats (reseller groups, community announcements). Chats outside
  * businesses.whatsappChats can't be named, read or written to at all.
  */
+import { contactByName } from "@/lib/contacts";
 import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
@@ -52,6 +53,11 @@ export async function resolveTarget(business: Pick<Business, "id" | "language">,
     }
   }
   const n = raw.toLowerCase();
+  const known = contactByName(business.id, raw);
+  if (known?.phone) {
+    const jid = `${known.phone}@s.whatsapp.net`;
+    return { jid, name: `${known.name} (+${known.phone})`, allowed: allowedChats.some((c) => c.jid === jid) || ongoing(jid) };
+  }
   const contacts = await searchContacts(raw, 10).catch(() => []);
   const contact =
     contacts.find((c) => [c.name, c.alias, c.system_name].some((x) => x?.toLowerCase() === n)) ??

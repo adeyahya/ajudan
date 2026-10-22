@@ -213,6 +213,8 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Studying ${short(input.skill ?? input.command, 40)}`;
     case "mcp__biz__list_media":
       return "Looking through the media library";
+    case "mcp__biz__search_contacts":
+      return `Looking up ${short(input.query, 30) || "people"} in the address book`;
     case "mcp__biz__inspect_media":
       return `Checking ${baseName(input.file)}`;
     case "mcp__biz__extract_frames":

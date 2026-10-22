@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import type { DeliverableStatus, EditKind } from "@/db/schema";
+import { deleteContact, importContacts, saveContact, type ContactInput } from "@/lib/contacts";
 import { AudioSpecSchema, VideoSpecSchema } from "@/lib/edits";
 import { enqueueJob } from "@/lib/jobs";
 import { isServablePath } from "@/lib/media";
@@ -153,4 +154,24 @@ export async function deleteDoc(businessId: string, docId: string) {
     .get();
   if (gone) removeDeliverableFile(gone.id);
   refresh();
+}
+
+export async function saveContactAction(businessId: string, input: ContactInput & { id?: string }) {
+  ownBusiness(businessId);
+  const r = saveContact(businessId, input);
+  if ("contact" in r) refresh();
+  return "error" in r ? { error: r.error } : { id: r.contact.id };
+}
+
+export async function deleteContactAction(businessId: string, id: string) {
+  ownBusiness(businessId);
+  deleteContact(businessId, id);
+  refresh();
+}
+
+export async function importContactsAction(businessId: string, text: string) {
+  ownBusiness(businessId);
+  const r = importContacts(businessId, text);
+  refresh();
+  return r;
 }

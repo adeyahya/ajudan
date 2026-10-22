@@ -114,6 +114,7 @@ export function AudioEditor({
             <Waveform
               key={file}
               url={fileUrl(businessId, file)}
+              peaksUrl={`/api/b/${businessId}/peaks?file=${encodeURIComponent(file)}`}
               duration={duration}
               start={start}
               end={end}
@@ -203,6 +204,7 @@ function Slider({ label, value, min, max, step, unit, onChange }: { label: strin
 /** Waveform with a draggable selection; plays the selection with the level and fades applied. */
 function Waveform({
   url,
+  peaksUrl,
   duration,
   start,
   end,
@@ -212,6 +214,7 @@ function Waveform({
   fadeOut,
 }: {
   url: string;
+  peaksUrl: string;
   duration: number;
   start: number;
   end: number;
@@ -228,31 +231,17 @@ function Waveform({
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(start);
 
-  // Decode once and keep the loudest sample per bin.
+  // Peaks come from ffmpeg on the server (any format, and long videos stay out of the browser).
   useEffect(() => {
     let off = false;
-    (async () => {
-      try {
-        const buf = await (await fetch(url)).arrayBuffer();
-        const ctx = new OfflineAudioContext(1, 1, 44100);
-        const audioBuf = await ctx.decodeAudioData(buf);
-        const data = audioBuf.getChannelData(0);
-        const out = new Float32Array(BINS);
-        const per = Math.max(1, Math.floor(data.length / BINS));
-        for (let b = 0; b < BINS; b++) {
-          let m = 0;
-          for (let i = b * per, e = Math.min(data.length, i + per); i < e; i += 4) m = Math.max(m, Math.abs(data[i]));
-          out[b] = m;
-        }
-        if (!off) setPeaks(out);
-      } catch {
-        if (!off) setFailed(true);
-      }
-    })();
+    fetch(`${peaksUrl}&bins=${BINS}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ peaks: number[] }>) : Promise.reject()))
+      .then((j) => !off && setPeaks(Float32Array.from(j.peaks)))
+      .catch(() => !off && setFailed(true));
     return () => {
       off = true;
     };
-  }, [url]);
+  }, [peaksUrl]);
 
   useEffect(() => {
     const c = canvas.current;
