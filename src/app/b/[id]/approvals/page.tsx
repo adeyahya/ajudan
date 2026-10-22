@@ -7,7 +7,9 @@ import type { Approval, Deliverable } from "@/db/schema";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Button, Card, Input, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
-import { decideApproval } from "./actions";
+import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
+import { approveCapability, decideApproval, rejectCapability } from "./actions";
+import { CapabilityForm } from "./capability-form";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -72,6 +74,10 @@ async function Content({ params }: Params) {
                 </div>
                 <Badge tone="amber">pending</Badge>
               </div>
+              {a.toolName === CAPABILITY ? (
+                <CapabilityRequestView a={a} businessId={id} />
+              ) : (
+              <>
               <ApprovalInput a={a} deliverables={data.deliverables} />
               <form action={decideApproval} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="businessId" value={id} />
@@ -84,6 +90,8 @@ async function Content({ params }: Params) {
                   Reject
                 </Button>
               </form>
+              </>
+              )}
             </Card>
           );
         })}
@@ -114,6 +122,30 @@ async function Content({ params }: Params) {
           );
         })}
       </section>
+    </div>
+  );
+}
+
+/** A teammate asks for an ability it's missing (src/lib/capabilities.ts). */
+function CapabilityRequestView({ a, businessId }: { a: Approval; businessId: string }) {
+  const r = a.input as CapabilityRequest;
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm">
+        <span className="text-muted-foreground">Why: </span>
+        {r.why}
+      </p>
+      {r.kind === "shell" && (
+        <p className="text-xs text-muted-foreground">
+          Commands run in a sandbox: they can only write in this teammate&apos;s folder, read that plus the business&apos;s media and
+          work, and reach the domains under Business → API keys &amp; access.
+        </p>
+      )}
+      <CapabilityForm
+        approve={approveCapability.bind(null, businessId, a.id)}
+        reject={rejectCapability.bind(null, businessId, a.id)}
+        secret={r.kind === "secret" ? { name: r.name, hosts: r.hosts } : undefined}
+      />
     </div>
   );
 }

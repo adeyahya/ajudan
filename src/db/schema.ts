@@ -40,6 +40,8 @@ export const businesses = sqliteTable("businesses", {
     .$type<{ jid: string; name: string }[]>()
     .notNull()
     .default([]),
+  /** Domains teammates' sandboxed shell may reach (e.g. "api.orucraft.com"). */
+  networkDomains: text("network_domains", { mode: "json" }).$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
 });
 
@@ -92,6 +94,8 @@ export const teammates = sqliteTable("teammates", {
   browserAccess: integer("browser_access", { mode: "boolean" }).notNull().default(false),
   /** May read and post in the business's allowed WhatsApp chats. Off by default. */
   whatsappAccess: integer("whatsapp_access", { mode: "boolean" }).notNull().default(false),
+  /** May run shell commands (sandboxed: own folder only, allowed domains only). Off by default. */
+  shellAccess: integer("shell_access", { mode: "boolean" }).notNull().default(false),
   kind: text("kind").$type<TeammateKind>().notNull().default("ai"),
   /** Human teammates: WhatsApp number in international format, digits only ("6281234567890"). */
   phone: text("phone"),
@@ -207,6 +211,23 @@ export const humanMessages = sqliteTable("human_messages", {
   createdAt: createdAt(),
 });
 
+/**
+ * Credentials the team may use (API keys, tokens). Only the name, the hosts it may be
+ * sent to and a note live here; the value is in the macOS Keychain (src/lib/secrets.ts).
+ */
+export const secrets = sqliteTable("secrets", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  /** Referenced by teammates as {{secret.NAME}}, e.g. "ORUCRAFT_API". */
+  name: text("name").notNull(),
+  hosts: text("hosts", { mode: "json" }).$type<string[]>().notNull().default([]),
+  note: text("note").notNull().default(""),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+});
+
 export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task";
 
 export const jobs = sqliteTable("jobs", {
@@ -230,3 +251,4 @@ export type Deliverable = typeof deliverables.$inferSelect;
 export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type HumanMessage = typeof humanMessages.$inferSelect;
+export type Secret = typeof secrets.$inferSelect;

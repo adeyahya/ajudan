@@ -264,6 +264,7 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
               schedulePrompt: t.schedulePrompt,
               browserAccess: t.browserAccess,
               whatsappAccess: t.whatsappAccess,
+              shellAccess: t.shellAccess,
             }}
           />
           <form action={removeTeammate.bind(null, businessId, t.id)}>

@@ -1,5 +1,6 @@
 "use server";
 
+import { deleteSecret, normalizeHost, setSecret } from "@/lib/secrets";
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
@@ -126,5 +127,41 @@ export async function saveWhatsappChats(businessId: string, fd: FormData) {
     })
     .filter((c) => c.jid.endsWith("@g.us") || c.jid.endsWith("@s.whatsapp.net") || c.jid.endsWith("@newsletter"));
   db.update(schema.businesses).set({ whatsappChats }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/** Store or update a credential (value → Keychain). FormData: name, value, hosts, note. */
+export async function saveSecretAction(businessId: string, _prev: { error?: string; ok?: string }, fd: FormData) {
+  try {
+    const name = await setSecret({
+      businessId,
+      name: String(fd.get("name") ?? ""),
+      value: String(fd.get("value") ?? ""),
+      hosts: String(fd.get("hosts") ?? "").split(/[\n,\s]+/),
+      note: String(fd.get("note") ?? "").trim(),
+    });
+    refresh();
+    return { ok: `Saved ${name}. Teammates use it as {{secret.${name}}}.` };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
+}
+
+export async function deleteSecretAction(businessId: string, name: string) {
+  await deleteSecret(businessId, name);
+  refresh();
+}
+
+/** Domains the teammates' sandboxed shell may reach. */
+export async function saveNetworkDomains(businessId: string, fd: FormData) {
+  const networkDomains = [
+    ...new Set(
+      String(fd.get("domains") ?? "")
+        .split(/[\n,\s]+/)
+        .map(normalizeHost)
+        .filter((d): d is string => !!d),
+    ),
+  ];
+  db.update(schema.businesses).set({ networkDomains }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }

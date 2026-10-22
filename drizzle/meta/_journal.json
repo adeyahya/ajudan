@@ -43,6 +43,13 @@
       "when": 1792637973851,
       "tag": "0005_human_teammates",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792644664883,
+      "tag": "0006_secrets_shell",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,8 @@ import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
+import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
+import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished } from "@/lib/manager";
 import { sendToHuman } from "./humans";
 import { renderVideo } from "./video";
@@ -38,6 +40,8 @@ export const SAFE_BIZ_TOOLS = [
   "render_video",
   "find_free_assets",
   "download_free_asset",
+  "request_capability",
+  "list_secrets",
   "team_status",
   "task_results",
   "pending_approvals",
@@ -46,6 +50,8 @@ export const SAFE_BIZ_TOOLS = [
 );
 /** Talking to the team's human teammates on WhatsApp (not for draft-only teammates). */
 export const HUMAN_TOOLS = ["ask_human", "message_human", "close_human_request", "human_conversation"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
+/** Allowed for GET/HEAD; other methods change things and are gated like publishing (worker/handlers/task.ts). */
+export const HTTP_TOOL = `mcp__${BIZ_SERVER}__http_request`;
 /** Tools that reach the outside world: gated by the teammate's autonomy. */
 export const OUTWARD_BIZ_TOOLS = ["publish_deliverable", "send_message", "confirm_browser_action"].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
@@ -414,6 +420,135 @@ export function createBizServer(ctx: BizContext) {
       },
     ),
   ];
+
+  tools.push(
+    tool(
+      "http_request",
+      "Call a web API (JSON, CSV…), e.g. the business's own API. Put credentials in as {{secret.NAME}} (see list_secrets): Ajudan fills them in, only for the hosts that secret allows, and never shows you the value. GET and HEAD run right away; POST, PUT, PATCH and DELETE change things and follow your freedom setting (the owner may have to approve). Big responses are saved to a file you can Read.",
+      {
+        url: z.string().describe('Full https URL, e.g. "https://orucraft.com/api/agent/v1/orders?month=2026-10"'),
+        method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]).optional(),
+        headers: z.record(z.string(), z.string()).optional().describe('e.g. {"Authorization": "Bearer {{secret.ORUCRAFT_API}}"}'),
+        body: z.string().optional().describe("Request body (JSON as a string)"),
+        save_as: z.string().optional().describe('File name to save the response under work/api/, e.g. "orders-oktober.json"'),
+      },
+      async (a) => {
+        const method = a.method ?? "GET";
+        // Which secrets does the request use?
+        const used = new Set<string>();
+        const scan = (v: string) => {
+          for (const m of v.matchAll(PLACEHOLDER)) used.add(m[1]);
+        };
+        scan(a.url);
+        Object.values(a.headers ?? {}).forEach((v) => scan(String(v)));
+        if (a.body) scan(a.body);
+        let url: URL;
+        try {
+          url = new URL(a.url.replace(PLACEHOLDER, "x"));
+        } catch {
+          return fail(`Not a valid URL: ${a.url}`);
+        }
+        if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) {
+          return fail("Only https:// URLs.");
+        }
+        const values = new Map<string, string>();
+        for (const name of used) {
+          const meta = findSecret(businessId, name);
+          if (!meta) return fail(`There's no secret ${name}. Ask the owner for it with request_capability(kind "secret").`);
+          if (!hostAllowed(url.hostname, meta.hosts)) {
+            return fail(`${name} may only be sent to ${meta.hosts.join(", ")}, not ${url.hostname}.`);
+          }
+          const v = await secretValue(businessId, name);
+          if (!v) return fail(`${name} has no value stored. Ask the owner to set it again on the Business page.`);
+          values.set(name, v);
+        }
+        const fill = (v: string) => v.replace(PLACEHOLDER, (_m, n: string) => values.get(n) ?? "");
+        let res: Response;
+        try {
+          res = await fetch(fill(a.url), {
+            method,
+            headers: Object.fromEntries(Object.entries(a.headers ?? {}).map(([k, v]) => [k, fill(String(v))])),
+            body: a.body && method !== "GET" && method !== "HEAD" ? fill(a.body) : undefined,
+            signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(ctx.signal ? [ctx.signal] : [])]),
+            redirect: "manual",
+          });
+        } catch (err) {
+          return fail(redact(`Request failed: ${(err as Error).message}`, values));
+        }
+        for (const name of used) {
+          db.update(schema.secrets)
+            .set({ lastUsedAt: new Date() })
+            .where(and(eq(schema.secrets.businessId, businessId), eq(schema.secrets.name, name)))
+            .run();
+        }
+        const location = res.headers.get("location");
+        const text = redact(method === "HEAD" ? "" : await res.text(), values);
+        const type = res.headers.get("content-type") ?? "";
+        ev("tool", `${teammate.name} called ${url.hostname}${url.pathname.slice(0, 40)}`, { status: res.status });
+        let saved = "";
+        if (a.save_as || text.length > 12_000) {
+          const ext = type.includes("json") ? ".json" : type.includes("csv") ? ".csv" : ".txt";
+          const name = slugify((a.save_as ?? `${url.hostname}-${url.pathname}`).replace(/\.[a-z]+$/i, "")) + ext;
+          const file = path.join(ctx.cwd, "work", "api", `${new Date().toISOString().slice(0, 10)}-${name}`);
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, text);
+          saved = `\nSaved the full response (${text.length} chars) to ${path.relative(ctx.cwd, file)}.`;
+        }
+        return ok(
+          `HTTP ${res.status} ${res.statusText}${location ? ` → ${redact(location, values)}` : ""} (${type || "no content type"})${saved}\n\n${text.slice(0, 6000)}${text.length > 6000 ? "\n… (truncated)" : ""}`,
+        );
+      },
+    ),
+
+    tool("list_secrets", "List the credentials the owner stored for the team (names and the hosts each may be sent to; never the values).", {}, async () => {
+      const rows = listSecrets(businessId);
+      return ok(
+        rows.length
+          ? rows.map((r) => `- {{secret.${r.name}}}: for ${r.hosts.join(", ")}${r.note ? ` (${r.note})` : ""}`).join("\n")
+          : "No credentials stored yet. Ask for one with request_capability(kind \"secret\").",
+      );
+    }),
+
+    tool(
+      "request_capability",
+      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, or WhatsApp. The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
+      {
+        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp"]),
+        why: z.string().describe("One sentence for the owner: what you'll do with it"),
+        name: z.string().optional().describe('secret: a name like "ORUCRAFT_API"'),
+        hosts: z.array(z.string()).optional().describe('secret: the hosts it may be sent to, e.g. ["orucraft.com"]'),
+        domain: z.string().optional().describe('domain: e.g. "api.orucraft.com"'),
+        site: z.string().optional().describe('browser_site: e.g. "seller.shopee.co.id"'),
+      },
+      async (a) => {
+        let request: CapabilityRequest;
+        switch (a.kind) {
+          case "secret": {
+            const name = (a.name ?? "").trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+            const hosts = (a.hosts ?? []).map(normalizeHost).filter((h): h is string => !!h);
+            if (!/^[A-Z][A-Z0-9_]{1,47}$/.test(name) || !hosts.length) return fail("A secret needs a name (e.g. ORUCRAFT_API) and the hosts it's for.");
+            if (findSecret(businessId, name)) return ok(`${name} is already stored: use {{secret.${name}}} in http_request.`);
+            request = { kind: "secret", name, hosts, why: a.why };
+            break;
+          }
+          case "domain":
+            if (!a.domain) return fail("Which domain?");
+            request = { kind: "domain", domain: a.domain, why: a.why };
+            break;
+          case "browser_site":
+            if (!a.site) return fail("Which site?");
+            request = { kind: "browser_site", site: a.site, why: a.why };
+            break;
+          default:
+            request = { kind: a.kind, why: a.why };
+        }
+        const { duplicate } = requestCapability({ businessId, teammate, taskId, request });
+        return ok(
+          `${duplicate ? "That request is already waiting" : "Asked the owner"} on the Approvals page. Don't wait: finish what you can now, tell the owner what you asked for and why. If they approve, you'll get a new task to carry on.`,
+        );
+      },
+    ),
+  );
 
   if (ctx.browser) {
     tools.push(

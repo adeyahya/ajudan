@@ -2,6 +2,7 @@ import fs from "node:fs";
 import {
   query,
   type CanUseTool,
+  type Options,
   type McpServerConfig,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -32,6 +33,8 @@ export type RunAgentOptions = {
   allowedTools?: string[];
   disallowedTools?: string[];
   mcpServers?: Record<string, McpServerConfig>;
+  /** Sandbox for Bash (filesystem and network limits), see the SDK's SandboxSettings. */
+  sandbox?: Options["sandbox"];
   /** Local plugin folders to load (their skills become available). */
   plugins?: string[];
   /** Skills to enable ("plugin:skill"); needs "Skill" in tools. */
@@ -73,6 +76,7 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
       disallowedTools: opts.disallowedTools,
       mcpServers: opts.mcpServers,
       plugins: opts.plugins?.map((p) => ({ type: "local" as const, path: p })),
+      sandbox: opts.sandbox,
       skills: opts.skills,
       canUseTool: opts.canUseTool,
       resume: opts.resume,
@@ -165,6 +169,14 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
     case "Glob":
     case "Grep":
       return "Looking through files";
+    case "Bash":
+      return `Running ${short(input.description ?? input.command, 50)}`;
+    case "mcp__biz__http_request":
+      return `Calling ${hostOf(input.url)}`;
+    case "mcp__biz__request_capability":
+      return `Asking the owner for ${short(input.kind, 20).replace("_", " ")}`;
+    case "mcp__biz__list_secrets":
+      return "Checking credentials";
     case "Skill":
       return `Studying ${short(input.skill ?? input.command, 40)}`;
     case "mcp__biz__list_media":

@@ -8,6 +8,7 @@ import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { LanguageSelect } from "@/app/language-select";
 import { saveLanguage, saveProfile } from "./actions";
 import { BrowserPanel } from "./browser-panel";
+import { SecretsPanel } from "./secrets-panel";
 import { WhatsappPanel } from "./whatsapp-panel";
 import { ProfileForm } from "./profile-form";
 
@@ -65,6 +66,7 @@ async function Content({ params }: Params) {
   const p = biz.profile;
   const mates = await listTeammates(id);
   const browserMates = mates.filter((t) => t.browserAccess).map((t) => t.name);
+  const shellMates = mates.filter((t) => t.shellAccess).map((t) => t.name);
   const waMates = mates.filter((t) => t.whatsappAccess).map((t) => t.name);
   if (!p) {
     return (
@@ -141,6 +143,9 @@ async function Content({ params }: Params) {
         </Card>
         <Card className="p-6">
           <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} />
+        </Card>
+        <Card className="p-6">
+          <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={shellMates} />
         </Card>
         <Card className="p-6 grid gap-6 content-start">
           <LanguageForm id={id} language={biz.language} />

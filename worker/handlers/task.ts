@@ -10,6 +10,8 @@ import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
 import { describeMedia, linkIntoWorkspace, mediaInfo, mediaKind } from "@/lib/media";
 import { getRole, MANAGER_ROLE } from "@/lib/roles";
+import os from "node:os";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { HUMAN, humanThread, listHumans } from "@/lib/humans";
 import { managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
@@ -18,7 +20,7 @@ import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBro
 import { PausedError, runAbortController } from "../session";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SERVER, createWhatsappServer, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
-import { BIZ_SERVER, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
+import { BIZ_SERVER, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
@@ -97,6 +99,20 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       if (toolName === "Skill") return { behavior: "allow", updatedInput: input };
+      // The sandbox (sandboxFor) limits files and network; outside it nothing runs.
+      if (toolName === "Bash") {
+        return teammate.shellAccess && !input.dangerouslyDisableSandbox
+          ? { behavior: "allow", updatedInput: input }
+          : { behavior: "deny", message: "Commands only run in your sandbox. Ask for the shell with request_capability if you don't have it." };
+      }
+      // Reading an API is like browsing; changing things through it is outward.
+      if (toolName === HTTP_TOOL) {
+        const method = String(input.method ?? "GET").toUpperCase();
+        if (method === "GET" || method === "HEAD") return { behavior: "allow", updatedInput: input };
+        if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
+        if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
+        return { behavior: "deny", message: "You're draft-only: you can read APIs (GET) but not change anything through them." };
+      }
       if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR]);
       if (useBrowser && toolName.startsWith(`mcp__${browserProvider.server}__`)) {
         const url = browserProvider.targetUrl(toolName, input);
@@ -172,7 +188,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     const run = async () => {
       const mcpServers: Record<string, McpServerConfig> = { [BIZ_SERVER]: biz };
       const allowedTools = ["WebSearch", "WebFetch", "Skill", ...SAFE_BIZ_TOOLS, ...(humans.length ? HUMAN_TOOLS : [])];
-      const disallowedTools = ["Bash", ...(teammate.autonomy === "draft" ? outward : [])];
+      const disallowedTools = [...(teammate.shellAccess ? [] : ["Bash"]), ...(teammate.autonomy === "draft" ? outward : [])];
       if (useWhatsapp) {
         mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd });
         allowedTools.push(...SAFE_WA_TOOLS);
@@ -196,7 +212,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         cwd,
         systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans),
         prompt: buildPrompt(task, isManager ? managerHistory(teammate.id, task) : "", await describeAttachments(attachments)),
-        tools: BUILTIN_TOOLS,
+        tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
+        sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
         plugins: [PLUGIN_DIR],
         skills: SKILLS,
         allowedTools,
@@ -248,6 +265,29 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     onTaskFinished(task.id);
     throw err;
   }
+}
+
+/**
+ * The shell's box: write only in the teammate's folder, read that plus the business's
+ * media and work (never the database, other businesses or the rest of your home
+ * folder), and reach only the business's allowed domains.
+ */
+function sandboxFor(cwd: string, business: Business): Options["sandbox"] {
+  const home = os.homedir();
+  return {
+    enabled: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: { allowedDomains: business.networkDomains, strictAllowlist: true },
+    filesystem: {
+      allowWrite: [cwd],
+      denyRead: [home],
+      allowRead: [cwd, path.join(dataDir(), "media"), path.join(dataDir(), "work"), path.join(home, ".volta")],
+    },
+    credentials: {
+      envVars: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "AJUDAN_DATA_DIR"].map((name) => ({ name, mode: "deny" as const })),
+    },
+  };
 }
 
 /** Workspace folder Claude Code runs in; BUSINESS.md is refreshed from the profile each run. */
@@ -333,6 +373,16 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
     const channel = s(input.channel, 30);
     return `${who} wants to send ${/^[aeiou]/i.test(channel) ? "an" : "a"} ${channel} message to ${s(input.to, 60)}: "${s(input.subject)}"`;
   }
+  if (toolName === HTTP_TOOL) {
+    let where = s(input.url, 80);
+    try {
+      const u = new URL(String(input.url).replace(/\{\{[^}]+\}\}/g, "x"));
+      where = `${u.hostname}${u.pathname}`.slice(0, 80);
+    } catch {
+      // keep the raw text
+    }
+    return `${who} wants to ${String(input.method ?? "POST").toUpperCase()} to ${where}${input.body ? `: ${s(input.body, 80)}` : ""}`;
+  }
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;
   }
@@ -355,7 +405,7 @@ The owner talks to you instead of to each teammate, in a chat. Each message:
 3. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
 4. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
 When a "Report back" task arrives, summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
-If nobody on the team can do something (missing permission), say exactly which switch on the Team page would allow it.`;
+If nobody on the team can do something (a missing credential, shell, browser or WhatsApp), have the teammate who'd do it ask with request_capability (or ask yourself), and tell the owner to look at the Approvals page.`;
 }
 
 function humanRules(humans: Teammate[]) {
@@ -438,16 +488,22 @@ You can make real images (social posts, carousel slides, posters, banners) with 
 You can edit real videos (TikTok, Reels, Shorts, ads) from the owner's footage and photos with Remotion: load the campaign-video skill first (Skill tool), then follow it. The owner's uploads are in the media library (list_media; files attached to a task are listed in it). Look at footage with inspect_media and extract_frames, write the video as one TSX file, render_video, check frames of the result, fix, and attach the MP4 with save_deliverable(images=[…]). Add music and sound effects with find_free_assets and download_free_asset (free, business-safe licenses; credit CC BY tracks in the caption) or use music the owner uploaded.
 If the work needs footage you don't have, ask the owner for it with a precise shot list (what to film, how long, vertical) instead of inventing it, and say they can drop the clips into the chat.
 
-## What you can't do here
+## APIs and credentials
+- Call web APIs with http_request (JSON, CSV…). For APIs that need a key, use the credentials the owner stored (list_secrets) as {{secret.NAME}} in the URL, headers or body; Ajudan fills them in only for the hosts allowed for that secret, and you never see the value. Save big responses (save_as) and analyse the file.
+- Never ask the owner to paste a key, token or password into the chat, and never write one into a file, a message or your memory. If a credential is missing, ask for it with request_capability(kind "secret", name, hosts, why): the owner enters it safely on the Approvals page.
+${teammate.shellAccess ? `- You have a sandboxed shell (Bash): python3, jq, node, curl and the usual tools, for processing data (CSV/JSON, reports, charts). It can only write in your folder, read your folder plus the business's media/ and work/, and reach these domains: ${business.networkDomains.join(", ") || "none yet"}. Secrets aren't available in the shell: fetch with http_request, then process the saved file. Need another domain? request_capability(kind "domain").` : ""}
+
+## When you're missing an ability
+Don't just say you can't. Ask for it with request_capability, say in your reply what you asked for and why, and do what you can meanwhile. If the owner approves, you'll get a task to carry on. What you can ask for:
 ${[
-  useBrowser ? null : "- The business browser: if a task needs a website the owner is logged into (Shopee, TikTok…), say so and ask the owner to turn on “Can use the business browser” for you on the Team page.",
-  useWhatsapp
-    ? null
-    : "- WhatsApp: if a task needs WhatsApp, say so and ask the owner to turn on “Can use WhatsApp” for you on the Team page (and allow the chats on Business → WhatsApp).",
+  "- a credential for an API (kind \"secret\")",
+  teammate.shellAccess ? null : "- a sandboxed shell to run commands such as python, jq or curl (kind \"shell\")",
+  useBrowser ? "- another site in the business browser (kind \"browser_site\")" : "- the business browser, the owner's logged-in Chrome for Shopee, TikTok and so on (kind \"browser\")",
+  useWhatsapp ? null : "- WhatsApp (kind \"whatsapp\"); the owner also chooses which chats on Business → WhatsApp",
 ]
   .filter(Boolean)
-  .join("\n") || "- (nothing extra)"}
-- A permission given in chat (“I give you access”) doesn't change your tools; only those switches do.
+  .join("\n")}
+- A permission given in chat ("I give you access") doesn't change your tools; only an approved request or the owner's switches on the Team page do.
 ${humans.length ? `\n${humanRules(humans)}\n` : ""}${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }

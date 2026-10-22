@@ -25,7 +25,7 @@ export function TeammateEditor({
   initial,
 }: {
   action: Action;
-  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean; whatsappAccess?: boolean };
+  initial: { name: string; autonomy: Autonomy; schedule: string | null; schedulePrompt: string | null; browserAccess?: boolean; whatsappAccess?: boolean; shellAccess?: boolean };
 }) {
   const [state, formAction] = useActionState(action, {});
   const [autonomy, setAutonomy] = useState<Autonomy>(initial.autonomy);
@@ -76,6 +76,16 @@ export function TeammateEditor({
           <span className="font-pixel">Can use WhatsApp</span>
           <span className="block text-xs text-muted-foreground">
             Reads and posts in the WhatsApp groups you allowed on the Business page. Posting follows the freedom setting above.
+          </span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2">
+        <input type="checkbox" name="shellAccess" defaultChecked={initial.shellAccess} className="mt-0.5 size-4 accent-[var(--primary)]" />
+        <span>
+          <span className="font-pixel">Can run commands</span>
+          <span className="block text-xs text-muted-foreground">
+            A sandboxed shell for working with data (python, jq, curl): it only writes in this teammate&apos;s folder and only reaches
+            the domains listed under Business → API keys &amp; access.
           </span>
         </span>
       </label>

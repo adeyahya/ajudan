@@ -10,9 +10,10 @@
  * worker aborts what's running, puts those jobs back in the old folder's queue
  * (they run again when it's reopened), stops its schedules and moves on.
  */
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
+import { CAPABILITY } from "@/lib/capabilities";
 import { readConfig } from "@/lib/folders";
 import { claimJob, finishJob, requeueJob, requeueStaleJobs } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
@@ -77,7 +78,8 @@ function activate(dir: string | null) {
   }
   requeueStaleJobs();
   // Approvals left waiting by interrupted tasks: those tasks run again and ask afresh.
-  db.delete(schema.approvals).where(eq(schema.approvals.status, "pending")).run();
+  // (Capability requests don't belong to a running task: they stay.)
+  db.delete(schema.approvals).where(and(eq(schema.approvals.status, "pending"), ne(schema.approvals.toolName, CAPABILITY))).run();
   db.update(schema.teammates)
     .set({ state: "idle", currentActivity: null })
     .where(inArray(schema.teammates.state, ["working", "waiting"]))

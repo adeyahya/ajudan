@@ -141,6 +141,7 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   if (createdBy === "user") return "You";
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === REPORT) return "Team update";
+  if (createdBy === "system:capability") return "You approved";
   if (createdBy.startsWith("human:")) {
     const id = createdBy.slice("human:".length);
     return `From ${mates.find((m) => m.id === id)?.name ?? "a person"} (WhatsApp)`;
