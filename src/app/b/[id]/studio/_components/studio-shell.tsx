@@ -57,7 +57,7 @@ export function StudioShell({ peek, children }: { peek?: ReactNode; children: Re
           return { href, label: tab.label, icon: tab.icon, active: tab.href === "" ? pathname === base : pathname.startsWith(href) };
         })}
       />
-      <div className="mt-6">{children}</div>
+      <div className="@container mt-6">{children}</div>
     </PageBody>
   );
   return peek ? <SidePeekLayout peek={peek}>{body}</SidePeekLayout> : body;
@@ -139,7 +139,7 @@ export function DeleteDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-destructive text-white hover:bg-destructive/90 focus-visible:outline-destructive">
+          <AlertDialogAction onClick={onConfirm} className="bg-destructive! text-white hover:bg-destructive/90! focus-visible:outline-destructive">
             {t("common.delete")}
           </AlertDialogAction>
         </AlertDialogFooter>

@@ -76,7 +76,6 @@ export function Docs({
     <SidePeek open={!!hand} onClose={() => setHand(null)} title={t("studio.docs.handTitle")} description={t("studio.docs.handHelp")}>
       {hand && (
         <div className="space-y-4">
-          <p className="text-[13px] leading-[18px] text-muted-foreground">{t("studio.docs.handHelp")}</p>
           <PlanTask
             key={hand.key}
             businessId={businessId}
@@ -92,8 +91,8 @@ export function Docs({
 
   return (
     <StudioShell peek={peek}>
-      <div className="grid gap-8 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className={cn("min-w-0 space-y-3", doc && "hidden lg:block")}>
+      <div className="grid gap-8 @3xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className={cn("min-w-0 space-y-3", doc && "hidden @3xl:block")}>
           <div className="flex items-center gap-2">
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.docs.search")} aria-label={t("studio.docs.search")} className="h-7 min-w-0 flex-1 text-[13px]" />
             <Button asChild size="sm">
@@ -142,7 +141,7 @@ export function Docs({
         </aside>
         <div className="min-w-0">
           {doc && (
-            <Button asChild size="sm" variant="ghost" className="mb-3 -ml-2 text-muted-foreground lg:hidden">
+            <Button asChild size="sm" variant="ghost" className="mb-3 -ml-2 text-muted-foreground @3xl:hidden">
               <Link href={href(filter)}>
                 <ChevronLeft /> {t("studio.docs.allDocs")}
               </Link>
@@ -215,7 +214,7 @@ function Editor({
   const handOver = `Work from this ${label(kind).toLowerCase()} (saved as "${title}"):\n\n${content}`.slice(0, 20000);
 
   return (
-    <div className="mx-auto w-full max-w-[var(--content-w)] lg:mx-0">
+    <div className="mx-auto w-full max-w-[var(--content-w)] @3xl:mx-0">
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}

@@ -498,7 +498,7 @@ function Preview({
         <IconButton label={playing ? tr("studio.video.pause") : tr("studio.video.play")} variant="primary" size="icon" onClick={toggle} className="text-white">
           {playing ? <PauseIcon /> : <PlayIcon />}
         </IconButton>
-        <span className="font-mono text-xs tabular-nums">
+        <span className="font-mono text-xs whitespace-nowrap tabular-nums">
           {formatTime(before + Math.max(0, t - clip.start))} · {tr("studio.video.clipOf", { n: i + 1, total: clips.length })}
         </span>
         <span className="ml-auto hidden text-xs text-white/60 sm:inline">{tr("studio.video.trimHint")}</span>

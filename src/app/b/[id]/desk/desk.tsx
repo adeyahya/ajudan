@@ -163,7 +163,7 @@ export function Desk({ businessId, language, initial }: { businessId: string; la
           <EmptyState icon={<MessageCircle />} title={t("desk.emptyTitle")} body={t("desk.emptyBody")} />
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 md:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] md:grid-cols-[300px_minmax(0,1fr)]">
           {/* Chats */}
           <nav aria-label={t("desk.chats")} className={cn("min-h-0 overflow-y-auto border-border p-1.5 md:border-r", phoneConversation && "hidden md:block")}>
             <ul className="space-y-px">

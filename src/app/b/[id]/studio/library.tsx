@@ -198,7 +198,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   return (
     <StudioShell peek={peek}>
       <div
-        className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]"
+        className="grid gap-6 @3xl:grid-cols-[220px_minmax(0,1fr)]"
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes("Files")) {
             e.preventDefault();
@@ -217,13 +217,13 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
       >
         {/* Albums & tags */}
         <aside className="min-w-0 space-y-4">
-          <Button size="sm" className="w-full" onClick={() => fileInput.current?.click()} disabled={!!uploading && !uploading.error} loading={!!uploading && !uploading.error}>
+          <Button size="sm" className="@3xl:w-full" onClick={() => fileInput.current?.click()} disabled={!!uploading && !uploading.error} loading={!!uploading && !uploading.error}>
             <UploadIcon /> {t("studio.lib.upload")}
           </Button>
           <input ref={fileInput} type="file" multiple accept={MEDIA_ACCEPT} className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
 
           {/* Phone: one scrolling row of chips */}
-          <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden">
+          <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] @3xl:hidden">
             <Chip active={!album && !starredOnly} onClick={showAll}>
               {t("studio.lib.everything")}
             </Chip>
@@ -243,7 +243,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
           </div>
 
           {/* Desktop: a Notion-like list */}
-          <nav aria-label={t("studio.lib.albums")} className="hidden space-y-0.5 lg:block">
+          <nav aria-label={t("studio.lib.albums")} className="hidden space-y-0.5 @3xl:block">
             <SideItem active={!album && !starredOnly} onClick={showAll} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
             <SideItem active={starredOnly} onClick={showStarred} icon={<StarIcon />} label={t("studio.lib.starred")} count={starredCount} />
             <div className="px-2 pt-4 pb-1 text-xs font-medium text-tertiary">{t("studio.lib.albums")}</div>
@@ -286,11 +286,11 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
                 onChange={(e) => setQ(e.target.value)}
                 placeholder={t("studio.lib.search")}
                 aria-label={t("studio.lib.search")}
-                className="hidden h-7 w-56 text-[13px] sm:block"
+                className="hidden h-7 w-56 text-[13px] @xl:block"
               />
             }
           />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.lib.search")} aria-label={t("studio.lib.search")} className="mt-3 h-8 sm:hidden" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.lib.search")} aria-label={t("studio.lib.search")} className="mt-3 h-8 @xl:hidden" />
           {uploading && (
             <p role="status" className={cn("mt-3 text-xs", uploading.error ? "text-destructive" : "text-muted-foreground")}>
               {uploading.error ?? t("studio.lib.uploading", { n: uploading.done + 1, total: uploading.total })}
@@ -316,7 +316,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
             ) : shown.length === 0 ? (
               <EmptyState compact icon={<LayoutGrid />} title={t("studio.lib.noMatch")} body={t("studio.lib.noMatchBody")} />
             ) : (
-              <Gallery className="grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-4">
+              <Gallery className="grid-cols-2 gap-3 @xl:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] @xl:gap-4">
                 {shown.map((i, n) => {
                   const Icon = KIND_ICON[i.kind];
                   const on = selected.includes(i.path);
@@ -430,6 +430,8 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 function AlbumSelect({ value, onChange, albums }: { value: string; onChange: (v: string) => void; albums: string[] }) {
   const t = useT();
   const [creating, setCreating] = useState(!!value && !albums.includes(value));
+  const nameRef = useRef<HTMLInputElement>(null);
+  const focusName = useRef(false);
   return (
     <div className="flex w-full min-w-0 gap-2">
       <Select
@@ -437,6 +439,7 @@ function AlbumSelect({ value, onChange, albums }: { value: string; onChange: (v:
         onValueChange={(v) => {
           if (v === NEW) {
             setCreating(true);
+            focusName.current = true;
             onChange("");
           } else {
             setCreating(false);
@@ -444,10 +447,18 @@ function AlbumSelect({ value, onChange, albums }: { value: string; onChange: (v:
           }
         }}
       >
-        <SelectTrigger size="sm" className={cn(creating ? "w-28 shrink-0" : "w-full")} aria-label={t("studio.lib.album")}>
+        <SelectTrigger size="sm" className={cn(creating ? "w-32 shrink-0" : "w-full")} aria-label={t("studio.lib.album")}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent
+          onCloseAutoFocus={(e) => {
+            // After "New album…", type the name right away instead of landing back on the trigger.
+            if (!focusName.current) return;
+            focusName.current = false;
+            e.preventDefault();
+            requestAnimationFrame(() => nameRef.current?.focus());
+          }}
+        >
           <SelectItem value={NONE}>{t("studio.lib.noAlbum")}</SelectItem>
           {albums.map((a) => (
             <SelectItem key={a} value={a}>
@@ -458,7 +469,7 @@ function AlbumSelect({ value, onChange, albums }: { value: string; onChange: (v:
           <SelectItem value={NEW}>{t("studio.lib.newAlbum")}</SelectItem>
         </SelectContent>
       </Select>
-      {creating && <Input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={t("studio.lib.albumName")} className="h-7 min-w-0 flex-1 text-[13px]" />}
+      {creating && <Input ref={nameRef} value={value} onChange={(e) => onChange(e.target.value)} placeholder={t("studio.lib.albumName")} className="h-7 min-w-0 flex-1 text-[13px]" />}
     </div>
   );
 }
