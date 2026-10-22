@@ -135,6 +135,8 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       !PLANNING_ROLES.has(teammate.roleKey) &&
       delegationDepth(task.id) + 1 <= MAX_DELEGATION_DEPTH;
     const delegationRoster = canDelegate ? roster : [];
+    // The manager's first report on a request reviews the work (and may send it back once).
+    const reviewRequestId = isManager && canReview(task) ? task.parentTaskId : null;
 
     const useBrowser = teammate.browserAccess;
     const useWhatsapp = teammate.whatsappAccess;
@@ -149,7 +151,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       isManager,
       signal: ac.signal,
       humans,
-      reviewRequestId: isManager && canReview(task) ? task.parentTaskId : null,
+      reviewRequestId,
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
@@ -315,7 +317,8 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
           canUseTool,
           onMessage,
           resume,
-          maxTurns: useBrowser || videoWork ? 80 : quickWork ? 20 : 40,
+          // A reviewing report reads each piece before it writes: room for that.
+          maxTurns: useBrowser || videoWork ? 80 : quickWork && !reviewRequestId ? 20 : 40,
           // Reacting to an approval is a quick note to the owner: answer fast.
           effort: task.createdBy === DECISION ? "low" : undefined,
           maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : quickWork ? Math.min(BUDGET_USD, QUICK_BUDGET_USD) : BUDGET_USD,
