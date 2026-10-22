@@ -9,9 +9,8 @@ const { isAllowedUrl } = await import("../worker/browser");
 describe("isAllowedUrl", () => {
   const sites = ["shopee.co.id", "tiktok.com"];
 
-  it("allows everything when the list is empty", () => {
-    expect(isAllowedUrl("https://anything.example/x", [])).toBe(true);
-    expect(isAllowedUrl("not a url", [])).toBe(true);
+  it("allows nothing when the list is empty", () => {
+    expect(isAllowedUrl("https://anything.example/x", [])).toBe(false);
   });
 
   it("allows listed sites and their subdomains", () => {
