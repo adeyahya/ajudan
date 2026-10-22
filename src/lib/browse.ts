@@ -29,6 +29,7 @@ const TEXT_TYPES: Record<string, string> = {
   ".js": "text/plain; charset=utf-8",
   ".html": "text/plain; charset=utf-8", // shown as source, never run
   ".log": "text/plain; charset=utf-8",
+  ".srt": "text/plain; charset=utf-8",
   ".yaml": "text/plain; charset=utf-8",
   ".yml": "text/plain; charset=utf-8",
 };

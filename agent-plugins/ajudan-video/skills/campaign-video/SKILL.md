@@ -47,7 +47,7 @@ export default function Video() {
 
 - `staticFile()` takes the **same path you'd attach**: `media/<file>` (owner footage, photos, music), `work/images/<file>` (images you rendered), `work/videos/<file>` (earlier renders). Product photos by https URL also work.
 - You can split code into more files next to Video.tsx and import them relatively.
-- Installed packages (nothing else can be imported): `remotion`, `@remotion/media` (Video, Audio), `@remotion/transitions`, `@remotion/google-fonts`, `@remotion/media-utils`, `@remotion/shapes`, `@remotion/paths`, `@remotion/captions`, `@remotion/layout-utils`, `@remotion/light-leaks`, `react`. Not available: Tailwind, three.js, Lottie, Mapbox, Mediabunny, Whisper. Use `inspect_media` instead of Mediabunny for durations and sizes.
+- Installed packages (nothing else can be imported): `remotion`, `@remotion/media` (Video, Audio), `@remotion/transitions`, `@remotion/google-fonts`, `@remotion/media-utils`, `@remotion/shapes`, `@remotion/paths`, `@remotion/captions`, `@remotion/layout-utils`, `@remotion/light-leaks`, `react`. Not available: Tailwind, three.js, Lottie, Mapbox, Mediabunny. Use `inspect_media` instead of Mediabunny for durations and sizes, and `transcribe_media` instead of the Whisper rules for captions.
 - Animate only with `useCurrentFrame()`, `interpolate()` and `spring()`. CSS animations and transitions don't render.
 - Max 3 minutes. Load only the font weights you use.
 
@@ -68,7 +68,7 @@ export default function Video() {
 - **Show the product being used and its details:** close-ups, hands, the before and after, the price.
 - **End card for the last 2–3 s:** the offer and the call to action (where to buy: website, Shopee, WhatsApp), the logo, the handle.
 - **Sound:** a Reel or TikTok without sound feels unfinished. Keep the owner's original audio when it's speech or a satisfying product sound (clicks, printing), and put music under it.
-- **Speech:** if there's speech worth captioning, write the captions yourself from what you can infer, or ask the owner for the script. There's no transcription tool.
+- **Speech:** caption it. `transcribe_media(file, captions: true)` writes a timed `.srt` next to the footage. Load it with `staticFile`, parse it with `parseSrt` from `@remotion/captions`, and show each caption in its time window. Check names and prices in the transcript: they may be misheard.
 
 ## Music and sound effects
 

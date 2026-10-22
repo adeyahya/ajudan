@@ -177,6 +177,8 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Asking the owner for ${short(input.kind, 20).replace("_", " ")}`;
     case "mcp__biz__list_secrets":
       return "Checking credentials";
+    case "mcp__biz__transcribe_media":
+      return `Listening to ${baseName(input.file)}`;
     case "Skill":
       return `Studying ${short(input.skill ?? input.command, 40)}`;
     case "mcp__biz__list_media":

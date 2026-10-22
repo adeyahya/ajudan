@@ -80,6 +80,7 @@ You can still chat with any teammate directly.
 - **Asking for abilities**: a teammate that's missing something (a credential, a shell, the browser or a site in it, WhatsApp) calls `request_capability`. It shows on the Approvals page; approving switches it on and gives the teammate a task to carry on (`src/lib/capabilities.ts`).
 - **Sandboxed shell**: "Can run commands" on the Team page gives a teammate Bash (python, jq, node, curl) inside Claude Code's sandbox: it writes only in its own folder, reads that plus the business's `media/` and `work/`, and reaches only the domains under API keys & access. Secrets aren't in the shell.
 - **Files tab**: browse the business folder's work, media library and each teammate's folder (memory, notes, drafts, renders). Markdown is rendered (with its images and videos), images and videos open in place, CSV shows as a table, JSON is formatted, and you can search by name or title. The database, browser profile, WhatsApp, backups, logs and dotfiles are never listed or served (`src/lib/browse.ts`).
+- **Voice notes and speech**: people on WhatsApp can send voice notes. The worker transcribes them on this Mac with whisper.cpp (`brew install whisper-cpp`; model `~/.ajudan/models/ggml-large-v3-turbo-q5_0.bin`, 574 MB) and hands over the transcript (🎤) like a typed message. Teammates also have `transcribe_media` for footage and audio, with timed `.srt` captions for videos (`src/lib/speech.ts`). Audio never leaves the laptop.
 - **Data**: SQLite at `<business folder>/ajudan.db` (Drizzle; schema in `src/db/schema.ts`). Live updates reach the browser over SSE from `activity_events`.
 
 ## Useful commands
@@ -99,5 +100,5 @@ Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's ter
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
 - `publish_deliverable` / `send_message` only record the action; real outward channels are the business browser and WhatsApp.
-- Videos: no automatic transcription or captions from speech yet. Teammates can't listen to music, so they pick free tracks by title, mood and length.
+- Videos: teammates can't listen to music, so they pick free tracks by title, mood and length.
 - The "ask before changing a site" rule is enforced by the teammate's instructions plus approvals, not by blocking clicks. The site list and the blocked tools are hard limits.

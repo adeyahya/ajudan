@@ -23,6 +23,7 @@ import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished } from "@/lib/manager";
 import { sendToHuman } from "./humans";
+import { speechAvailable, transcribe } from "@/lib/speech";
 import { renderVideo } from "./video";
 
 export const BIZ_SERVER = "biz";
@@ -42,6 +43,7 @@ export const SAFE_BIZ_TOOLS = [
   "download_free_asset",
   "request_capability",
   "list_secrets",
+  "transcribe_media",
   "team_status",
   "task_results",
   "pending_approvals",
@@ -262,6 +264,34 @@ export function createBizServer(ctx: BizContext) {
           );
         } catch (err) {
           return fail(`Download failed: ${(err as Error).message}`);
+        }
+      },
+    ),
+
+    tool(
+      "transcribe_media",
+      "Turn speech in a video or audio file (media/… or work/…) into text, on this Mac: what someone says in footage, a voice note, an interview. With captions=true it also writes timed captions (.srt next to the file) for subtitles in a video (parse with @remotion/captions parseSrt). Names and numbers can be misheard.",
+      {
+        file: z.string().describe('e.g. "media/2026-10-22-unboxing-a1b2c3.mp4"'),
+        captions: z.boolean().optional().describe("Also write timed captions (.srt)"),
+        language: z.string().optional().describe('Spoken language code, e.g. "id" or "en" (default: the business language)'),
+      },
+      async (a) => {
+        const rel = a.file.replace(/^\.?\//, "");
+        const abs = path.join(dataDir(), rel);
+        if (!isServablePath(rel) || !fs.existsSync(abs)) return fail(`No file ${a.file}.`);
+        if (!["audio", "video"].includes(mediaKind(rel))) return fail(`${a.file} isn't audio or video.`);
+        if (!speechAvailable()) return fail("Speech recognition isn't set up on this Mac yet.");
+        const language = a.language ?? db.select({ l: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.l;
+        try {
+          const t = await transcribe(abs, { language, srtNextTo: a.captions, signal: ctx.signal });
+          if (!t.text) return ok("No speech found in that file.");
+          const srt = t.srt ? path.relative(dataDir(), t.srt) : null;
+          if (srt) linkIntoWorkspace([srt], ctx.cwd);
+          const timed = t.segments.slice(0, 80).map((s) => `[${s.start.toFixed(1)}–${s.end.toFixed(1)}s] ${s.text}`).join("\n");
+          return ok(`Language: ${t.language}\n\n${t.text}${srt ? `\n\nCaptions saved: ${srt} (staticFile("${srt}"))` : ""}\n\nTimed:\n${timed}`);
+        } catch (err) {
+          return fail(`Couldn't transcribe: ${(err as Error).message.slice(0, 500)}`);
         }
       },
     ),

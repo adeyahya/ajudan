@@ -14,7 +14,8 @@ import type { Business, Task, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { HUMAN, humanJid, isAcknowledgement, listHumans, openRequest, recordHumanMessage, replyHint, senderLine } from "@/lib/humans";
 import { getManager } from "@/lib/manager";
-import { isServablePath, newMediaPath } from "@/lib/media";
+import { isServablePath, mediaKind, newMediaPath } from "@/lib/media";
+import { transcribe } from "@/lib/speech";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { downloadMedia, isLinked, listMessages, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
@@ -154,7 +155,20 @@ async function pollHuman(business: Business, human: Teammate) {
       });
       if (file) attachments.push(file);
     }
-    const text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
+    let text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
+    // A voice note is an instruction like any other: transcribe it (on this Mac).
+    let voice = false;
+    const audio = attachments.find((f) => mediaKind(f) === "audio");
+    if (audio && !text) {
+      voice = true;
+      try {
+        const t = await transcribe(path.join(dataDir(), audio), { language: business.language });
+        text = t.text ? `🎤 ${t.text}` : "🎤 (voice note without words)";
+      } catch (err) {
+        console.error(`[humans] couldn't transcribe ${audio}`, err);
+        text = `🎤 (voice note: ${audio}; it couldn't be transcribed: ${(err as Error).message.slice(0, 120)})`;
+      }
+    }
     recordHumanMessage({
       businessId: business.id,
       humanId: human.id,
@@ -166,7 +180,8 @@ async function pollHuman(business: Business, human: Teammate) {
       sentAt: new Date(m.Timestamp),
     });
     if (text) texts.push(text);
-    files.push(...attachments);
+    // The transcript stands in for a voice note; other files go along to the teammate.
+    files.push(...(voice ? attachments.filter((f) => f !== audio) : attachments));
   }
   logEvent({
     businessId: business.id,
@@ -249,11 +264,14 @@ function routeReply(business: Business, human: Teammate, request: Task | undefin
   const about = request
     ? `${human.name} (human teammate) replied on WhatsApp to the request "${request.title}"${askingMate && target.id === askingMate.id ? " you sent" : ""}:`
     : `${human.name} (human teammate) sent a WhatsApp message (there's no open request to them):`;
+  const voiceHint = texts.some((t) => t.startsWith("🎤"))
+    ? "\n\n(🎤 marks a voice note, transcribed automatically: names, numbers and prices may be misheard. Confirm anything important before acting on it.)"
+    : "";
   createTask({
     businessId: business.id,
     teammateId: target.id,
     title: `${human.name} replied${files.length ? ` (${files.length} file${files.length === 1 ? "" : "s"})` : ""}`,
-    instructions: `${about}\n\n${said}`,
+    instructions: `${about}\n\n${said}${voiceHint}`,
     createdBy: `${HUMAN}${human.id}`,
     // Keeps the manager's report chain: the follow-up belongs to the owner's request.
     parentTaskId: asking?.parentTaskId ?? null,
