@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CanUseTool, McpServerConfig, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, eq, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Business, Deliverable, Task, Teammate } from "@/db/schema";
+import type { Business, Task, Teammate } from "@/db/schema";
 import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
@@ -394,7 +394,6 @@ function isInside(p: string, dir: string) {
 
 function summarizeOutward(toolName: string, input: Record<string, unknown>, who: string) {
   const s = (v: unknown, n = 80) => String(v ?? "").replace(/\s+/g, " ").slice(0, n);
-  // WhatsApp first: its send_message also ends with "__send_message".
   if (toolName === "mcp__whatsapp__send_message") {
     return `${who} wants to post in WhatsApp "${s(input.chat, 40)}": "${s(input.message, 100)}"`;
   }
@@ -412,10 +411,6 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   if (toolName === "mcp__whatsapp__send_file") {
     return `${who} wants to post ${s(input.file, 40)} in WhatsApp "${s(input.chat, 40)}"`;
   }
-  if (toolName.endsWith("__send_message")) {
-    const channel = s(input.channel, 30);
-    return `${who} wants to send ${/^[aeiou]/i.test(channel) ? "an" : "a"} ${channel} message to ${s(input.to, 60)}: "${s(input.subject)}"`;
-  }
   if (toolName === HTTP_TOOL) {
     let where = s(input.url, 80);
     try {
@@ -428,14 +423,6 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   }
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;
-  }
-  if (toolName.endsWith("__publish_deliverable")) {
-    const d = db
-      .select({ title: schema.deliverables.title })
-      .from(schema.deliverables)
-      .where(eq(schema.deliverables.id, String(input.deliverable_id ?? "")))
-      .get() as Pick<Deliverable, "title"> | undefined;
-    return `${who} wants to publish "${s(d?.title ?? input.deliverable_id)}" to ${s(input.channel, 30)}`;
   }
   return `${who} wants to use ${toolName}`;
 }
@@ -504,12 +491,15 @@ function buildSystemPrompt(
         .map((r) => `- ${r.name}, ${r.title}: ${r.responsibilities.slice(0, 3).join("; ") || getRole(r.roleKey)?.summary || ""}`)
         .join("\n")
     : "- (you're the only teammate right now)";
-  const outward =
-    teammate.autonomy === "auto"
-      ? "You may publish and send directly with publish_deliverable and send_message when the task calls for it."
+  // What really leaves the machine: the browser and WhatsApp, when the teammate has them.
+  const channels = [useWhatsapp && "WhatsApp", useBrowser && "the business browser"].filter(Boolean).join(" and ");
+  const outward = !channels
+    ? "You have no channel that reaches outside (no WhatsApp, no browser), so everything you make is for the owner to post."
+    : teammate.autonomy === "auto"
+      ? `Only ${channels} really reach the outside world, and there you act on your own within your role.`
       : teammate.autonomy === "ask"
-        ? "publish_deliverable and send_message require the owner's approval: call them when the task calls for it and the owner will approve or reject. If rejected, follow their note."
-        : "You cannot publish or send anything. Save drafts with save_deliverable; the owner will publish them.";
+        ? `Only ${channels} really reach the outside world, and there the owner approves each action first; if they reject it, follow their note.`
+        : `Only ${channels} really reach the outside world, and you're draft-only there: you never send, post or change anything, only read and prepare.`;
 
   return `You are ${teammate.name}, the ${teammate.title} on the AI team of ${business.name}${business.website ? ` (${business.website})` : ""}.
 You work for the business owner. Your working folder contains BUSINESS.md (everything about the business) and memory.md (your own long-term notes). Read both first.
@@ -529,7 +519,7 @@ ${canDelegate && roster.length ? "Delegate work that fits someone else's role wi
 
 ## Rules
 - Save every piece of work (posts, articles, emails, plans, reports) with save_deliverable. Work that isn't saved is lost.
-- Act on the outside world only through the publish_deliverable and send_message tools; never claim you posted or sent something otherwise. ${outward}
+- Ajudan can't post to Instagram, blogs, email, DMs or any other channel for you. When a piece is finished, call mark_ready_to_post(deliverable_id, channel); write emails, DMs and outreach with draft_outbound_message. Both only prepare the text for the owner, who posts or sends it from the Work page. Never claim you posted or sent something. ${outward}
 - Use set_status to keep a short, current status line for the office.
 - You can only read and write files inside your working folder. Keep scratch files under work/.
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.

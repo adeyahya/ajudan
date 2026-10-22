@@ -5,9 +5,11 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { Approval, Deliverable } from "@/db/schema";
 import { LiveRefresh } from "@/components/live";
+import { ImageStrip } from "@/components/image-strip";
 import { Avatar, Badge, Button, Card, Input, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
+import { isServablePath } from "@/lib/media";
 import { approveCapability, decideApproval, rejectCapability } from "./actions";
 import { CapabilityForm } from "./capability-form";
 
@@ -54,7 +56,7 @@ async function Content({ params }: Params) {
       <LiveRefresh businessId={id} types={["approval_requested", "approval_granted", "approval_rejected", "task_done", "task_failed"]} />
       <PageHeader
         title="Approvals"
-        subtitle={`Teammates with “ask” autonomy wait here before publishing or sending anything outside the business.${owner ? ` Each request also goes to ${owner.name}'s WhatsApp: answer “ya <code>” or “tidak <code>”.` : " Mark yourself as the owner on the Team page to approve on WhatsApp too."}`}
+        subtitle={`Teammates with “ask” autonomy wait here before anything goes out on WhatsApp, in the business browser or through an API. Posts and messages for other channels never go out by themselves: find them on the Work page.${owner ? ` Each request also goes to ${owner.name}'s WhatsApp: answer “ya <code>” or “tidak <code>”.` : " Mark yourself as the owner on the Team page to approve on WhatsApp too."}`}
       />
 
       <section className="space-y-3">
@@ -79,7 +81,7 @@ async function Content({ params }: Params) {
                 <CapabilityRequestView a={a} businessId={id} />
               ) : (
               <>
-              <ApprovalInput a={a} deliverables={data.deliverables} />
+              <ApprovalInput a={a} businessId={id} deliverables={data.deliverables} />
               <form action={decideApproval} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="businessId" value={id} />
                 <input type="hidden" name="approvalId" value={a.id} />
@@ -117,7 +119,7 @@ async function Content({ params }: Params) {
                 <Badge tone={a.status === "approved" ? "green" : "red"}>{a.status}</Badge>
               </summary>
               <div className="border-t border-border p-3">
-                <ApprovalInput a={a} deliverables={data.deliverables} />
+                <ApprovalInput a={a} businessId={id} deliverables={data.deliverables} />
               </div>
             </details>
           );
@@ -152,10 +154,10 @@ function CapabilityRequestView({ a, businessId }: { a: Approval; businessId: str
 }
 
 /** Human-friendly view of what the teammate wants to do. */
-function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<string, Deliverable> }) {
+function ApprovalInput({ a, businessId, deliverables }: { a: Approval; businessId: string; deliverables: Map<string, Deliverable> }) {
   const i = a.input as Record<string, unknown>;
   const str = (v: unknown) => (v == null ? "" : String(v));
-  // Check WhatsApp first: its send_message would also match the generic rule below.
+  // Check WhatsApp first: its send_message would also match the old biz send_message rule below.
   if (a.toolName === "mcp__whatsapp__update_group") {
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
@@ -180,6 +182,8 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
     );
   }
   if (a.toolName.startsWith("mcp__whatsapp__send_")) {
+    // send_file's path is inside the teammate's folder; work/ and media/ are the same files as in the business folder.
+    const file = str(i.file);
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
         <div className="text-xs text-muted-foreground">
@@ -187,12 +191,14 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
           <span className="text-foreground">
             {Array.isArray(i.recipientNames) ? (i.recipientNames as string[]).join(", ") : str(i.chat)}
           </span>
-          {i.file ? ` · file ${str(i.file)}` : ""}
+          {file ? ` · file ${file}` : ""}
         </div>
+        {file && isServablePath(file) && <ImageStrip businessId={businessId} images={[file]} size={120} className="pt-1" />}
         <Prose>{str(i.message ?? i.caption ?? "")}</Prose>
       </div>
     );
   }
+  // Old rows from before 1.1: the biz send_message and publish_deliverable tools no longer exist.
   if (a.toolName.endsWith("__send_message")) {
     return (
       <div className="rounded-lg border border-border bg-background/50 p-3 space-y-1 text-sm">
@@ -226,6 +232,7 @@ function ApprovalInput({ a, deliverables }: { a: Approval; deliverables: Map<str
         {d ? (
           <>
             <div className="font-medium">{d.title}</div>
+            <ImageStrip businessId={businessId} images={d.attachments} size={120} className="pt-1" />
             <Prose className="max-h-80 overflow-y-auto">{d.content}</Prose>
           </>
         ) : (

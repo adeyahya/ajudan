@@ -33,6 +33,8 @@ export const BIZ_SERVER = "biz";
 /** Tools that act inside Ajudan only: always allowed. */
 export const SAFE_BIZ_TOOLS = [
   "save_deliverable",
+  "mark_ready_to_post",
+  "draft_outbound_message",
   "list_deliverables",
   "assign_task",
   "set_status",
@@ -56,10 +58,12 @@ export const SAFE_BIZ_TOOLS = [
 export const HUMAN_TOOLS = ["ask_human", "message_human", "close_human_request", "human_conversation"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
 /** Allowed for GET/HEAD; other methods change things and are gated like publishing (worker/handlers/task.ts). */
 export const HTTP_TOOL = `mcp__${BIZ_SERVER}__http_request`;
-/** Tools that reach the outside world: gated by the teammate's autonomy. */
-export const OUTWARD_BIZ_TOOLS = ["publish_deliverable", "send_message", "confirm_browser_action"].map(
-  (t) => `mcp__${BIZ_SERVER}__${t}`,
-);
+/**
+ * Tools that reach the outside world: gated by the teammate's autonomy. Ajudan can't post
+ * anywhere itself (mark_ready_to_post and draft_outbound_message only prepare work for the
+ * owner); the browser and WhatsApp (worker/whatsapp-tools.ts) are the real outward channels.
+ */
+export const OUTWARD_BIZ_TOOLS = ["confirm_browser_action"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
 
 export type BizContext = {
   businessId: string;
@@ -81,9 +85,6 @@ export type BizContext = {
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
-
-const SIMULATED =
-  "(Simulated: Ajudan has no real integrations for this channel yet, so nothing was actually sent outside. The owner can copy it from the Work page.)";
 
 export function createBizServer(ctx: BizContext) {
   const { businessId, teammate, taskId } = ctx;
@@ -347,7 +348,7 @@ export function createBizServer(ctx: BizContext) {
     tool(
       "list_deliverables",
       "List this business's saved deliverables (newest first), optionally filtered by status.",
-      { status: z.enum(["draft", "approved", "published", "rejected"]).optional() },
+      { status: z.enum(["draft", "ready_to_post", "approved", "published", "rejected"]).optional() },
       async (a) => {
         const filters = [eq(schema.deliverables.businessId, businessId)];
         if (a.status) filters.push(eq(schema.deliverables.status, a.status as DeliverableStatus));
@@ -392,11 +393,11 @@ export function createBizServer(ctx: BizContext) {
     ),
 
     tool(
-      "publish_deliverable",
-      "Publish a saved deliverable to a channel (outward action). Use the deliverable_id returned by save_deliverable.",
+      "mark_ready_to_post",
+      "Mark a saved deliverable as finished and ready for the owner to post on a channel. Ajudan doesn't post it: the owner copies the text and files from the Work page and posts it themselves. Use the deliverable_id returned by save_deliverable.",
       {
         deliverable_id: z.string(),
-        channel: z.string().describe('e.g. "instagram", "blog", "newsletter"'),
+        channel: z.string().describe('Where the owner should post it, e.g. "instagram", "blog", "newsletter"'),
       },
       async (a) => {
         const d = db
@@ -406,27 +407,28 @@ export function createBizServer(ctx: BizContext) {
           .get();
         if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business.`);
         db.update(schema.deliverables)
-          .set({ status: "published", channel: a.channel })
+          .set({ status: "ready_to_post", channel: a.channel })
           .where(eq(schema.deliverables.id, d.id))
           .run();
         syncDeliverableFile(d.id);
-        ev("deliverable_published", `${teammate.name} published "${d.title}" to ${a.channel}`, {
+        ev("deliverable_ready", `${teammate.name} finished "${d.title}" for the owner to post on ${a.channel}`, {
           deliverableId: d.id,
           channel: a.channel,
-          simulated: true,
         });
-        return ok(`Marked "${d.title}" as published to ${a.channel}. ${SIMULATED}`);
+        return ok(
+          `"${d.title}" is marked ready to post on ${a.channel}. Nothing was posted: the owner posts it from the Work page. Say so in your summary.`,
+        );
       },
     ),
 
     tool(
-      "send_message",
-      "Send a message (email, DM, outreach) to someone outside the business (outward action).",
+      "draft_outbound_message",
+      "Write a message (email, DM, outreach) for the owner to send to someone outside the business. Ajudan doesn't send it: it's saved as ready to send and the owner copies it from the Work page.",
       {
         channel: z.string().describe('e.g. "email", "instagram_dm", "linkedin"'),
         to: z.string().describe("Recipient (name, handle or address)"),
         subject: z.string().describe("Subject or short headline"),
-        body: z.string().describe("Full message body"),
+        body: z.string().describe("Full message body, exactly as it should be sent"),
       },
       async (a) => {
         const d = db
@@ -439,16 +441,17 @@ export function createBizServer(ctx: BizContext) {
             title: `To ${a.to}: ${a.subject}`,
             content: a.body,
             channel: a.channel,
-            status: "published",
+            status: "ready_to_post",
           })
           .returning({ id: schema.deliverables.id })
           .get();
         syncDeliverableFile(d.id);
-        ev("message_sent", `${teammate.name} sent a ${a.channel} message to ${a.to}`, {
+        ev("message_drafted", `${teammate.name} drafted a ${a.channel} message to ${a.to} for the owner to send`, {
           deliverableId: d.id,
-          simulated: true,
         });
-        return ok(`Message to ${a.to} recorded as sent (id ${d.id}). ${SIMULATED}`);
+        return ok(
+          `Message to ${a.to} saved as ready to send (id ${d.id}). Nothing was sent: the owner sends it from the Work page. Say so in your summary.`,
+        );
       },
     ),
   ];

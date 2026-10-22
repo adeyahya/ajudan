@@ -4,11 +4,21 @@ import { setDeliverableStatus } from "./actions";
 import { CopyButton } from "./copy-button";
 import { ImageStrip } from "@/components/image-strip";
 
-export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "blue" | "red"> = {
+export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "blue" | "amber" | "red"> = {
   draft: "neutral",
+  ready_to_post: "amber",
   approved: "blue",
   published: "green",
   rejected: "red",
+};
+
+/** "published" stays the stored value for work the owner posted (and old simulated publishes). */
+export const DELIVERABLE_LABEL: Record<DeliverableStatus, string> = {
+  draft: "Draft",
+  ready_to_post: "Ready to post",
+  approved: "Approved",
+  published: "Posted",
+  rejected: "Rejected",
 };
 
 export function kindLabel(kind: string) {
@@ -27,9 +37,10 @@ export function DeliverableCard({
 }) {
   const actions: { status: DeliverableStatus; label: string; variant: "secondary" | "ghost" }[] = [
     { status: "approved", label: "Mark approved", variant: "secondary" },
-    { status: "published", label: "Mark published", variant: "secondary" },
+    { status: "published", label: "Mark posted", variant: "secondary" },
     { status: "rejected", label: "Reject", variant: "ghost" },
   ];
+  const isMessage = d.kind === "outbound_message";
   return (
     <details className="group rounded-xl border border-border bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
@@ -45,10 +56,17 @@ export function DeliverableCard({
         {d.attachments.length > 0 && (
           <span className="font-pixel text-xs text-muted-foreground">🖼 {d.attachments.length}</span>
         )}
-        <Badge tone={DELIVERABLE_TONE[d.status]}>{d.status}</Badge>
+        <Badge tone={DELIVERABLE_TONE[d.status]}>{DELIVERABLE_LABEL[d.status]}</Badge>
         <span className="text-muted-foreground text-xs transition group-open:rotate-90">▶</span>
       </summary>
       <div className="border-t border-border p-3 space-y-3">
+        {d.status === "ready_to_post" && (
+          <p className="text-xs text-muted-foreground">
+            {isMessage ? "Ready for you to send" : "Ready for you to post"}
+            {d.channel ? ` on ${d.channel}` : ""}: Ajudan doesn&apos;t {isMessage ? "send" : "post"} it. Copy the text
+            {d.attachments.length ? ", download the files" : ""} and {isMessage ? "send" : "post"} it yourself, then mark it posted.
+          </p>
+        )}
         <ImageStrip businessId={d.businessId} images={d.attachments} size={120} />
         <Prose className="max-h-[28rem] overflow-y-auto">{d.content}</Prose>
         <div className="flex flex-wrap items-center gap-2">

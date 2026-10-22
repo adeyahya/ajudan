@@ -8,14 +8,14 @@ import type { DeliverableStatus } from "@/db/schema";
 import { LiveRefresh } from "@/components/live";
 import { PageHeader, PageSkeleton, cn } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
-import { DeliverableCard, kindLabel } from "./deliverable-card";
+import { DELIVERABLE_LABEL, DeliverableCard, kindLabel } from "./deliverable-card";
 
 type Props = {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-const STATUSES: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
+const STATUSES: DeliverableStatus[] = ["draft", "ready_to_post", "approved", "published", "rejected"];
 
 export default function DeliverablesPage(props: Props) {
   return (
@@ -72,9 +72,12 @@ async function Content({ params, searchParams }: Props) {
     <div className="space-y-5">
       <LiveRefresh
         businessId={id}
-        types={["deliverable_saved", "deliverable_published", "message_sent", "deliverable_status", "task_done"]}
+        types={["deliverable_saved", "deliverable_ready", "message_drafted", "deliverable_status", "task_done"]}
       />
-      <PageHeader title="Work" subtitle="Everything your teammates produced. Copy it, approve it, or mark it published." />
+      <PageHeader
+        title="Work"
+        subtitle="Everything your teammates produced. Ajudan doesn't post it anywhere: copy what's ready, post it yourself, then mark it posted."
+      />
 
       <div className="space-y-2">
         <FilterRow label="Status">
@@ -83,7 +86,7 @@ async function Content({ params, searchParams }: Props) {
           </Chip>
           {STATUSES.map((s) => (
             <Chip key={s} href={href({ status: s })} active={f.status === s}>
-              {s}
+              {DELIVERABLE_LABEL[s]}
             </Chip>
           ))}
         </FilterRow>

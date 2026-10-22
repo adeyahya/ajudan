@@ -9,6 +9,7 @@ import { db, schema } from "@/db";
 import type { Approval, Business, Teammate } from "@/db/schema";
 import { approvalCode, decide, findPendingByCode } from "@/lib/approvals";
 import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
+import { isServablePath, mediaKind } from "@/lib/media";
 import { isLinked } from "@/lib/whatsapp";
 import { sendToHuman } from "./humans";
 
@@ -24,16 +25,23 @@ export function ownerOf(business: Pick<Business, "ownerHumanId">) {
   return h && h.kind === "human" && h.status === "active" && h.phone ? h : undefined;
 }
 
-/** What the owner needs to see to decide: the exact text that would go out. */
-function details(a: Approval) {
+/**
+ * What the owner needs to see to decide: the exact text that would go out, and the
+ * pictures or videos with it (at most 3, so the owner isn't flooded).
+ */
+function details(a: Approval): { text: string; files: string[] } {
   const i = a.input as Record<string, unknown>;
   const s = (v: unknown, n = 700) => String(v ?? "").trim().slice(0, n);
-  if (a.toolName === CAPABILITY) return s((i as CapabilityRequest).why, 300);
+  const visual = (paths: string[]) => paths.filter((f) => isServablePath(f) && ["image", "video"].includes(mediaKind(f))).slice(0, 3);
+  if (a.toolName === CAPABILITY) return { text: s((i as CapabilityRequest).why, 300), files: [] };
+  // Old rows from before the publish tool was replaced by mark_ready_to_post.
   if (a.toolName.endsWith("__publish_deliverable")) {
     const d = db.select().from(schema.deliverables).where(eq(schema.deliverables.id, String(i.deliverable_id ?? ""))).get();
-    return d ? `*${d.title}*\n${s(d.content)}` : "";
+    return d ? { text: `*${d.title}*\n${s(d.content)}`, files: visual(d.attachments) } : { text: "", files: [] };
   }
-  return s(i.message ?? i.body ?? i.details ?? i.caption ?? i.action ?? "");
+  // WhatsApp send_file: a path in the teammate's folder; work/ and media/ are the business folder's files.
+  const files = typeof i.file === "string" ? visual([i.file]) : [];
+  return { text: s(i.message ?? i.body ?? i.details ?? i.caption ?? i.action ?? ""), files };
 }
 
 /** Send a new approval request to the owner's WhatsApp (if set up). */
@@ -45,13 +53,13 @@ export async function notifyOwner(approvalId: string) {
   if (!business || !owner || !(await isLinked())) return;
   const code = approvalCode(a);
   const secret = a.toolName === CAPABILITY && (a.input as CapabilityRequest).kind === "secret";
-  const body = details(a);
+  const { text: body, files } = details(a);
   const how = secret
     ? t(business, "Ini kunci/API key: masukkan lewat aplikasi (halaman Approvals), jangan lewat chat.", "This is an API key: enter it in the app (Approvals page), never in a chat.")
     : t(business, `Balas *ya ${code}* untuk setuju, atau *tidak ${code}* + alasannya.`, `Reply *yes ${code}* to approve, or *no ${code}* + why.`);
   const text = `${PROMPT} *${t(business, "Perlu persetujuan", "Needs your approval")}* · ${code}\n${a.summary}${body ? `\n\n${body}` : ""}\n\n${how}`;
   try {
-    await sendToHuman({ business, human: owner, from: null, text });
+    await sendToHuman({ business, human: owner, from: null, text, files });
   } catch (err) {
     console.error("[owner-approvals] couldn't notify the owner", err);
   }

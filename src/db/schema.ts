@@ -152,7 +152,12 @@ export const approvals = sqliteTable("approvals", {
   createdAt: createdAt(),
 });
 
-export type DeliverableStatus = "draft" | "approved" | "published" | "rejected";
+/**
+ * Nothing a teammate makes is posted by Ajudan: "ready_to_post" means the teammate finished
+ * it for the owner to post themselves (mark_ready_to_post / draft_outbound_message), and
+ * "published" is the owner's own "I posted it" (also what the old simulated publish tools set).
+ */
+export type DeliverableStatus = "draft" | "ready_to_post" | "approved" | "published" | "rejected";
 
 export const deliverables = sqliteTable("deliverables", {
   id: id(),

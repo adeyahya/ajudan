@@ -7,7 +7,7 @@ import type { DeliverableStatus } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { syncDeliverableFile } from "@/lib/workfiles";
 
-const STATUSES: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
+const STATUSES: DeliverableStatus[] = ["draft", "ready_to_post", "approved", "published", "rejected"];
 
 /** FormData: businessId, deliverableId, status. */
 export async function setDeliverableStatus(formData: FormData) {

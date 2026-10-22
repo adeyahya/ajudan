@@ -206,10 +206,10 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Handing a task to ${short(input.teammate_name, 30)}`;
     case "mcp__biz__set_status":
       return short(input.text, 70);
-    case "mcp__biz__publish_deliverable":
-      return "Asking to publish";
-    case "mcp__biz__send_message":
-      return `Asking to message ${short(input.to, 40)}`;
+    case "mcp__biz__mark_ready_to_post":
+      return `Marking ready to post on ${short(input.channel, 30)}`;
+    case "mcp__biz__draft_outbound_message":
+      return `Drafting a message to ${short(input.to, 40)}`;
     case "mcp__biz__confirm_browser_action":
       return `Asking before: ${short(input.action, 60)}`;
     // WhatsApp (wacli)

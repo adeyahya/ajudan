@@ -102,6 +102,6 @@ Before letting other businesses use it, set `ANTHROPIC_API_KEY`. Anthropic's ter
 - Moving from the old shared `./data` folder: `npx tsx scripts/move-to-folder.ts <businessId>` copies a business into `~/Ajudan/<Name>/`. Orucraft has been moved already, and `./data` can be deleted once you are happy.
 - `pnpm dev` runs the worker with `tsx watch`: editing files restarts it and any running task starts over from scratch.
 - Teammate schedules (e.g. Mondays 08:00) run automatically while the worker is up, and they use your Claude quota.
-- `publish_deliverable` / `send_message` only record the action; real outward channels are the business browser and WhatsApp.
+- Ajudan doesn't post to Instagram, blogs, email or DMs: teammates mark work "Ready to post" (`mark_ready_to_post`) or draft messages (`draft_outbound_message`) and the owner posts them from the Work page. The real outward channels are the business browser and WhatsApp.
 - Videos: teammates can't listen to music, so they pick free tracks by title, mood and length.
 - The "ask before changing a site" rule is enforced by the teammate's instructions plus approvals, not by blocking clicks. The site list and the blocked tools are hard limits.
