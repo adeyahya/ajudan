@@ -15,7 +15,7 @@ import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
 import { DECISION, REPORT } from "@/lib/manager";
 import { activeWatches, watchState } from "@/lib/watches";
-import { runScheduledNow, sendTaskMessage } from "./actions";
+import { cancelTaskAction, retryTaskAction, runScheduledNow, sendTaskMessage } from "./actions";
 
 const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "red"> = {
   idle: "neutral",
@@ -158,6 +158,19 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
 
 const time = (d: Date) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
+/** Cancel / Retry under a task's reply (Server Functions in ./actions.ts). */
+function TaskButton({ action, businessId, taskId, label }: { action: (fd: FormData) => Promise<void>; businessId: string; taskId: string; label: string }) {
+  return (
+    <form action={action} className="contents">
+      <input type="hidden" name="businessId" value={businessId} />
+      <input type="hidden" name="taskId" value={taskId} />
+      <Button type="submit" variant="ghost" size="xs">
+        {label}
+      </Button>
+    </form>
+  );
+}
+
 function toMessages(
   businessId: string,
   tasks: Task[],
@@ -207,6 +220,16 @@ function toMessages(
           pending: true,
           steps: mine,
           meta: task.createdBy === REPORT ? "Writing the team update…" : task.createdBy === DECISION ? "Following up on your decision…" : label,
+          footer: (
+            <>
+              {task.status === "waiting_approval" && (
+                <Link href={`/b/${businessId}/approvals`} className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400">
+                  Decide on the Approvals page →
+                </Link>
+              )}
+              <TaskButton action={cancelTaskAction} businessId={businessId} taskId={task.id} label="Cancel" />
+            </>
+          ),
         },
       ];
     }
@@ -232,6 +255,9 @@ function toMessages(
             <Link href={`/b/${businessId}/deliverables`} className="text-xs text-muted-foreground hover:text-foreground">
               View work →
             </Link>
+            {(task.status === "failed" || task.status === "cancelled") && (
+              <TaskButton action={retryTaskAction} businessId={businessId} taskId={task.id} label="Retry" />
+            )}
           </>
         ),
       },

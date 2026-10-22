@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Approval, Task } from "@/db/schema";
+import type { Approval } from "@/db/schema";
 import { MANAGER_ROLE } from "@/lib/roles";
 import { createTask } from "@/lib/tasks";
 import { initTeammateWorkspace } from "@/lib/workspace";
@@ -130,37 +130,6 @@ export function onTaskFinished(taskId: string) {
     parentTaskId: parent.id,
     instructions: `Your team has finished ${lastReport ? "more of " : ""}the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
   });
-}
-
-/** Recent manager ↔ owner conversation, for continuity between messages. */
-export function managerHistory(managerId: string, beforeTask: Pick<Task, "id" | "createdAt">, limit = 8) {
-  const rows = db
-    .select()
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.teammateId, managerId), ne(schema.tasks.id, beforeTask.id)))
-    .orderBy(desc(schema.tasks.createdAt))
-    .limit(limit)
-    .all()
-    .filter((t) => t.createdAt <= beforeTask.createdAt)
-    .reverse();
-  if (!rows.length) return "";
-  return rows
-    .map((t) => {
-      const who =
-        t.createdBy === REPORT
-          ? "Team update (you reported)"
-          : t.createdBy === DECISION
-            ? "Owner's approval decision"
-            : t.createdBy === "user"
-              ? "Owner"
-              : t.createdBy.startsWith("human:")
-                ? "WhatsApp from a person on the team"
-                : "Scheduled";
-      const files = t.attachments.length ? ` [attached: ${t.attachments.join(", ")}]` : "";
-      const ask = t.createdBy === REPORT ? "" : `${who}: ${t.instructions.slice(0, 500)}${files}\n`;
-      return `${ask}You: ${(t.result ?? `(${t.status})`).slice(0, 700)}`;
-    })
-    .join("\n\n");
 }
 
 export const DECISION = "system:decision";

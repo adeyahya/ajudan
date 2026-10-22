@@ -12,7 +12,8 @@ export type JobPayloads = {
   onboarding_turn: { businessId: string };
   onboarding_finalize: { businessId: string };
   design_team: { businessId: string };
-  run_task: { taskId: string };
+  /** `approvalId`: continue a task that waited for this (now decided) approval. */
+  run_task: { taskId: string; approvalId?: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */

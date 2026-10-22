@@ -3,8 +3,10 @@ import path from "node:path";
 import type { CanUseTool, McpServerConfig, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, eq, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Business, Task, Teammate } from "@/db/schema";
+import type { Approval, Business, Task, Teammate } from "@/db/schema";
+import { sameAction } from "@/lib/approvals";
 import { describeToolUse, runAgent } from "@/lib/claude";
+import { taskHistory } from "@/lib/history";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
@@ -16,11 +18,12 @@ import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { HUMAN, humanThread, listHumans } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { REPLY } from "../replies";
-import { DECISION, managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
+import { DECISION, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { isInside, resolveReal } from "../fs-guard";
-import { PausedError, runAbortController } from "../session";
+import { ApprovalWait, CancelledError, isPaused, PausedError, runAbortController, runningTasks } from "../session";
+import { sessionExists } from "../claude-sessions";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
 import { notifyOwner } from "../owner-approvals";
@@ -35,12 +38,21 @@ const VIDEO_BUDGET_USD = Number(process.env.AJUDAN_VIDEO_BUDGET_USD ?? 6) || 6;
 /** Skills teammates can load (agent-plugins/ in this repo; ~/.claude is never read). */
 const PLUGIN_DIR = path.resolve(import.meta.dirname, "..", "..", "agent-plugins", "ajudan-video");
 const SKILLS = ["ajudan-video:campaign-video", "ajudan-video:remotion-best-practices"];
-const APPROVAL_POLL_MS = 1000;
 
-export async function runTask({ taskId }: JobPayloads["run_task"]) {
+/**
+ * Run a task through Claude Code. A run that needs the owner's approval ends there
+ * (the task waits as `waiting_approval` with its session saved, freeing the lane);
+ * the decision queues this job again with `approvalId`, and the run resumes that
+ * session with the answer. Follow-up tasks (capability granted, WhatsApp replies)
+ * arrive with the asking task's session and resume it too; a session that's gone
+ * (reinstall, cleaned ~/.claude) falls back to the task history in the prompt.
+ */
+export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
   const task = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
   if (!task) throw new Error(`Task ${taskId} not found`);
   if (task.status === "done" || task.status === "cancelled" || task.status === "failed") return;
+  // Only its decision continues a waiting task (a stale job from before the wait doesn't).
+  if (task.status === "waiting_approval" && !approvalId) return;
   const teammate = db.select().from(schema.teammates).where(eq(schema.teammates.id, task.teammateId)).get();
   const business = db.select().from(schema.businesses).where(eq(schema.businesses.id, task.businessId)).get();
   if (!teammate || !business) throw new Error(`Task ${taskId}: teammate or business missing`);
@@ -49,16 +61,27 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
 
   const ev = (type: string, message: string, data?: Record<string, unknown>) =>
     logEvent({ businessId: business.id, teammateId: teammate.id, taskId: task.id, type, message, data });
-  const setTask = (v: Partial<Task>) => db.update(schema.tasks).set(v).where(eq(schema.tasks.id, task.id)).run();
+  // Never overwrite a Cancel the owner pressed meanwhile.
+  const setTask = (v: Partial<Task>) =>
+    db.update(schema.tasks).set(v).where(and(eq(schema.tasks.id, task.id), ne(schema.tasks.status, "cancelled"))).run();
   const setMate = (v: Partial<Teammate>) =>
     db.update(schema.teammates).set(v).where(eq(schema.teammates.id, teammate.id)).run();
 
+  // The decision this run continues from: approved, that one call is allowed once.
+  const decided = approvalId ? db.select().from(schema.approvals).where(eq(schema.approvals.id, approvalId)).get() : undefined;
+  if (approvalId && (!decided || decided.status === "pending")) return;
+  let grant: Approval | undefined = decided?.status === "approved" ? decided : undefined;
+
   const ac = runAbortController();
+  runningTasks.set(task.id, ac);
   /** WhatsApp people/chats outside the allowed list the owner approved during this run. */
   const approvedTargets = new Set<string>();
-  setTask({ status: "running", startedAt: new Date() });
-  setMate({ state: "working", currentActivity: `Starting: ${task.title}` });
-  ev("task_started", `${teammate.name} started "${task.title}"`);
+  if (!setTask({ status: "running", startedAt: task.startedAt ?? new Date() }).changes) {
+    runningTasks.delete(task.id);
+    return; // cancelled since the job was claimed
+  }
+  setMate({ state: "working", currentActivity: decided ? `Owner ${decided.status}: ${task.title}` : `Starting: ${task.title}` });
+  ev(decided ? "task_resumed" : "task_started", decided ? `${teammate.name} carries on with "${task.title}"` : `${teammate.name} started "${task.title}"`);
 
   try {
     const cwd = prepareWorkspace(teammate, business);
@@ -104,6 +127,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     });
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
+      // Stopping (an approval request, a cancel): nothing else starts.
+      if (ac.signal.aborted) return { behavior: "deny", message: "This run is stopping." };
       if (toolName === "Skill") return { behavior: "allow", updatedInput: input };
       // The sandbox (sandboxFor) limits files and network; outside it nothing runs.
       if (toolName === "Bash") {
@@ -116,7 +141,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         const method = String(input.method ?? "GET").toUpperCase();
         if (method === "GET" || method === "HEAD") return { behavior: "allow", updatedInput: input };
         if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
-        if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
+        if (teammate.autonomy === "ask") return requestApproval(toolName, input);
         return { behavior: "deny", message: "You're draft-only: you can read APIs (GET) but not change anything through them." };
       }
       if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR]);
@@ -149,7 +174,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         if (!outside.length) {
           if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: updated };
           if (teammate.autonomy === "ask") {
-            const d = await requestApproval(toolName, { ...input, recipientNames: resolved.map((t) => t.name) }, options.signal);
+            const d = await requestApproval(toolName, { ...input, recipientNames: resolved.map((t) => t.name) });
             return d.behavior === "allow" ? { behavior: "allow", updatedInput: updated } : d;
           }
           return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
@@ -158,25 +183,35 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         const text = String(input.message ?? input.caption ?? input.file ?? "").replace(/\s+/g, " ").slice(0, 100);
         const who = resolved.map((t) => t.name);
         const summary = `${teammate.name} wants to WhatsApp ${who.length === 1 ? who[0] : `${who.length} people (${who.slice(0, 4).join(", ")}${who.length > 4 ? ", …" : ""})`}: "${text}"`;
-        const decision = await requestApproval(toolName, { ...updated, recipientNames: who }, options.signal, summary);
+        const decision = await requestApproval(toolName, { ...updated, recipientNames: who }, summary);
         if (decision.behavior !== "allow") return decision;
         jids.forEach((j) => approvedTargets.add(j));
         return { behavior: "allow", updatedInput: updated };
       }
       if (outward.includes(toolName)) {
         if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
-        if (teammate.autonomy === "ask") return requestApproval(toolName, input, options.signal);
+        if (teammate.autonomy === "ask") return requestApproval(toolName, input);
         return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
       }
       return { behavior: "deny", message: `Tool ${toolName} is not available to teammates.` };
     };
 
+    /**
+     * An outward action on "ask": the call the owner just approved goes through once;
+     * anything else is recorded for the owner and ends this run (the task waits, the
+     * decision resumes the session).
+     */
     const requestApproval = async (
       toolName: string,
       input: Record<string, unknown>,
-      signal: AbortSignal,
       summary = summarizeOutward(toolName, input, teammate.name),
     ): Promise<PermissionResult> => {
+      if (grant && sameAction(grant, toolName, input)) {
+        ev("approval_used", `${teammate.name} does what the owner approved: ${grant.summary}`, { approvalId: grant.id });
+        grant = undefined;
+        return { behavior: "allow", updatedInput: input };
+      }
+      if (ac.signal.aborted) return { behavior: "deny", message: "This run is stopping." };
       const approval = db
         .insert(schema.approvals)
         .values({ businessId: business.id, teammateId: teammate.id, taskId: task.id, toolName, input, summary })
@@ -186,32 +221,17 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       setTask({ status: "waiting_approval" });
       setMate({ state: "waiting", currentActivity: `Waiting for approval: ${summary}`.slice(0, 140) });
       ev("approval_requested", summary, { approvalId: approval.id, toolName });
-
-      try {
-        while (true) {
-          if (signal.aborted) return { behavior: "deny", message: "Cancelled while waiting for approval." };
-          const row = db.select().from(schema.approvals).where(eq(schema.approvals.id, approval.id)).get();
-          if (!row) return { behavior: "deny", message: "The approval request was removed." };
-          if (row.status === "approved") {
-            ev("approval_granted", `Owner approved: ${summary}`, { approvalId: approval.id });
-            return { behavior: "allow", updatedInput: input };
-          }
-          if (row.status === "rejected") {
-            ev("approval_rejected", `Owner rejected: ${summary}`, { approvalId: approval.id, note: row.note });
-            return {
-              behavior: "deny",
-              message: `The owner rejected this action.${row.note ? ` Their note: ${row.note}` : ""} Adjust and save a revised draft instead of retrying the same action.`,
-            };
-          }
-          await sleep(APPROVAL_POLL_MS, signal);
-        }
-      } finally {
-        setTask({ status: "running" });
-        setMate({ state: "working", currentActivity: "Back to work" });
-      }
+      ac.abort(new ApprovalWait(approval.id));
+      return { behavior: "deny", message: "Waiting for the owner's approval. This run pauses here and continues with their answer." };
     };
 
+    let sessionSeen: string | undefined;
     const onMessage = (m: SDKMessage) => {
+      // Saved as soon as it's known: the run may stop at any tool call (approval, cancel).
+      if ("session_id" in m && m.session_id && m.session_id !== sessionSeen) {
+        sessionSeen = m.session_id;
+        setTask({ sessionId: m.session_id });
+      }
       if (m.type !== "assistant") return;
       for (const block of m.message.content) {
         if (block.type === "tool_use") {
@@ -248,25 +268,43 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         );
         disallowedTools.push(...browserToolNames(browserProvider, browserProvider.blockedTools));
       }
-      return runAgent({
-        cwd,
-        systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans),
-        prompt: buildPrompt(task, isManager ? managerHistory(teammate.id, task) : "", await describeAttachments(attachments)),
-        tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
-        sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
-        plugins: [PLUGIN_DIR],
-        skills: SKILLS,
-        allowedTools,
-        disallowedTools,
-        mcpServers,
-        canUseTool,
-        onMessage,
-        maxTurns: useBrowser || videoWork ? 80 : 40,
-        // Reacting to an approval is a quick note to the owner: answer fast.
-        effort: task.createdBy === DECISION ? "low" : undefined,
-        maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
-        abortController: ac,
-      });
+      const files = await describeAttachments(attachments);
+      const attempt = (resume: string | undefined) =>
+        runAgent({
+          cwd,
+          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans),
+          prompt: resume
+            ? decided
+              ? decisionPrompt(decided)
+              : buildPrompt(task, "", files, true)
+            : `${buildPrompt(task, taskHistory(teammate.id, task), files)}${decided ? `\n\n${decisionRecap(decided)}` : ""}`,
+          tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
+          sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
+          plugins: [PLUGIN_DIR],
+          skills: SKILLS,
+          allowedTools,
+          disallowedTools,
+          mcpServers,
+          canUseTool,
+          onMessage,
+          resume,
+          maxTurns: useBrowser || videoWork ? 80 : 40,
+          // Reacting to an approval is a quick note to the owner: answer fast.
+          effort: task.createdBy === DECISION ? "low" : undefined,
+          maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
+          abortController: ac,
+        });
+      // The conversation to continue: this task's own run (after an approval) or the one
+      // that led to this follow-up. Gone from ~/.claude, or refusing to load: start
+      // fresh with the history in the prompt instead.
+      const resume = task.sessionId && sessionExists(cwd, task.sessionId) ? task.sessionId : undefined;
+      if (task.sessionId && !resume) ev("text", "Earlier conversation not found; continuing from the task history.");
+      let r = await attempt(resume);
+      if (!r.ok && resume && r.costUsd === 0 && !ac.signal.aborted) {
+        ev("text", `Couldn't resume the earlier conversation (${r.error}); starting fresh.`);
+        r = await attempt(undefined);
+      }
+      return r;
     };
 
     const r = useBrowser
@@ -280,16 +318,28 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     if (r.sessionId) setMate({ sessionId: r.sessionId });
     if (!r.ok) throw Object.assign(new Error(r.error ?? "Run failed"), { partial: r.text, costUsd: r.costUsd });
 
-    setTask({ status: "done", result: r.text, costUsd: r.costUsd, finishedAt: new Date() });
+    // Spend adds up over a task's runs (before and after an approval, retries).
+    const costUsd = spent(task.id) + r.costUsd;
+    setTask({ status: "done", result: r.text, costUsd, finishedAt: new Date() });
     setMate({ state: "idle", currentActivity: null });
     ev("task_done", `${teammate.name} finished "${task.title}"`, { costUsd: r.costUsd });
     onTaskFinished(task.id);
   } catch (err) {
-    if (ac.signal.aborted) {
+    const reason = ac.signal.aborted ? ac.signal.reason : undefined;
+    if (reason instanceof ApprovalWait) {
+      // The task waits (set when it asked) and the lane is free; its decision queues
+      // the continuation. The partial run's spend isn't known: the result tells it later.
+      return;
+    }
+    if (reason instanceof CancelledError) {
+      // cancelTask already closed the task and its approvals; just let the teammate go.
+      db.update(schema.tasks).set({ result: "Cancelled by the owner." }).where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.status, "cancelled"))).run();
+      setMate({ state: "idle", currentActivity: null });
+      ev("text", `${teammate.name} stopped "${task.title}".`);
+      return;
+    }
+    if (isPaused(ac.signal)) {
       // Folder closed: back to the queue; it starts over when the folder is reopened.
-      db.delete(schema.approvals)
-        .where(and(eq(schema.approvals.taskId, task.id), eq(schema.approvals.status, "pending")))
-        .run();
       setTask({ status: "queued", startedAt: null });
       setMate({ state: "idle", currentActivity: null });
       throw new PausedError();
@@ -299,14 +349,36 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     setTask({
       status: "failed",
       result: e.partial ? `${message}\n\n---\n${e.partial}` : message,
-      costUsd: e.costUsd ?? 0,
+      costUsd: spent(task.id) + (e.costUsd ?? 0),
       finishedAt: new Date(),
     });
     setMate({ state: "error", currentActivity: `Task failed: ${message}`.slice(0, 140) });
     ev("task_failed", `${teammate.name} couldn't finish "${task.title}": ${message}`, { costUsd: e.costUsd ?? 0 });
     onTaskFinished(task.id);
     throw err;
+  } finally {
+    runningTasks.delete(task.id);
   }
+}
+
+function spent(taskId: string) {
+  return db.select({ c: schema.tasks.costUsd }).from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()?.c ?? 0;
+}
+
+/** The message that resumes a run after the owner decided. */
+function decisionPrompt(a: Approval) {
+  const note = a.note ? ` Their note: "${a.note}".` : "";
+  return a.status === "approved"
+    ? `The owner approved your request: ${a.summary}.${note}\n\nThat call is now allowed: make it again exactly as before (same tool, same arguments; anything different is a new request that needs approval again), then carry on with the task and finish with your summary for the owner.`
+    : `The owner rejected your request: ${a.summary}.${note}\n\nDon't do it, and don't ask again for the same thing. Follow their note if there is one: adjust and save a revised draft with save_deliverable, or finish the task without that step. Say in your summary what you didn't do and why.`;
+}
+
+/** The same, for a run that starts over because its session is gone. */
+function decisionRecap(a: Approval) {
+  const note = a.note ? ` Their note: "${a.note}".` : "";
+  return a.status === "approved"
+    ? `## Earlier in this task\nYou asked the owner for approval to: ${a.summary}. They approved.${note} That call is allowed once, with exactly these arguments (anything different needs approval again):\n\`\`\`json\n${JSON.stringify(a.input)}\n\`\`\`\nMake it when you reach that step, then finish the task.`
+    : `## Earlier in this task\nYou asked the owner for approval to: ${a.summary}. They rejected it.${note} Don't do it and don't ask again for the same thing; adjust or leave that step out, and say so in your summary.`;
 }
 
 /**
@@ -486,7 +558,7 @@ function buildSystemPrompt(
     : teammate.autonomy === "auto"
       ? `Only ${channels} really reach the outside world, and there you act on your own within your role.`
       : teammate.autonomy === "ask"
-        ? `Only ${channels} really reach the outside world, and there the owner approves each action first; if they reject it, follow their note.`
+        ? `Only ${channels} really reach the outside world, and there the owner approves each action first; if they reject it, follow their note. Asking pauses your work until they answer (sometimes hours), and you continue right here with their decision: do everything else first and ask last.`
         : `Only ${channels} really reach the outside world, and you're draft-only there: you never send, post or change anything, only read and prepare.`;
 
   return `You are ${teammate.name}, the ${teammate.title} on the AI team of ${business.name}${business.website ? ` (${business.website})` : ""}.
@@ -547,7 +619,7 @@ async function describeAttachments(files: string[]) {
   return lines.join("\n");
 }
 
-function buildPrompt(task: Task, history = "", files = "") {
+function buildPrompt(task: Task, history = "", files = "", resumed = false) {
   const from =
     task.createdBy === REPORT
       ? "Your team finished work you delegated. Report back to the owner in this chat."
@@ -564,26 +636,15 @@ function buildPrompt(task: Task, history = "", files = "") {
             : "This is a message from the business owner.";
   const thread = task.createdBy.startsWith(HUMAN) ? humanThread(task.createdBy.slice(HUMAN.length), 20) : "";
   const past =
-    (history ? `## Your recent conversation with the owner\n${history}\n\n` : "") +
+    (history ? `## Your recent tasks\n${history}\n\n` : "") +
     (thread ? `## WhatsApp conversation with ${teammateName(task.createdBy.slice(HUMAN.length))}\n${thread}\n\n` : "");
   const attached = files
     ? `\n\n## Attached files\nThese are in your folder at these paths (Read images; use inspect_media and extract_frames for videos; staticFile("<path>") in a video):\n${files}`
     : "";
-  return `${past}${from}\n\nTask: ${task.title}\n\n${task.instructions}${attached}`;
+  const continuing = resumed ? "This continues the conversation above (the task that led here). " : "";
+  return `${past}${continuing}${from}\n\nTask: ${task.title}\n\n${task.instructions}${attached}`;
 }
 
 function teammateName(id: string) {
   return db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, id)).get()?.name ?? "a teammate";
-}
-
-function sleep(ms: number, signal: AbortSignal) {
-  return new Promise<void>((resolve) => {
-    const t = setTimeout(done, ms);
-    function done() {
-      clearTimeout(t);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-    signal.addEventListener("abort", done, { once: true });
-  });
 }

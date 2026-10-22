@@ -4,8 +4,8 @@ import { refresh } from "next/cache";
 import { decide } from "@/lib/approvals";
 
 /**
- * Approve or reject a pending outward action. The worker is polling the row and
- * continues the teammate's run (and logs approval_granted/rejected) once decided.
+ * Approve or reject a pending outward action. The decision queues the waiting task's
+ * continuation (the worker resumes its Claude session) and logs approval_granted/rejected.
  * FormData: businessId, approvalId, decision ("approved" | "rejected"), note?.
  */
 export async function decideApproval(formData: FormData) {

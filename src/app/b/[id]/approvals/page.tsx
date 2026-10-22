@@ -116,7 +116,7 @@ async function Content({ params }: Params) {
                     {a.note ? ` · “${a.note}”` : ""}
                   </div>
                 </div>
-                <Badge tone={a.status === "approved" ? "green" : "red"}>{a.status}</Badge>
+                <Badge tone={a.status === "approved" ? "green" : a.status === "rejected" ? "red" : "neutral"}>{a.status}</Badge>
               </summary>
               <div className="border-t border-border p-3">
                 <ApprovalInput a={a} businessId={id} deliverables={data.deliverables} />

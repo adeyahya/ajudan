@@ -10,10 +10,10 @@
  * worker aborts what's running, puts those jobs back in the old folder's queue
  * (they run again when it's reopened), stops its schedules and moves on.
  */
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
-import { CAPABILITY } from "@/lib/capabilities";
+import { supersedeStaleApprovals } from "@/lib/approvals";
 import { logEvent } from "@/lib/events";
 import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
@@ -22,7 +22,7 @@ import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker
 import { handlers } from "./handlers";
 import { startMaintenance, stopMaintenance } from "./maintenance";
 import { startScheduler, stopScheduler } from "./scheduler";
-import { endFolderSession, PausedError } from "./session";
+import { CancelledError, endFolderSession, PausedError, runningTasks } from "./session";
 import { startHumanInbox, stopHumanInbox } from "./humans";
 import { startWhatsappSync, stopWhatsappSync } from "./whatsapp-sync";
 
@@ -81,12 +81,25 @@ function activate(dir: string | null) {
     return;
   }
   requeueStaleJobs();
-  // Approvals left waiting by interrupted tasks: those tasks run again and ask afresh.
-  // (Capability requests don't belong to a running task: they stay.)
-  db.delete(schema.approvals).where(and(eq(schema.approvals.status, "pending"), ne(schema.approvals.toolName, CAPABILITY))).run();
+  // Tasks waiting for an approval keep waiting (their session resumes on the decision);
+  // approvals asked by a run that restarts from scratch are superseded, it asks afresh.
+  const superseded = supersedeStaleApprovals();
+  if (superseded) console.log(`[worker] ${superseded} approval request(s) superseded by restarted tasks`);
+  // Nothing is running now: "working" and "error" teammates are idle; "waiting" stays
+  // only while the teammate really has a task waiting on the owner or a person.
   db.update(schema.teammates)
     .set({ state: "idle", currentActivity: null })
-    .where(inArray(schema.teammates.state, ["working", "waiting"]))
+    .where(inArray(schema.teammates.state, ["working", "error"]))
+    .run();
+  const stillWaiting = db
+    .selectDistinct({ id: schema.tasks.teammateId })
+    .from(schema.tasks)
+    .where(inArray(schema.tasks.status, ["waiting_approval", "waiting_human"]))
+    .all()
+    .map((t) => t.id);
+  db.update(schema.teammates)
+    .set({ state: "idle", currentActivity: null })
+    .where(and(eq(schema.teammates.state, "waiting"), stillWaiting.length ? notInArray(schema.teammates.id, stillWaiting) : sql`1`))
     .run();
   startMaintenance(dir); // daily backup and pruning; the first run is now
   if (!once) {
@@ -150,6 +163,19 @@ function noteActivationFailure(dir: string, err: unknown) {
 }
 
 let lastBlockedTry = 0;
+let lastCancelCheck = 0;
+
+/** The owner pressed Cancel on a running task (src/lib/tasks.ts): stop its Claude call. */
+function abortCancelledRuns() {
+  if (!runningTasks.size || Date.now() - lastCancelCheck < 2000) return;
+  lastCancelCheck = Date.now();
+  const cancelled = db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(inArray(schema.tasks.id, [...runningTasks.keys()]), eq(schema.tasks.status, "cancelled")))
+    .all();
+  for (const { id } of cancelled) runningTasks.get(id)?.abort(new CancelledError());
+}
 
 function tick() {
   if (switching) return;
@@ -167,6 +193,7 @@ function tick() {
     return;
   }
   if (!folder) return;
+  abortCancelledRuns();
   for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["team", CONCURRENCY]] as const) {
     while (running[lane] < max) {
       const job = claimJob(lane);

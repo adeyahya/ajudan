@@ -7,7 +7,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Business, Teammate } from "@/db/schema";
-import { approvalCode, decide, findPendingByCode } from "@/lib/approvals";
+import { approvalCode, decide, findByCode, findPendingByCode } from "@/lib/approvals";
 import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
 import { isServablePath, mediaKind } from "@/lib/media";
 import { isLinked } from "@/lib/whatsapp";
@@ -99,6 +99,26 @@ export function parseAnswer(raw: string, isOpenCode: (code: string) => boolean) 
   return { decision, target, note };
 }
 
+/** Why a code the owner typed isn't open: decided, replaced by a restarted task, or unknown. */
+export function explainClosedCode(business: Pick<Business, "id" | "language">, code: string) {
+  const CODE = code.toUpperCase();
+  const was = findByCode(business.id, code).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  if (was?.status === "superseded") {
+    return t(
+      business,
+      `Permintaan *${CODE}* (${was.summary}) sudah diganti: tugasnya dimulai ulang dan akan minta persetujuan lagi dengan kode baru.`,
+      `Request *${CODE}* (${was.summary}) was replaced: its task started over and will ask again with a new code.`,
+    );
+  }
+  if (was?.status === "cancelled") {
+    return t(business, `Permintaan *${CODE}* (${was.summary}) sudah dibatalkan bersama tugasnya.`, `Request *${CODE}* (${was.summary}) was cancelled with its task.`);
+  }
+  if (was) {
+    return t(business, `Permintaan *${CODE}* sudah diputuskan: ${was.status === "approved" ? "disetujui" : "ditolak"}.`, `Request *${CODE}* was already decided: ${was.status}.`);
+  }
+  return t(business, `Kode *${CODE}* tidak ditemukan.`, `No request with code *${CODE}*.`);
+}
+
 /** Is this message only an approval answer (so it can be handled without the usual wait)? */
 export function isApprovalAnswer(text: string) {
   return parseAnswer(text, () => true) !== null;
@@ -153,7 +173,7 @@ export async function handleOwnerAnswers(business: Business, owner: Teammate, te
       continue;
     }
     if (!chosen.length) {
-      await reply(t(business, `Kode *${target.toUpperCase()}* tidak ditemukan atau sudah diputuskan.`, `No open request with code *${target.toUpperCase()}* (or it was already decided).`));
+      await reply(explainClosedCode(business, target));
       continue;
     }
     for (const a of chosen) {

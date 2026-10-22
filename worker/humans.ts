@@ -293,6 +293,8 @@ function routeReply(business: Business, human: Teammate, request: Task | undefin
     createdBy: `${HUMAN}${human.id}`,
     // Keeps the manager's report chain: the follow-up belongs to the owner's request.
     parentTaskId: asking?.parentTaskId ?? null,
+    // The teammate that asked carries on in the same conversation.
+    sessionId: asking && target.id === asking.teammateId ? asking.sessionId : null,
     attachments: files,
   });
   console.log(`[humans] ${human.name} replied → ${target.name}`);
