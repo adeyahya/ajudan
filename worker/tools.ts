@@ -12,6 +12,7 @@ import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { slugify } from "@/lib/folders";
+import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from "@/lib/free-assets";
 import { renderHtmlToPng } from "@/lib/images";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
@@ -32,6 +33,8 @@ export const SAFE_BIZ_TOOLS = [
   "inspect_media",
   "extract_frames",
   "render_video",
+  "find_free_assets",
+  "download_free_asset",
   "team_status",
   "task_results",
   "pending_approvals",
@@ -156,7 +159,14 @@ export function createBizServer(ctx: BizContext) {
           .map((x) => path.join("media", x.f));
         if (!files.length) return ok("No matching files in the media library.");
         linkIntoWorkspace(files, ctx.cwd);
-        const lines = await Promise.all(files.map(async (rel) => `- ${describeMedia(rel, await mediaInfo(path.join(dataDir(), rel)))}`));
+        const credits = readCredits();
+        const lines = await Promise.all(
+          files.map(async (rel) => {
+            const c = credits[rel];
+            const from = c ? ` (free asset: "${c.title}" by ${c.creator}, ${c.license}${c.creditRequired ? `, credit: ${c.attribution}` : ""})` : "";
+            return `- ${describeMedia(rel, await mediaInfo(path.join(dataDir(), rel)))}${from}`;
+          }),
+        );
         return ok(lines.join("\n"));
       },
     ),
@@ -190,6 +200,56 @@ export function createBizServer(ctx: BizContext) {
         return ok(
           `Read these to look at the video:\n${frames.map((f) => `- ${path.relative(ctx.cwd, f.file)} (at ${f.atSec}s)`).join("\n")}`,
         );
+      },
+    ),
+
+    tool(
+      "find_free_assets",
+      "Search free music, sound effects or photos that are safe for business use (CC0, public domain or CC BY via Openverse: Jamendo, Freesound, Flickr, Wikimedia). Use it for background music and sound effects in videos. Search in English with mood/genre words (e.g. \"upbeat acoustic\", \"lofi chill\", \"whoosh\", \"pop click\"). Limited to ~200 searches a day: search with purpose.",
+      {
+        type: z.enum(["music", "sound_effect", "image"]),
+        query: z.string().describe('Mood, genre or sound, e.g. "upbeat happy ukulele"'),
+        min_seconds: z.number().min(0).optional().describe("Audio: shortest acceptable length"),
+        max_seconds: z.number().min(0).optional().describe("Audio: longest acceptable length"),
+        limit: z.number().int().min(1).max(20).optional(),
+      },
+      async (a) => {
+        try {
+          const found = await searchFreeAssets({
+            type: a.type,
+            query: a.query,
+            minSeconds: a.min_seconds,
+            maxSeconds: a.max_seconds,
+            limit: a.limit ?? 8,
+          });
+          if (!found.length) return ok("Nothing found. Try broader or different words (in English).");
+          return ok(`${found.map(describeAsset).join("\n")}\n\nDownload one with download_free_asset(id, type). You can't listen to tracks, so pick by title, tags, length and source, and prefer several short candidates over one guess.`);
+        } catch (err) {
+          return fail((err as Error).message);
+        }
+      },
+    ),
+
+    tool(
+      "download_free_asset",
+      "Download a result of find_free_assets into the business's media library (and your folder). Returns its media/… path for staticFile() and the credit line to put in the caption if the license needs one.",
+      { id: z.string().describe("The id from find_free_assets"), type: z.enum(["music", "sound_effect", "image"]) },
+      async (a) => {
+        try {
+          const { path: rel, asset } = await downloadFreeAsset(a.id, a.type);
+          linkIntoWorkspace([rel], ctx.cwd);
+          ev("asset_downloaded", `${teammate.name} downloaded "${asset.title}" by ${asset.creator} (${asset.license})`, { path: rel });
+          const info = await mediaInfo(path.join(dataDir(), rel));
+          return ok(
+            `Saved ${describeMedia(rel, info)}. Use staticFile("${rel}").${
+              asset.creditRequired
+                ? ` License ${asset.license}: credit is required. Put this in the caption or posting notes: 🎵 "${asset.title}" by ${asset.creator} (${asset.license})${asset.pageUrl ? ` ${asset.pageUrl}` : ""}`
+                : ` License ${asset.license}: no credit needed (a credit is still nice).`
+            }`,
+          );
+        } catch (err) {
+          return fail(`Download failed: ${(err as Error).message}`);
+        }
       },
     ),
 

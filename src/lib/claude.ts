@@ -175,6 +175,10 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Watching ${baseName(input.file)}`;
     case "mcp__biz__render_video":
       return `Rendering video ${baseName(input.file)}`;
+    case "mcp__biz__find_free_assets":
+      return `Searching free ${String(input.type ?? "assets").replace("_", " ")}: ${short(input.query, 40)}`;
+    case "mcp__biz__download_free_asset":
+      return "Downloading a free asset";
     case "mcp__biz__render_image":
       return `Designing ${short(input.name, 40)}`;
     case "mcp__biz__save_deliverable":

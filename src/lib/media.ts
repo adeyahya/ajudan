@@ -60,7 +60,8 @@ export async function mediaInfo(abs: string): Promise<MediaInfo> {
       streams?: { codec_type?: string; width?: number; height?: number; avg_frame_rate?: string; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] }[];
     };
     const v = j.streams?.find((s) => s.codec_type === "video");
-    if (v?.width && v.height) {
+    // (MP3 cover art shows up as a video stream: ignore it for audio.)
+    if (v?.width && v.height && kind !== "audio") {
       // Phone footage is often stored landscape with a rotation flag.
       const rot = Math.abs(Number(v.tags?.rotate ?? v.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? 0));
       [info.width, info.height] = rot === 90 || rot === 270 ? [v.height, v.width] : [v.width, v.height];
