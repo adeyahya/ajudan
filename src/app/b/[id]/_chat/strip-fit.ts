@@ -1,5 +1,5 @@
 /** The room is drawn at most this many times the strip's height; the rest is cropped top and bottom. */
-export const MAX_OVERSCAN = 1.75;
+export const MAX_OVERSCAN = 2.25;
 
 /**
  * Where the room sits in the strip: as wide as fits, cropped top and bottom around the

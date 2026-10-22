@@ -82,4 +82,53 @@ for (const [tm, title] of [
     .run();
 }
 
+// A week of outcomes so the chat home's XP, levels, trust and streak have something to show
+// (src/lib/progress.ts): finished tasks, a WhatsApp chat answered, verdicts and approvals.
+const DAY = 24 * 60 * 60 * 1000;
+const ago = (days: number, hour = 10) => {
+  const d = new Date(Date.now() - days * DAY);
+  d.setHours(hour, 0, 0, 0);
+  return d;
+};
+for (const [tm, title, days, createdBy] of [
+  [research, "Competitor pricing scan", 6, "user"],
+  [content, "Blog post: 5 gift ideas", 5, "user"],
+  [social, "Captions for the new collection", 4, "user"],
+  [social, "Customer asked about custom orders", 3, "system:reply"],
+  [lead, "Weekly growth plan", 2, "schedule"],
+  [content, "Newsletter draft", 1, "user"],
+] as const) {
+  db.insert(schema.tasks)
+    .values({ businessId: business.id, teammateId: tm.id, title, instructions: title, status: "done", result: `Done: ${title}`, createdBy, createdAt: ago(days, 9), finishedAt: ago(days, 11) })
+    .run();
+}
+for (const [tm, title, status, revised] of [
+  [content, "Gift guide carousel", "published", false],
+  [social, "Story poll for Friday", "approved", false],
+  [social, "Launch post", "approved", true],
+  [research, "Supplier shortlist", "rejected", false],
+] as const) {
+  db.insert(schema.deliverables)
+    .values({
+      businessId: business.id,
+      teammateId: tm.id,
+      kind: "social_post",
+      title,
+      content: `Demo content: ${title}`,
+      status,
+      versions: revised ? [{ title, content: "Earlier draft", attachments: [], savedAt: ago(2).toISOString(), byTeammateId: tm.id }] : [],
+      createdAt: ago(2),
+    })
+    .run();
+}
+// Approvals decided the same day for the last three days (a 3-day clean-queue streak), one waiting today.
+for (const days of [3, 2, 1]) {
+  db.insert(schema.approvals)
+    .values({ businessId: business.id, teammateId: social.id, toolName: "send_message", input: {}, summary: "Reply to a customer", status: "approved", createdAt: ago(days, 9), decidedAt: ago(days, 15) })
+    .run();
+}
+db.insert(schema.approvals)
+  .values({ businessId: business.id, teammateId: content.id, toolName: "send_message", input: {}, summary: "Send the newsletter to 120 subscribers", status: "pending" })
+  .run();
+
 console.log(business.id);
