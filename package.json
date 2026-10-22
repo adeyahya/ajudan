@@ -12,7 +12,9 @@
     "worker:once": "tsx worker/index.ts --once",
     "typecheck": "next typegen && tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/db-migrate.ts"
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "app": "next build && open -n node_modules/electron/dist/Electron.app --args \"$PWD/electron\"",
+    "app:package": "node scripts/package-app.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.304",
@@ -52,6 +54,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@tailwindcss/turbopack": "^4",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
@@ -60,6 +63,7 @@
     "@types/react-dom": "^19",
     "concurrently": "^10.0.6",
     "drizzle-kit": "^0.31.11",
+    "electron": "44.7.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",

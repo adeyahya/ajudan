@@ -42,3 +42,6 @@ next-env.d.ts
 /data
 /.next-*/
 /.test-data/
+
+# Ajudan.app builds
+/dist

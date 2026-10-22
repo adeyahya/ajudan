@@ -16,6 +16,7 @@ import type { Job, JobKind } from "@/db/schema";
 import { readConfig } from "@/lib/folders";
 import { claimJob, finishJob, requeueJob, requeueStaleJobs } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
+import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
 import { startScheduler, stopScheduler } from "./scheduler";
 import { endFolderSession, PausedError } from "./session";
@@ -29,6 +30,8 @@ let running = 0;
 const inflight = new Set<Promise<void>>();
 let folder: string | null = null;
 let switching = false;
+/** A folder another worker (another Ajudan window, or `pnpm dev`) is working on. */
+let blocked: string | null = null;
 
 /** Which folder the worker should be working on right now. */
 function wantedFolder(): string | null {
@@ -56,6 +59,16 @@ async function runJob(job: Job) {
 
 /** Open a folder: recover leftovers from a crash or a previous switch, start schedules. */
 function activate(dir: string | null) {
+  if (dir && !acquireWorkerLock(dir)) {
+    if (blocked !== dir) {
+      console.log(`[worker] ${dir} is already being worked on by another Ajudan worker (pid ${folderWorker(dir)?.pid}); waiting`);
+    }
+    blocked = dir;
+    pinDataDir(null);
+    folder = null;
+    return;
+  }
+  blocked = null;
   pinDataDir(dir);
   folder = dir;
   if (!dir) {
@@ -85,13 +98,24 @@ async function switchTo(dir: string | null) {
   stopHumanInbox();
   endFolderSession(); // aborts running Claude calls; their jobs go back to the queue
   await Promise.allSettled([...inflight]);
+  if (folder) releaseWorkerLock(folder);
   activate(dir);
   switching = false;
 }
 
+let lastBlockedTry = 0;
+
 function tick() {
   if (switching) return;
   const wanted = wantedFolder();
+  // Another worker has it: try again now and then.
+  if (wanted && wanted === blocked) {
+    if (Date.now() - lastBlockedTry > 5000) {
+      lastBlockedTry = Date.now();
+      activate(wanted);
+    }
+    return;
+  }
   if (wanted !== folder) {
     void switchTo(wanted);
     return;
@@ -113,10 +137,14 @@ function tick() {
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     stopWhatsappSync();
+    if (folder) releaseWorkerLock(folder);
     process.exit(0);
   });
 }
-process.on("exit", () => stopWhatsappSync());
+process.on("exit", () => {
+  stopWhatsappSync();
+  if (folder) releaseWorkerLock(folder);
+});
 
 async function main() {
   activate(wantedFolder());

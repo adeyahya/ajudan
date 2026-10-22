@@ -1,0 +1,7 @@
+{
+  "name": "ajudan-app",
+  "productName": "Ajudan",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs"
+}

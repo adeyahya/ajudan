@@ -7,10 +7,12 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb, schema } from "@/db";
-import { folderInfo, forgetFolder, isBusinessFolder, setActiveFolder, suggestFolder } from "@/lib/folders";
+import { folderInfo, forgetFolder, isBusinessFolder, rememberFolder, setActiveFolder, suggestFolder } from "@/lib/folders";
+import { IN_APP, routeFor } from "@/lib/app-mode";
 import { parseLanguage } from "@/lib/language";
 
-export type FolderFormState = { error?: string };
+/** openDir: in the desktop app, the folder to open in a new window. */
+export type FolderFormState = { error?: string; openDir?: string };
 
 function normalizeWebsite(raw: string) {
   const w = raw.trim();
@@ -25,11 +27,6 @@ function expandPath(raw: string) {
   return path.resolve(p === "~" ? os.homedir() : p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
 }
 
-function routeFor(businessId: string, status: string | null) {
-  if (status === "onboarding") return `/b/${businessId}/onboarding`;
-  if (status === "active") return `/b/${businessId}/manager`;
-  return `/b/${businessId}/team`;
-}
 
 /** New business = new folder. Opens it, then starts the interview. */
 export async function createBusiness(_prev: FolderFormState, formData: FormData): Promise<FolderFormState> {
@@ -54,6 +51,12 @@ export async function createBusiness(_prev: FolderFormState, formData: FormData)
     db.update(schema.businesses).set({ busy: false }).where(eq(schema.businesses.id, biz.id)).run();
     throw err;
   }
+  // Desktop app: the new business opens in its own window (and lands on the interview).
+  if (IN_APP) {
+    rememberFolder(dir);
+    revalidatePath("/", "layout");
+    return { openDir: dir };
+  }
   setActiveFolder(dir);
   revalidatePath("/", "layout"); // header shows the open business
   redirect(`/b/${biz.id}/onboarding`);
@@ -75,6 +78,11 @@ export async function openFolderByPath(_prev: FolderFormState, formData: FormDat
   if (!fs.existsSync(dir)) return { error: `${dir} doesn't exist` };
   if (!isBusinessFolder(dir)) return { error: `${dir} has no ajudan.db, so it isn't a business folder` };
   getDb(dir); // upgrade its schema if it came from an older version
+  if (IN_APP) {
+    rememberFolder(dir);
+    revalidatePath("/", "layout");
+    return { openDir: dir };
+  }
   setActiveFolder(dir);
   revalidatePath("/", "layout");
   const info = folderInfo(dir);

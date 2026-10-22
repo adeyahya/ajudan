@@ -12,7 +12,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Business, Task, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
-import { HUMAN, humanJid, listHumans, openRequest, recordHumanMessage, replyHint, senderLine } from "@/lib/humans";
+import { HUMAN, humanJid, isAcknowledgement, listHumans, openRequest, recordHumanMessage, replyHint, senderLine } from "@/lib/humans";
 import { getManager } from "@/lib/manager";
 import { isServablePath, newMediaPath } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
@@ -212,6 +212,20 @@ async function saveMedia(jid: string, m: WaMessage) {
  * follow-up is still queued, add to it instead of starting another run.
  */
 function routeReply(business: Business, human: Teammate, request: Task | undefined, texts: string[], files: string[]) {
+  // "oke sinta", "makasih 🙏" after the work is wrapped up: recorded in the conversation,
+  // but no one needs to act. ("iya" to an open request or a question is an answer.)
+  const names = db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.businessId, business.id)).all().map((t) => t.name);
+  const lastOut = db
+    .select({ text: schema.humanMessages.text })
+    .from(schema.humanMessages)
+    .where(and(eq(schema.humanMessages.humanId, human.id), eq(schema.humanMessages.direction, "out")))
+    .orderBy(desc(schema.humanMessages.sentAt))
+    .get();
+  const askedSomething = !!lastOut && /\?\s*\S{0,3}\s*$/.test(lastOut.text.trim());
+  if (!request && !askedSomething && !files.length && texts.length && texts.every((t) => isAcknowledgement(t, names))) {
+    console.log(`[humans] ${human.name}: acknowledgement only, not handed over`);
+    return;
+  }
   const asking = request?.parentTaskId
     ? db.select().from(schema.tasks).where(eq(schema.tasks.id, request.parentTaskId)).get()
     : undefined;

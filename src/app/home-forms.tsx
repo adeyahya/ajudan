@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button, Input, Label } from "@/components/kit";
+import { appBridge } from "@/lib/app-bridge";
 import { DEFAULT_LANGUAGE } from "@/lib/language";
 import { createBusiness, openFolderByPath, type FolderFormState } from "./actions";
 import { LanguageSelect } from "./language-select";
@@ -16,12 +17,41 @@ function Submit({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Desktop app: a folder the server just created or found opens in its own window. */
+function useOpenInWindow(state: FolderFormState) {
+  useEffect(() => {
+    if (state.openDir) void appBridge()?.openFolder(state.openDir);
+  }, [state]);
+}
+
+/** Desktop app: open (or bring forward) the business's window. */
+export function AppOpenButton({ dir, label }: { dir: string; label: string }) {
+  const [opening, setOpening] = useState(false);
+  return (
+    <Button
+      type="button"
+      disabled={opening}
+      onClick={async () => {
+        setOpening(true);
+        try {
+          await appBridge()?.openFolder(dir);
+        } finally {
+          setTimeout(() => setOpening(false), 1500);
+        }
+      }}
+    >
+      {opening ? "Opening…" : label}
+    </Button>
+  );
+}
+
 const ErrorLine = ({ state }: { state: FolderFormState }) =>
   state.error ? <p className="text-sm text-bad">{state.error}</p> : null;
 
 /** New business = new folder (defaults to ~/Ajudan/<name>). */
 export function NewBusinessForm({ home }: { home: string }) {
   const [state, action] = useActionState(createBusiness, {});
+  useOpenInWindow(state);
   const [name, setName] = useState("");
   const shown = home.replace(/^\/Users\/[^/]+/, "~");
   return (
@@ -55,6 +85,7 @@ export function NewBusinessForm({ home }: { home: string }) {
 /** Open a business folder that isn't in the list (moved, copied, restored). */
 export function OpenFolderForm() {
   const [state, action] = useActionState(openFolderByPath, {});
+  useOpenInWindow(state);
   return (
     <form action={action} className="grid gap-2">
       <div className="flex flex-wrap items-end gap-2">

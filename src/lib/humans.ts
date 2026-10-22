@@ -92,6 +92,25 @@ export function humanThread(humanId: string, limit = 20) {
     .join("\n");
 }
 
+const ACK_WORDS = new Set(
+  "ok oke okay okey okk oce sip siap siapp mantap mantul makasih makasi trims terima kasih thanks thank you thx ty tq noted baik iya ya yaa yes yup sure sama sama2 np mas mbak kak kakak bang pak bu jeng deh".split(" "),
+);
+
+/**
+ * "oke sinta", "siap kak 👍", "makasih ya": nothing for the team to act on. Names of
+ * the team count as filler.
+ */
+export function isAcknowledgement(text: string, names: string[] = []) {
+  const words = text
+    .toLowerCase()
+    .replace(/[.,!?~:;()"'*_-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length || words.length > 6) return false;
+  const filler = new Set(names.map((n) => n.toLowerCase()));
+  return words.every((w) => ACK_WORDS.has(w) || filler.has(w) || /^[\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]+$/u.test(w));
+}
+
 /** First line of a WhatsApp message from an AI teammate: says who it is, and that it's an AI. */
 export function senderLine(teammate: Pick<Teammate, "name"> | null, businessName: string, language: string) {
   if (!teammate) return "";

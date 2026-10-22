@@ -53,6 +53,13 @@ export function setActiveFolder(dir: string) {
   writeConfig({ activeFolder: abs, recent: [abs, ...c.recent.filter((r) => r !== abs)].slice(0, 20) });
 }
 
+/** Add `dir` to the recent list without opening it (desktop app windows). */
+export function rememberFolder(dir: string) {
+  const abs = path.resolve(dir);
+  const c = readConfig();
+  writeConfig({ activeFolder: c.activeFolder, recent: [abs, ...c.recent.filter((r) => r !== abs)].slice(0, 20) });
+}
+
 export function forgetFolder(dir: string) {
   const abs = path.resolve(dir);
   const c = readConfig();

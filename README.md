@@ -15,6 +15,19 @@ pnpm dev        # creates the SQLite schema, starts Next.js on :3000 and the wor
 
 Open http://localhost:3000, add your business and website, and do the interview.
 
+**Or use the desktop app** (several businesses at once, one window each):
+
+```bash
+pnpm app                    # build, then open Ajudan (Electron)
+pnpm app:package --install  # make Ajudan.app and put it in ~/Applications
+```
+
+- Every business window runs its own web server and worker pinned to its folder, so each open business keeps working at the same time. **File → Businesses…** (⌘N) or the header chip opens the list; **Open in a window** opens another business next to the first.
+- The app reopens the windows you had open. Closing a window pauses that business (running work goes back to its queue).
+- `Ajudan.app` is a small shell that runs this repo with your installed Node. After changing code, run `pnpm app` (or `pnpm build`) and reopen it. Logs are in `<folder>/logs/` (**File → Show Logs**).
+- Because it's its own app, macOS asks for permissions (for example for Chrome or your folders) for "Ajudan" once and remembers them, instead of asking the terminal that ran `pnpm dev`.
+- A folder has one worker at a time (`<folder>/.worker.lock`). Quit `pnpm dev` before opening its business in the app; until then the app's window waits.
+
 **Talk to your manager.** Each hired team gets a manager (the **Manager** tab, where a business opens). Ask the manager anything:
 - **Quick questions:** status, advice and "what needs my approval?" get answered directly.
 - **Real work:** goes to the right teammates. Each delegation shows up under the manager's reply with live status.
