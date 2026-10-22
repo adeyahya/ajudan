@@ -4,11 +4,11 @@ import { db, schema } from "@/db";
 import type { ContextPage, ContextSuggestion } from "@/db/schema";
 import { listLibrary } from "@/lib/assets";
 import { listContacts } from "@/lib/contacts";
-import { compactDiff, diffLines, ensureContextWorkspace, listPages, normalizeMarkdown, pendingSuggestions, readerMode, readerRows } from "@/lib/context";
+import { compactDiff, diffLines, ensureContextWorkspace, listPages, normalizeMarkdown, pageIcon, pendingSuggestions, readerMode, readerRows, SECTIONS } from "@/lib/context";
 import { MANAGER_ROLE } from "@/lib/roles";
-import type { Mate, SuggestionView } from "./workspace";
+import type { CoverImage, Mate, SuggestionView, TreePage } from "./types";
 
-/** Server-side reads for the Context pages (call inside Suspense: they await connection()). */
+/** Server-side reads for the Konteks pages (call inside Suspense: they await connection()). */
 
 export async function contextBase(businessId: string) {
   await connection();
@@ -27,6 +27,37 @@ export async function contextBase(businessId: string) {
     mateViews: mates.map((m): Mate => ({ id: m.id, name: m.name, color: m.color, title: m.title })),
     managerId: mates.find((m) => m.roleKey === MANAGER_ROLE.key)?.id ?? null,
   };
+}
+
+/** The tree's rows (listPages order: sortOrder, then age), with pending-suggestion counts. */
+export async function treePages(businessId: string): Promise<TreePage[]> {
+  await connection();
+  ensureContextWorkspace(businessId);
+  const pending = pendingSuggestions(businessId);
+  return listPages(businessId).map((p) => ({
+    id: p.id,
+    title: p.title,
+    section: p.section,
+    kind: p.kind,
+    key: p.key,
+    parentId: p.parentId,
+    icon: pageIcon(p),
+    pending: pending.filter((s) => s.pageId === p.id).length,
+  }));
+}
+
+/**
+ * The page /context opens on without ?page=: the first top-level page in tree order
+ * (the tree highlights the same one; see firstPageId in context-tree.tsx).
+ */
+export function firstPage(pages: ContextPage[]) {
+  const ids = new Set(pages.map((p) => p.id));
+  const top = pages.filter((p) => !p.parentId || !ids.has(p.parentId));
+  for (const s of SECTIONS) {
+    const hit = top.find((p) => p.section === s);
+    if (hit) return hit;
+  }
+  return pages[0];
 }
 
 export function readersFor(page: ContextPage, mates: { id: string }[], rows: ReturnType<typeof readerRows>) {
@@ -67,6 +98,14 @@ export function galleryAssets(businessId: string) {
     .filter((a) => a.tags.length)
     .slice(0, 300)
     .map((a) => ({ path: a.path, title: a.title, tags: a.tags, kind: a.kind, usedIn: uses.get(a.path) ?? 0 }));
+}
+
+/** Library images for a page cover (any image, tagged or not). */
+export function coverImages(businessId: string): CoverImage[] {
+  return listLibrary(businessId)
+    .filter((a) => a.kind === "image")
+    .slice(0, 120)
+    .map((a) => ({ path: a.path, title: a.title }));
 }
 
 export function mentionContacts(businessId: string) {

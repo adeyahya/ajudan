@@ -1,0 +1,95 @@
+/*
+ * The Konteks editor's menus, in the app's design tokens (Notion-like): the / and @
+ * menus are 300px popovers with the menu shadow, 28px rows, 13px titles, a 22px icon
+ * tile; group labels 12px tertiary. Only the Konteks editor uses BlockNote, so these
+ * selectors aren't scoped further (the menus are portaled out of .ajudan-page-editor).
+ */
+
+.bn-suggestion-menu {
+  width: 300px;
+  max-height: 340px;
+  padding: 4px !important;
+  border: none !important;
+  border-radius: var(--radius-lg) !important;
+  background: var(--popover) !important;
+  box-shadow: var(--elev-menu) !important;
+  scrollbar-width: thin;
+}
+.bn-suggestion-menu .bn-suggestion-menu-label {
+  padding: 8px 8px 4px !important;
+  font-size: 12px !important;
+  line-height: 16px !important;
+  font-weight: 500 !important;
+  color: var(--tertiary) !important;
+}
+.bn-suggestion-menu .bn-suggestion-menu-item {
+  min-height: 28px;
+  gap: 10px !important;
+  padding: 3px 8px !important;
+  border-radius: var(--radius-md) !important;
+  font-size: 13px !important;
+  line-height: 18px !important;
+  color: var(--foreground) !important;
+  transition: background-color 100ms var(--ease);
+}
+.bn-suggestion-menu .bn-suggestion-menu-item:hover,
+.bn-suggestion-menu .bn-suggestion-menu-item[aria-selected="true"] {
+  background: var(--hover) !important;
+  color: var(--foreground) !important;
+}
+.bn-suggestion-menu .bn-suggestion-menu-item [data-position="left"] {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.bn-suggestion-menu .bn-suggestion-menu-item [data-position="left"] svg {
+  width: 14px !important;
+  height: 14px !important;
+  color: var(--muted-foreground) !important;
+}
+.bn-suggestion-menu .bn-suggestion-menu-item .text-base,
+.bn-suggestion-menu .bn-suggestion-menu-item .text-sm {
+  font-size: 13px !important;
+  line-height: 18px !important;
+  font-weight: 500;
+}
+/* Titles only, like Notion's compact menu (the subtext is in the item's tooltip). */
+.bn-suggestion-menu .bn-suggestion-menu-item .text-xs {
+  display: none;
+}
+
+/* Side menu (+ and the drag handle) in tertiary ink. */
+.ajudan-page-editor .bn-side-menu button,
+.ajudan-page-editor .bn-side-menu [role="button"] {
+  color: var(--tertiary);
+}
+.ajudan-page-editor .bn-side-menu button:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+
+/* Toolbars and block menus: popover shell. */
+.bn-toolbar,
+.bn-menu-dropdown,
+.bn-popover-content,
+.bn-table-handle-menu {
+  border: none !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--elev-menu) !important;
+}
+.bn-menu-item {
+  font-size: 13px !important;
+}
+
+/* Placeholders in the app's placeholder ink. */
+.ajudan-page-editor .bn-inline-content:has(> .ProseMirror-trailingBreak:only-child)::before {
+  color: var(--placeholder);
+}

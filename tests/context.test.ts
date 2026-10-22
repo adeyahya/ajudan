@@ -183,6 +183,46 @@ describe("the workspace", () => {
     expect(ctx.deletePage(biz.id, p.id)).toBe(true);
   });
 
+  it("gives Ajudan's own pages their default icons", () => {
+    expect(ctx.pageByKey(biz.id, "about")!.icon).toBe("lucide:store");
+    expect(ctx.pageIcon({ icon: null, key: "contacts" })).toBe("lucide:users");
+    expect(ctx.pageIcon({ icon: "", key: "contacts" })).toBeNull();
+    expect(ctx.pageIcon({ icon: "🍜", key: null })).toBe("🍜");
+  });
+
+  it("moves pages in the tree: reorder, nest, carry sub-pages, refuse cycles", () => {
+    const a = ctx.createPage(biz.id, { title: "A", section: "product" });
+    const b = ctx.createPage(biz.id, { title: "B", section: "product" });
+    const c = ctx.createPage(biz.id, { title: "C", section: "product" });
+    const top = () => ctx.listPages(biz.id).filter((p) => p.section === "product" && !p.parentId && ["A", "B", "C"].includes(p.title)).map((p) => p.title);
+    expect(top()).toEqual(["A", "B", "C"]);
+    ctx.movePage(biz.id, c.id, { parentId: null, section: "product", index: 0 });
+    expect(top()).toEqual(["C", "A", "B"]);
+
+    // A sub-page takes its parent's section; a new child goes last under it.
+    const child = ctx.createPage(biz.id, { title: "Child", section: "business", parentId: a.id });
+    expect(ctx.getPage(biz.id, child.id)).toMatchObject({ parentId: a.id, section: "product" });
+    expect(ctx.movePage(biz.id, b.id, { parentId: a.id, index: 0 })).toBe(true);
+    expect(ctx.listPages(biz.id).filter((p) => p.parentId === a.id).map((p) => p.title)).toEqual(["B", "Child"]);
+
+    // Into its own sub-page, or under a database: refused.
+    expect(ctx.movePage(biz.id, a.id, { parentId: b.id })).toBe(false);
+    expect(ctx.movePage(biz.id, a.id, { parentId: a.id })).toBe(false);
+    expect(ctx.movePage(biz.id, a.id, { parentId: ctx.pageByKey(biz.id, "contacts")!.id })).toBe(false);
+
+    // Another section: the sub-pages come along.
+    ctx.updatePage(biz.id, a.id, { section: "how_we_work" });
+    expect(ctx.getPage(biz.id, a.id)).toMatchObject({ section: "how_we_work", parentId: null });
+    expect(ctx.getPage(biz.id, b.id)!.section).toBe("how_we_work");
+    expect(ctx.getPage(biz.id, child.id)!.section).toBe("how_we_work");
+
+    // Icons and covers (only files in the folder).
+    ctx.updatePage(biz.id, a.id, { icon: "🍜", cover: "media/a.jpg" });
+    expect(ctx.getPage(biz.id, a.id)).toMatchObject({ icon: "🍜", cover: "media/a.jpg" });
+    ctx.updatePage(biz.id, a.id, { cover: "../etc/passwd" });
+    expect(ctx.getPage(biz.id, a.id)!.cover).toBeNull();
+  });
+
   it("follows the profile until the owner edits the About page", () => {
     const profile = biz.profile!;
     ctx.refreshAboutPage(biz.id, { ...profile, oneLiner: "Paper crafts and gifts" }, "id");

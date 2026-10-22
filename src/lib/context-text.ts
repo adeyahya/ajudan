@@ -7,6 +7,24 @@ import type { ContextPage, ContextSection, ContextSuggestion, ReaderMode } from 
 
 export const SECTIONS: ContextSection[] = ["business", "product", "people", "how_we_work", "team_written"];
 
+/**
+ * Icons for Ajudan's own pages (by key). A page's `icon` is an emoji or "lucide:<name>";
+ * null means "the default" (these, or a page / database glyph), "" means none.
+ */
+export const DEFAULT_ICONS: Record<string, string> = {
+  about: "lucide:store",
+  products: "lucide:package",
+  policies: "lucide:scroll-text",
+  learned: "lucide:sparkles",
+  contacts: "lucide:users",
+};
+
+/** The icon to draw for a page: its own, its key's default, or null (the page/database glyph). */
+export function pageIcon(page: { icon: string | null; key: string | null }) {
+  if (page.icon !== null) return page.icon || null;
+  return (page.key && DEFAULT_ICONS[page.key]) || null;
+}
+
 /** What teammates get in their prompt from always-pages: whole pages up to these sizes (characters). */
 export const PROMPT_BUDGET = { total: 20_000, perPage: 8_000 };
 
