@@ -14,6 +14,7 @@ import { logEvent } from "@/lib/events";
 import { slugify } from "@/lib/folders";
 import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from "@/lib/free-assets";
 import { renderHtmlToPng } from "@/lib/images";
+import { assetRows, describeOrganization } from "@/lib/assets";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
@@ -162,18 +163,33 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "list_media",
-      "List the business's media library: footage, photos and audio the owner uploaded (newest first). Listing makes them readable in your folder at the same path.",
-      { kind: z.enum(["video", "image", "audio", "file"]).optional() },
+      "List the business's media library: footage, photos and audio the owner uploaded, with how the owner organized them (★ picks, titles, albums, #tags and notes on how to use them). Starred first, then newest. Listing makes them readable in your folder at the same path. Follow the owner's notes.",
+      {
+        kind: z.enum(["video", "image", "audio", "file"]).optional(),
+        album: z.string().optional().describe("Only this album"),
+        tag: z.string().optional().describe("Only files with this tag"),
+        starred: z.boolean().optional().describe("Only the owner's starred picks"),
+      },
       async (a) => {
         const dir = mediaDir();
         if (!fs.existsSync(dir)) return ok("The media library is empty. Ask the owner to drop files into the chat.");
-        const files = fs
-          .readdirSync(dir)
-          .filter((f) => !f.startsWith(".") && (!a.kind || mediaKind(f) === a.kind))
-          .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
-          .sort((x, y) => y.t - x.t)
+        const all = fs
+          .readdirSync(dir, { withFileTypes: true })
+          .filter((d) => d.isFile() && !d.name.startsWith(".") && (!a.kind || mediaKind(d.name) === a.kind))
+          .map((d) => ({ rel: path.join("media", d.name), t: fs.statSync(path.join(dir, d.name)).mtimeMs }));
+        const org = assetRows(ctx.businessId, all.map((x) => x.rel));
+        const tag = a.tag?.trim().toLowerCase().replace(/^#/, "");
+        const files = all
+          .filter((x) => {
+            const o = org.get(x.rel);
+            if (a.starred && !o?.starred) return false;
+            if (a.album && o?.album?.toLowerCase() !== a.album.trim().toLowerCase()) return false;
+            if (tag && !o?.tags.includes(tag)) return false;
+            return true;
+          })
+          .sort((x, y) => Number(!!org.get(y.rel)?.starred) - Number(!!org.get(x.rel)?.starred) || y.t - x.t)
           .slice(0, 40)
-          .map((x) => path.join("media", x.f));
+          .map((x) => x.rel);
         if (!files.length) return ok("No matching files in the media library.");
         linkIntoWorkspace(files, ctx.cwd);
         const credits = readCredits();
@@ -181,7 +197,8 @@ export function createBizServer(ctx: BizContext) {
           files.map(async (rel) => {
             const c = credits[rel];
             const from = c ? ` (free asset: "${c.title}" by ${c.creator}, ${c.license}${c.creditRequired ? `, credit: ${c.attribution}` : ""})` : "";
-            return `- ${describeMedia(rel, await mediaInfo(path.join(dataDir(), rel)))}${from}`;
+            const owner = describeOrganization(org.get(rel));
+            return `- ${describeMedia(rel, await mediaInfo(path.join(dataDir(), rel)))}${from}${owner ? ` ${owner}` : ""}`;
           }),
         );
         return ok(lines.join("\n"));

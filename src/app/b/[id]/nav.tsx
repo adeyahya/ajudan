@@ -10,6 +10,7 @@ const TABS = [
   { href: "/approvals", label: "Approvals", icon: "✉" },
   { href: "/desk", label: "Desk", icon: "☎" },
   { href: "/deliverables", label: "Work", icon: "▤" },
+  { href: "/studio", label: "Studio", icon: "✦" },
   { href: "/files", label: "Files", icon: "▥" },
   { href: "/team", label: "Team", icon: "☺" },
   { href: "/onboarding", label: "Interview", icon: "✎" },

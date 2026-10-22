@@ -9,6 +9,8 @@ export type JobPayloads = {
   onboarding_finalize: { businessId: string };
   design_team: { businessId: string };
   run_task: { taskId: string };
+  /** A Studio edit rendered with ffmpeg (worker/edits.ts). */
+  render_edit: { editId: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */
@@ -37,8 +39,9 @@ export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
   return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 
-/** False only for requests to human teammates (they go out on WhatsApp): those run while the team rests. */
+/** False for jobs that don't call Claude (Studio renders, requests to human teammates): those run while the team rests. */
 export function needsClaude(job: Pick<Job, "kind" | "payload">) {
+  if (job.kind === "render_edit") return false;
   if (job.kind !== "run_task") return true;
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
   const row = db
