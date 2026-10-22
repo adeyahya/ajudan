@@ -1,7 +1,9 @@
+import { Globe } from "lucide-react";
 import { connection } from "next/server";
-import { Badge, Button, Label, Textarea } from "@/components/kit";
+import { Badge, Field, Input, Section, Textarea } from "@/components/kit";
 import { browserStatus, SUGGESTED_SITES } from "@/lib/browser";
 import { t, tn, type UiLang } from "@/lib/i18n";
+import { ActionForm, SubmitButton } from "../team/action-form";
 import { closeBusinessBrowser, openBusinessBrowser, saveBrowserSites } from "./actions";
 
 /**
@@ -23,56 +25,53 @@ export async function BrowserPanel({
   const status = await browserStatus();
 
   return (
-    <div className="grid gap-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg text-foreground">{t(lang, "profile.browser.title")}</h2>
-        <Badge tone={status.running ? "green" : "neutral"}>{t(lang, status.running ? "profile.browser.open" : "profile.browser.closed")}</Badge>
-      </div>
-      <p className="text-xs text-muted-foreground">{t(lang, "profile.browser.help")}</p>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <form action={openBusinessBrowser.bind(null, businessId)} className="flex flex-wrap items-center gap-2">
-          <input
-            name="url"
-            placeholder="https://seller.shopee.co.id"
-            className="pixel-select h-8 w-56 bg-transparent px-2 text-sm outline-none"
-          />
-          <Button type="submit">{t(lang, status.running ? "profile.browser.openPage" : "profile.browser.openBrowser")}</Button>
-        </form>
-        {status.running && (
-          <form action={closeBusinessBrowser.bind(null, businessId)}>
-            <Button type="submit" variant="secondary">
-              {t(lang, "common.close")}
-            </Button>
-          </form>
-        )}
-      </div>
-
-      <form action={saveBrowserSites.bind(null, businessId)} className="grid gap-2">
-        <Label htmlFor="sites">{t(lang, "profile.browser.sites")}</Label>
-        <Textarea
-          id="sites"
-          name="sites"
-          rows={4}
-          defaultValue={sites.join("\n")}
-          placeholder={SUGGESTED_SITES.slice(0, 4).join("\n")}
-        />
-        <p className="text-xs text-muted-foreground">
-          {sites.length ? tn(lang, "profile.browser.sitesAllowed", sites.length) : t(lang, "profile.browser.sitesEmpty")}{" "}
-          {t(lang, "profile.browser.suggestions", { sites: SUGGESTED_SITES.join(", ") })}
-        </p>
-        <div>
-          <Button type="submit" variant="secondary">
-            {t(lang, "profile.browser.saveSites")}
-          </Button>
+    <div>
+      <Section
+        title={t(lang, "profile.browser.title")}
+        description={t(lang, "profile.browser.help")}
+        actions={<Badge tone={status.running ? "green" : "gray"}>{t(lang, status.running ? "profile.browser.open" : "profile.browser.closed")}</Badge>}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <ActionForm
+            action={openBusinessBrowser.bind(null, businessId)}
+            success={t(lang, "profile.toast.browserOpened")}
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+          >
+            <div className="relative min-w-56 flex-1">
+              <Globe className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-tertiary" />
+              <Input name="url" aria-label={t(lang, "profile.browser.url")} placeholder="https://seller.shopee.co.id" className="pl-8" />
+            </div>
+            <SubmitButton size="sm">{t(lang, status.running ? "profile.browser.openPage" : "profile.browser.openBrowser")}</SubmitButton>
+          </ActionForm>
+          {status.running && (
+            <ActionForm action={closeBusinessBrowser.bind(null, businessId)} success={t(lang, "profile.toast.browserClosed")}>
+              <SubmitButton size="sm" variant="secondary">
+                {t(lang, "common.close")}
+              </SubmitButton>
+            </ActionForm>
+          )}
         </div>
-      </form>
+      </Section>
 
-      <p className="text-xs text-muted-foreground">
-        {teammatesWithAccess.length
-          ? t(lang, "profile.browser.canUse", { names: teammatesWithAccess.join(", ") })
-          : t(lang, "profile.browser.nobody")}
-      </p>
+      <Section title={t(lang, "profile.browser.sitesTitle")}>
+        <ActionForm action={saveBrowserSites.bind(null, businessId)} success={t(lang, "profile.toast.sites")} className="grid gap-3">
+          <Field
+            label={t(lang, "profile.browser.sites")}
+            htmlFor="sites"
+            hint={`${sites.length ? tn(lang, "profile.browser.sitesAllowed", sites.length) : t(lang, "profile.browser.sitesEmpty")} ${t(lang, "profile.browser.suggestions", { sites: SUGGESTED_SITES.join(", ") })}`}
+          >
+            <Textarea id="sites" name="sites" rows={5} defaultValue={sites.join("\n")} placeholder={SUGGESTED_SITES.slice(0, 4).join("\n")} className="font-mono text-[13px]" />
+          </Field>
+          <div>
+            <SubmitButton size="sm" variant="secondary">
+              {t(lang, "profile.browser.saveSites")}
+            </SubmitButton>
+          </div>
+        </ActionForm>
+        <p className="mt-4 text-xs text-tertiary">
+          {teammatesWithAccess.length ? t(lang, "profile.browser.canUse", { names: teammatesWithAccess.join(", ") }) : t(lang, "profile.browser.nobody")}
+        </p>
+      </Section>
     </div>
   );
 }

@@ -1,38 +1,66 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { eq } from "drizzle-orm";
 import {
   BracesIcon,
+  CalendarIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   DownloadIcon,
   FileIcon,
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
+  HashIcon,
   ImageIcon,
+  InfoIcon,
+  LayersIcon,
   MusicIcon,
   SearchIcon,
+  SearchXIcon,
   TableIcon,
+  TypeIcon,
   VideoIcon,
 } from "lucide-react";
 import { db, schema } from "@/db";
 import { LiveRefresh } from "@/components/live";
-import { Badge, Button, Card, Input, PageHeader, PageSkeleton } from "@/components/kit";
+import { SetBreadcrumb, type Crumb } from "@/components/breadcrumb";
+import { DataTable, Gallery, GalleryTile, type Column } from "@/components/data-table";
+import { Button, CardGridSkeleton, EmptyState, IconButton, Input, PageBody, PageHeader, PropertyList, Skeleton, cn } from "@/components/kit";
 import { FileMarkdown } from "@/components/markdown";
 import { ROOTS, cleanRel, fileStat, fileType, listDir, readText, searchFiles, type Entry, type FileType } from "@/lib/browse";
 import { getBusiness } from "@/lib/data";
 import { dateLocale, t, tn, uiLang, type MessageKey, type UiLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 
 /**
  * Files: browse everything the team made and keeps in the business folder (work,
- * media library, teammates' memory and drafts). Folders on the left; a gallery and
- * list, or a preview (markdown, images, video, CSV, JSON), on the right.
+ * media library, teammates' memory and drafts). A folder tree on the left; on the right
+ * a gallery + table for a folder, or a preview (markdown, images, video, CSV, JSON).
+ * The path shows as breadcrumbs in the top bar.
  */
 export default function FilesPage(props: PageProps<"/b/[id]/files">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense
+      fallback={
+        <PageBody width="wide">
+          <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+            <div className="hidden space-y-2 lg:block">
+              <Skeleton className="h-7 w-full" />
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-5" style={{ width: `${70 - i * 8}%` }} />
+              ))}
+            </div>
+            <div>
+              <Skeleton className="h-[34px] w-40 rounded-md" />
+              <CardGridSkeleton count={8} className="mt-10" />
+            </div>
+          </div>
+        </PageBody>
+      }
+    >
       <Content {...props} />
     </Suspense>
   );
@@ -69,6 +97,15 @@ const ICONS: Record<FileType | "dir", typeof FileIcon> = {
   other: FileIcon,
 };
 
+type Names = Map<string, string>;
+
+/** A path segment's label: root folders translated, teammate folders by name. */
+function segLabel(rel: string, names: Names, lang: UiLang) {
+  const parts = rel.split("/");
+  if (parts.length === 1 && ROOTS.some((r) => r.key === rel)) return rootLabel(rel, lang);
+  return names.get(rel)?.split(" · ")[0] ?? parts[parts.length - 1];
+}
+
 async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   await connection();
   const { id } = await params;
@@ -83,7 +120,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   const stat = rel ? fileStat(rel) : { isDir: true, size: 0, mtime: new Date() };
   if (!stat) notFound();
   // Teammate folders are slugs ("sinta"); show their names.
-  const names = new Map(
+  const names: Names = new Map(
     db
       .select({ dir: schema.teammates.workspaceDir, name: schema.teammates.name, title: schema.teammates.title })
       .from(schema.teammates)
@@ -93,201 +130,238 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
       .map((t) => [t.dir!.replace(/^.*?(teammates\/)/, "$1"), `${t.name} · ${t.title}`]),
   );
   const folder = stat.isDir ? rel : rel.split("/").slice(0, -1).join("/");
+  const parts = rel ? rel.split("/") : [];
+  const crumbs: Crumb[] = q
+    ? [{ label: `“${q}”` }]
+    : parts.map((_, i) => {
+        const r = parts.slice(0, i + 1).join("/");
+        return { label: segLabel(r, names, lang), href: i < parts.length - 1 ? href(id, r) : undefined };
+      });
+
+  const search = (
+    <form action={`/b/${id}/files`} className="relative" role="search">
+      <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-tertiary" />
+      <Input name="q" defaultValue={q} aria-label={t(lang, "files.search")} placeholder={t(lang, "files.search")} className="h-7 pl-8 text-[13px]" />
+    </form>
+  );
 
   return (
-    <div>
+    <PageBody width="wide">
       <LiveRefresh businessId={id} types={LIVE} />
-      <PageHeader title={t(lang, "files.title")} subtitle={t(lang, "files.subtitle")} />
-      <div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
-        <aside className="space-y-3">
-          <form action={`/b/${id}/files`} className="relative">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={q} placeholder={t(lang, "files.search")} className="pl-8" />
-          </form>
-          <Card className="p-2">
-            <nav className="text-sm">
-              <Link href={href(id, "")} className={cn("flex items-center gap-2 px-2 py-1 hover:bg-muted", !rel && !q && "bg-muted font-medium")}>
-                <FolderOpenIcon className="size-4 text-primary" /> {t(lang, "files.all")}
-              </Link>
+      <SetBreadcrumb items={crumbs} />
+      <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="hidden lg:block">
+          <div className="sticky top-[calc(var(--topbar-h)+16px)] space-y-3">
+            {search}
+            <nav aria-label={t(lang, "files.tree")} className="space-y-px">
+              <TreeRow href={href(id, "")} label={t(lang, "files.all")} active={!rel && !q} depth={0} icon={<FolderOpenIcon />} />
               {ROOTS.map((r) => (
-                <Tree key={r.key} businessId={id} rel={r.key} label={rootLabel(r.key, lang)} open={folder} names={names} depth={0} />
+                <Tree key={r.key} businessId={id} rel={r.key} label={rootLabel(r.key, lang)} open={folder} names={names} depth={0} q={q} />
               ))}
             </nav>
-          </Card>
+          </div>
         </aside>
 
-        <main className="min-w-0 space-y-4">
+        <div className="min-w-0">
+          <div className="mb-6 lg:hidden">{search}</div>
           {q ? (
             <SearchResults businessId={id} q={q} names={names} lang={lang} />
+          ) : stat.isDir ? (
+            <FolderView businessId={id} rel={rel} names={names} lang={lang} />
           ) : (
-            <>
-              <Breadcrumbs businessId={id} rel={rel} names={names} lang={lang} />
-              {stat.isDir ? (
-                <FolderView businessId={id} rel={rel} names={names} lang={lang} />
-              ) : (
-                <FileView businessId={id} rel={rel} size={stat.size} mtime={stat.mtime} lang={lang} />
-              )}
-            </>
+            <FileView businessId={id} rel={rel} size={stat.size} mtime={stat.mtime} lang={lang} />
           )}
-        </main>
+        </div>
       </div>
-    </div>
+    </PageBody>
+  );
+}
+
+function TreeRow({
+  href: to,
+  label,
+  active,
+  depth,
+  icon,
+  chevron,
+  title,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  depth: number;
+  icon: ReactNode;
+  chevron?: "open" | "closed";
+  title?: string;
+}) {
+  return (
+    <Link
+      href={to}
+      title={title}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex h-7 items-center gap-1.5 rounded-md pr-2 text-[13px] leading-[18px] font-medium transition-colors duration-100 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:stroke-[1.75]",
+        active ? "bg-accent text-foreground" : "text-sidebar-foreground hover:bg-hover",
+      )}
+      style={{ paddingLeft: 4 + depth * 14 }}
+    >
+      <span aria-hidden className="flex size-4 items-center justify-center text-tertiary [&_svg]:size-3.5!">
+        {chevron === "open" ? <ChevronDownIcon /> : chevron === "closed" ? <ChevronRightIcon /> : null}
+      </span>
+      <span className={cn(active ? "text-foreground" : "text-tertiary")}>{icon}</span>
+      <span className="truncate">{label}</span>
+    </Link>
   );
 }
 
 /** Folders only; the folder you're in (and its parents) are expanded. */
-function Tree({ businessId, rel, label, open, names, depth }: { businessId: string; rel: string; label: string; open: string; names: Map<string, string>; depth: number }) {
+function Tree({ businessId, rel, label, open, names, depth, q }: { businessId: string; rel: string; label: string; open: string; names: Names; depth: number; q: string }) {
   const expanded = open === rel || open.startsWith(`${rel}/`);
-  const here = open === rel;
+  const here = open === rel && !q;
   const subfolders = expanded ? (listDir(rel) ?? []).filter((e) => e.isDir) : [];
-  const Icon = expanded ? FolderOpenIcon : FolderIcon;
   return (
-    <div>
-      <Link
+    <div className="space-y-px">
+      <TreeRow
         href={href(businessId, rel)}
-        className={cn("flex items-center gap-2 py-1 pr-2 hover:bg-muted", here && "bg-muted font-medium")}
-        style={{ paddingLeft: `${0.5 + depth * 0.9}rem` }}
+        label={label}
+        active={here}
+        depth={depth}
         title={rel}
-      >
-        <Icon className="size-4 shrink-0 text-primary" />
-        <span className="truncate">{label}</span>
-      </Link>
+        chevron={expanded ? "open" : "closed"}
+        icon={expanded ? <FolderOpenIcon /> : <FolderIcon />}
+      />
       {subfolders.map((f) => (
-        <Tree key={f.rel} businessId={businessId} rel={f.rel} label={names.get(f.rel)?.split(" · ")[0] ?? f.name} open={open} names={names} depth={depth + 1} />
+        <Tree key={f.rel} businessId={businessId} rel={f.rel} label={names.get(f.rel)?.split(" · ")[0] ?? f.name} open={open} names={names} depth={depth + 1} q={q} />
       ))}
     </div>
   );
 }
 
-function Breadcrumbs({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Map<string, string>; lang: UiLang }) {
-  const parts = rel ? rel.split("/") : [];
+function NameCell({ e, names, showPath }: { e: Entry; names: Names; showPath?: boolean }) {
+  const Icon = ICONS[e.type];
+  const label = e.isDir ? (names.get(e.rel) ?? e.name) : (e.title ?? e.name);
+  const sub = showPath ? e.rel : e.title && e.title !== e.name ? e.name : null;
   return (
-    <div className="flex flex-wrap items-center gap-1 text-sm">
-      <Link href={href(businessId, "")} className="text-muted-foreground hover:text-foreground">
-        {t(lang, "files.title")}
-      </Link>
-      {parts.map((p, i) => {
-        const r = parts.slice(0, i + 1).join("/");
-        const label = i === 0 ? (ROOTS.some((x) => x.key === p) ? rootLabel(p, lang) : p) : (names.get(r)?.split(" · ")[0] ?? p);
-        return (
-          <span key={r} className="flex items-center gap-1">
-            <span className="text-muted-foreground">/</span>
-            {i === parts.length - 1 ? (
-              <span className="font-medium">{label}</span>
-            ) : (
-              <Link href={href(businessId, r)} className="text-muted-foreground hover:text-foreground">
-                {label}
-              </Link>
-            )}
-          </span>
-        );
-      })}
-    </div>
+    <span className="flex min-w-0 items-center gap-2 py-1.5">
+      <Icon className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
+      <span className="min-w-0">
+        <span className="block truncate">{label}</span>
+        {sub && <span className="block truncate font-mono text-xs font-normal text-tertiary">{sub}</span>}
+      </span>
+    </span>
   );
 }
 
-function FolderView({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Map<string, string>; lang: UiLang }) {
+function entryColumns(names: Names, lang: UiLang, showPath = false): Column<Entry>[] {
+  return [
+    { key: "name", header: t(lang, "files.col.name"), icon: <TypeIcon />, title: (e) => e.rel, cell: (e) => <NameCell e={e} names={names} showPath={showPath} /> },
+    {
+      key: "size",
+      header: t(lang, "files.col.size"),
+      icon: <HashIcon />,
+      width: 110,
+      align: "right",
+      cell: (e) => (e.isDir ? tn(lang, "files.items", e.children ?? 0) : size(e.size)),
+    },
+    { key: "modified", header: t(lang, "files.col.modified"), icon: <CalendarIcon />, width: 190, cell: (e) => <span className="text-muted-foreground">{when(e.mtime, lang)}</span> },
+  ];
+}
+
+function FolderView({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Names; lang: UiLang }) {
   const entries = listDir(rel) ?? [];
   if (!rel) {
+    const rows = ROOTS.map((r) => ({ key: r.key, children: entries.find((x) => x.rel === r.key)?.children ?? 0 }));
     return (
-      <div className="grid gap-3 sm:grid-cols-3">
-        {ROOTS.map((r) => {
-          const e = entries.find((x) => x.rel === r.key);
-          return (
-            <Link key={r.key} href={href(businessId, r.key)}>
-              <Card className="h-full space-y-1 p-4 transition hover:-translate-y-0.5">
-                <div className="flex items-center gap-2">
-                  <FolderIcon className="size-5 text-primary" />
-                  <span className="font-pixel text-lg">{rootLabel(r.key, lang)}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">{rootHint(r.key, lang)}</p>
-                {e && <Badge>{tn(lang, "files.items", e.children ?? 0)}</Badge>}
-              </Card>
-            </Link>
-          );
-        })}
-      </div>
+      <>
+        <PageHeader title={t(lang, "files.title")} description={t(lang, "files.subtitle")} />
+        <DataTable
+          label={t(lang, "files.title")}
+          rows={rows}
+          getRowId={(r) => r.key}
+          rowHref={(r) => href(businessId, r.key)}
+          minWidth={520}
+          columns={[
+            {
+              key: "name",
+              header: t(lang, "files.col.name"),
+              icon: <TypeIcon />,
+              width: 220,
+              cell: (r) => (
+                <span className="flex items-center gap-2">
+                  <FolderIcon className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
+                  <span className="truncate">{rootLabel(r.key, lang)}</span>
+                </span>
+              ),
+            },
+            { key: "items", header: t(lang, "files.col.items"), icon: <LayersIcon />, width: 110, cell: (r) => tn(lang, "files.items", r.children) },
+            { key: "about", header: t(lang, "files.col.about"), icon: <InfoIcon />, title: (r) => rootHint(r.key, lang), cell: (r) => <span className="text-muted-foreground">{rootHint(r.key, lang)}</span> },
+          ]}
+        />
+      </>
     );
   }
-  if (!entries.length) return <Card className="p-6 text-sm text-muted-foreground">{t(lang, "files.emptyFolder")}</Card>;
   const visual = entries.filter((e) => e.type === "image" || e.type === "video");
   const rest = entries.filter((e) => e.type !== "image" && e.type !== "video");
   return (
-    <div className="space-y-4">
+    <>
+      <PageHeader title={segLabel(rel, names, lang)} description={tn(lang, "files.items", entries.length)} />
+      {!entries.length && <EmptyState icon={<FolderOpenIcon />} title={t(lang, "files.emptyFolder")} body={t(lang, "files.emptyFolderBody")} />}
       {visual.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
+        <Gallery className="mb-10">
           {visual.map((e, i) => (
-            <Link key={e.rel} href={href(businessId, e.rel)} className="pixel-frame group relative m-[3px] block overflow-hidden bg-muted" title={e.name}>
-              <div className="aspect-[4/5]">
-                {e.type === "image" ? (
+            <GalleryTile
+              key={e.rel}
+              href={href(businessId, e.rel)}
+              caption={<span title={e.name}>{e.name}</span>}
+              meta={`${size(e.size)} · ${e.mtime.toLocaleDateString(dateLocale(lang), { day: "numeric", month: "short" })}`}
+              badge={
+                e.type === "video" ? (
+                  <span className="flex size-6 items-center justify-center rounded-md bg-black/55 text-white backdrop-blur-sm">
+                    <VideoIcon className="size-3.5" />
+                  </span>
+                ) : undefined
+              }
+              thumb={
+                e.type === "image" ? (
                   // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-                  <img src={fileUrl(businessId, e.rel)} alt={e.name} loading={i < 30 ? "eager" : "lazy"} className="size-full object-cover transition group-hover:scale-105" />
+                  <img src={fileUrl(businessId, e.rel)} alt={e.name} loading={i < 24 ? "eager" : "lazy"} />
                 ) : (
-                  <video src={`${fileUrl(businessId, e.rel)}#t=0.5`} preload="metadata" muted playsInline className="size-full object-cover" />
-                )}
-              </div>
-              <div className="flex items-center gap-1 bg-ink/85 px-1.5 py-1 text-[11px] text-parchment">
-                {e.type === "video" ? <VideoIcon className="size-3 shrink-0" /> : <ImageIcon className="size-3 shrink-0" />}
-                <span className="truncate">{e.name}</span>
-              </div>
-            </Link>
+                  <video src={`${fileUrl(businessId, e.rel)}#t=0.5`} preload="metadata" muted playsInline />
+                )
+              }
+            />
           ))}
-        </div>
+        </Gallery>
       )}
-      {rest.length > 0 && <EntryList businessId={businessId} entries={rest} names={names} lang={lang} />}
-    </div>
+      {rest.length > 0 && (
+        <DataTable label={segLabel(rel, names, lang)} rows={rest} getRowId={(e) => e.rel} rowHref={(e) => href(businessId, e.rel)} columns={entryColumns(names, lang)} minWidth={560} />
+      )}
+    </>
   );
 }
 
-function EntryList({
-  businessId,
-  entries,
-  names,
-  showPath,
-  lang,
-}: {
-  businessId: string;
-  entries: Entry[];
-  names: Map<string, string>;
-  showPath?: boolean;
-  lang: UiLang;
-}) {
-  return (
-    <Card className="divide-y divide-border p-0">
-      {entries.map((e) => {
-        const Icon = ICONS[e.type];
-        const label = e.isDir ? (names.get(e.rel) ?? e.name) : (e.title ?? e.name);
-        return (
-          <Link key={e.rel} href={href(businessId, e.rel)} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted">
-            <Icon className={cn("size-4 shrink-0", e.isDir ? "text-primary" : "text-muted-foreground")} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{label}</span>
-              {(showPath || (e.title && e.title !== e.name)) && (
-                <span className="block truncate font-mono text-[11px] text-muted-foreground">{showPath ? e.rel : e.name}</span>
-              )}
-            </span>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {e.isDir ? tn(lang, "files.items", e.children ?? 0) : `${size(e.size)} · ${when(e.mtime, lang)}`}
-            </span>
-          </Link>
-        );
-      })}
-    </Card>
-  );
-}
-
-function SearchResults({ businessId, q, names, lang }: { businessId: string; q: string; names: Map<string, string>; lang: UiLang }) {
+function SearchResults({ businessId, q, names, lang }: { businessId: string; q: string; names: Names; lang: UiLang }) {
   const found = searchFiles(q);
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 text-sm">
-        <span>{tn(lang, "files.found", found.length, { q })}</span>
-        <Link href={href(businessId, "")} className="text-muted-foreground hover:text-foreground">
-          {t(lang, "files.clearSearch")}
-        </Link>
-      </div>
-      {found.length > 0 && <EntryList businessId={businessId} entries={found} names={names} showPath lang={lang} />}
-    </div>
+    <>
+      <PageHeader
+        title={tn(lang, "files.found", found.length, { q })}
+        actions={
+          <Button asChild size="sm" variant="ghost">
+            <Link href={href(businessId, "")}>{t(lang, "files.clearSearch")}</Link>
+          </Button>
+        }
+      />
+      <DataTable
+        label={t(lang, "files.search")}
+        rows={found}
+        getRowId={(e) => e.rel}
+        rowHref={(e) => href(businessId, e.rel)}
+        columns={entryColumns(names, lang, true)}
+        minWidth={560}
+        empty={<EmptyState icon={<SearchXIcon />} title={t(lang, "files.noMatches", { q })} />}
+      />
+    </>
   );
 }
 
@@ -332,19 +406,7 @@ function parseCsv(text: string, maxRows = 300) {
   return rows;
 }
 
-function FileView({
-  businessId,
-  rel,
-  size: bytes,
-  mtime,
-  lang,
-}: {
-  businessId: string;
-  rel: string;
-  size: number;
-  mtime: Date;
-  lang: UiLang;
-}) {
+function FileView({ businessId, rel, size: bytes, mtime, lang }: { businessId: string; rel: string; size: number; mtime: Date; lang: UiLang }) {
   const type = fileType(rel);
   const name = rel.split("/").pop() ?? rel;
   const url = fileUrl(businessId, rel);
@@ -353,67 +415,87 @@ function FileView({
   const newer = i > 0 ? siblings[i - 1] : undefined;
   const older = i >= 0 && i < siblings.length - 1 ? siblings[i + 1] : undefined;
   const text = ["markdown", "csv", "json", "text"].includes(type) ? readText(rel) : null;
+  const Icon = ICONS[type];
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="min-w-0 flex-1 truncate font-pixel text-lg" title={name}>
-          {name}
-        </h2>
-        <span className="text-xs text-muted-foreground">
-          {size(bytes)} · {when(mtime, lang)}
-        </span>
-        {newer && (
-          <Button asChild variant="secondary" size="sm">
-            <Link href={href(businessId, newer.rel)} title={newer.name}>
-              {t(lang, "files.newer")}
-            </Link>
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Icon className="size-5 shrink-0 text-tertiary" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-base leading-6 font-semibold text-foreground" title={name}>
+            {name}
+          </h1>
+          <p className="text-xs text-tertiary tabular-nums">
+            {size(bytes)} · {when(mtime, lang)}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          {newer ? (
+            <IconButton label={`${t(lang, "files.newerFile")}: ${newer.name}`} asChild>
+              <Link href={href(businessId, newer.rel)}>
+                <ChevronLeftIcon />
+              </Link>
+            </IconButton>
+          ) : (
+            <IconButton label={t(lang, "files.newerFile")} disabled>
+              <ChevronLeftIcon />
+            </IconButton>
+          )}
+          {older ? (
+            <IconButton label={`${t(lang, "files.olderFile")}: ${older.name}`} asChild>
+              <Link href={href(businessId, older.rel)}>
+                <ChevronRightIcon />
+              </Link>
+            </IconButton>
+          ) : (
+            <IconButton label={t(lang, "files.olderFile")} disabled>
+              <ChevronRightIcon />
+            </IconButton>
+          )}
+          <Button asChild variant="secondary" size="sm" className="ml-1">
+            <a href={fileUrl(businessId, rel, true)}>
+              <DownloadIcon /> {t(lang, "files.download")}
+            </a>
           </Button>
-        )}
-        {older && (
-          <Button asChild variant="secondary" size="sm">
-            <Link href={href(businessId, older.rel)} title={older.name}>
-              {t(lang, "files.older")}
-            </Link>
-          </Button>
-        )}
-        <Button asChild variant="secondary" size="sm">
-          <a href={fileUrl(businessId, rel, true)}>
-            <DownloadIcon /> {t(lang, "files.download")}
-          </a>
-        </Button>
+        </div>
       </div>
 
-      <Card className="overflow-hidden p-0">
+      <div className="overflow-hidden rounded-lg border border-border">
         {type === "image" && (
-          <div className="flex justify-center bg-[repeating-conic-gradient(var(--muted)_0_25%,transparent_0_50%)] bg-[length:20px_20px] p-4">
+          <div className="flex justify-center bg-muted p-6">
             {/* eslint-disable-next-line @next/next/no-img-element -- local files from the business folder */}
-            <img src={url} alt={name} className="max-h-[75vh] max-w-full object-contain" />
+            <img src={url} alt={name} className="max-h-[75vh] max-w-full rounded-md object-contain" />
           </div>
         )}
-        {type === "video" && <video src={url} controls playsInline className="max-h-[75vh] w-full bg-black" />}
+        {type === "video" && <video src={url} controls playsInline className="max-h-[75vh] w-full bg-stage" />}
         {type === "audio" && (
-          <div className="flex flex-col items-center gap-3 p-8">
-            <MusicIcon className="size-10 text-muted-foreground" />
+          <div className="flex flex-col items-center gap-4 bg-muted p-10">
+            <MusicIcon className="size-8 text-placeholder" strokeWidth={1.5} />
             <audio src={url} controls />
           </div>
         )}
-        {type === "pdf" && <iframe src={url} title={name} className="h-[75vh] w-full bg-white" />}
+        {type === "pdf" && <iframe src={url} title={name} className="h-[75vh] w-full bg-background" />}
         {type === "markdown" && text && <MarkdownPreview businessId={businessId} rel={rel} text={text.text} />}
         {type === "csv" && text && <CsvPreview text={text.text} lang={lang} />}
-        {type === "json" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-relaxed">{prettyJson(text.text)}</pre>}
-        {type === "text" && text && <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed">{text.text}</pre>}
+        {type === "json" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-5">{prettyJson(text.text)}</pre>}
+        {type === "text" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-5 whitespace-pre-wrap">{text.text}</pre>}
         {type === "other" && (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            {t(lang, "files.noPreview")}{" "}
-            <a href={fileUrl(businessId, rel, true)} className="underline">
-              {t(lang, "files.downloadIt")}
-            </a>{" "}
-            {t(lang, "files.toOpen")}
-          </div>
+          <EmptyState
+            compact
+            icon={<FileIcon />}
+            title={t(lang, "files.noPreview")}
+            body={t(lang, "files.noPreviewBody")}
+            action={
+              <Button asChild variant="secondary" size="sm">
+                <a href={fileUrl(businessId, rel, true)}>
+                  <DownloadIcon /> {t(lang, "files.download")}
+                </a>
+              </Button>
+            }
+          />
         )}
-        {text?.truncated && <p className="border-t border-border p-2 text-center text-xs text-muted-foreground">{t(lang, "files.truncated")}</p>}
-      </Card>
+        {text?.truncated && <p className="border-t border-border p-2 text-center text-xs text-tertiary">{t(lang, "files.truncated")}</p>}
+      </div>
     </div>
   );
 }
@@ -421,18 +503,14 @@ function FileView({
 function MarkdownPreview({ businessId, rel, text }: { businessId: string; rel: string; text: string }) {
   const { meta, body } = frontMatter(text);
   return (
-    <div>
+    <div className="max-h-[75vh] overflow-auto px-6 py-5">
       {meta.length > 0 && (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-b border-border bg-muted/50 px-5 py-3 text-xs">
-          {meta.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted-foreground">{k}</dt>
-              <dd className="min-w-0 truncate">{v}</dd>
-            </div>
-          ))}
-        </dl>
+        <PropertyList
+          className="mb-5 border-b border-border pb-4"
+          items={meta.map(([k, v]) => ({ label: k, value: <span className="truncate">{v}</span> }))}
+        />
       )}
-      <div className="max-h-[75vh] overflow-auto px-5 py-4">
+      <div className="text-[15px] leading-[26px]">
         <FileMarkdown businessId={businessId} path={rel}>
           {body}
         </FileMarkdown>
@@ -444,32 +522,17 @@ function MarkdownPreview({ businessId, rel, text }: { businessId: string; rel: s
 function CsvPreview({ text, lang }: { text: string; lang: UiLang }) {
   const rows = parseCsv(text);
   const [head, ...body] = rows;
-  if (!head) return <p className="p-4 text-sm text-muted-foreground">{t(lang, "files.emptyFile")}</p>;
+  if (!head) return <EmptyState compact icon={<TableIcon />} title={t(lang, "files.emptyFile")} />;
+  const columns: Column<{ i: number; r: string[] }>[] = head.map((h, j) => ({
+    key: String(j),
+    header: h || " ",
+    title: (row) => row.r[j],
+    cell: (row) => row.r[j] ?? "",
+  }));
   return (
-    <div className="max-h-[75vh] overflow-auto">
-      <table className="w-full border-collapse text-xs">
-        <thead className="sticky top-0 bg-card">
-          <tr>
-            {head.map((h, i) => (
-              <th key={i} className="border-b border-border px-2 py-1.5 text-left font-semibold whitespace-nowrap">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {body.map((r, i) => (
-            <tr key={i} className="odd:bg-muted/40">
-              {r.map((c, j) => (
-                <td key={j} className="max-w-72 truncate px-2 py-1" title={c}>
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length >= 300 && <p className="p-2 text-center text-xs text-muted-foreground">{t(lang, "files.first300")}</p>}
+    <div className="max-h-[75vh] overflow-auto px-4">
+      <DataTable label={t(lang, "files.title")} rows={body.map((r, i) => ({ i, r }))} getRowId={(row) => String(row.i)} columns={columns} minWidth={Math.max(480, head.length * 140)} />
+      {rows.length >= 300 && <p className="p-2 text-center text-xs text-tertiary">{t(lang, "files.first300")}</p>}
     </div>
   );
 }

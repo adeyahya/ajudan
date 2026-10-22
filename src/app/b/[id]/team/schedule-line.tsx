@@ -1,14 +1,21 @@
 import { dateLocale, t, type UiLang } from "@/lib/i18n";
 import type { ScheduleStatus } from "@/lib/schedule-context";
 
-/** "Next run · last run · last skipped" under a scheduled teammate's prompt. */
+const when = (d: Date, lang: UiLang) => d.toLocaleString(dateLocale(lang), { dateStyle: "medium", timeStyle: "short" });
+
+/** "Next run · last run · last skipped" for a scheduled teammate. */
 export function ScheduleLine({ s, lang }: { s: ScheduleStatus; lang: UiLang }) {
-  const when = (d: Date) => d.toLocaleString(dateLocale(lang), { dateStyle: "medium", timeStyle: "short" });
   return (
-    <p className="text-[11px] text-muted-foreground">
-      <span>{t(lang, "team.nextRun", { when: s.nextRun ? when(s.nextRun) : "—" })}</span>
-      <span>{t(lang, "team.lastRun", { when: s.lastRun ? when(s.lastRun) : t(lang, "team.never") })}</span>
-      {s.lastSkipped && <span className="text-amber-700 dark:text-amber-300">{t(lang, "team.lastSkipped", { when: when(s.lastSkipped) })}</span>}
+    <p className="text-xs text-muted-foreground">
+      <span>{t(lang, "team.nextRun", { when: s.nextRun ? when(s.nextRun, lang) : "—" })}</span>
+      <span>{t(lang, "team.lastRun", { when: s.lastRun ? when(s.lastRun, lang) : t(lang, "team.never") })}</span>
+      {s.lastSkipped && <span className="text-warning">{t(lang, "team.lastSkipped", { when: when(s.lastSkipped, lang) })}</span>}
     </p>
   );
+}
+
+/** Just the next run, short ("Mon 09:00"), for a table cell. */
+export function nextRunShort(s: ScheduleStatus | undefined, lang: UiLang) {
+  if (!s?.nextRun) return null;
+  return s.nextRun.toLocaleString(dateLocale(lang), { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }

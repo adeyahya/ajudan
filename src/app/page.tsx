@@ -1,33 +1,38 @@
+import { Store } from "lucide-react";
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
-import { Badge, Button, Card, PageHeader, PageSkeleton } from "@/components/kit";
+import { Suspense, type ReactNode } from "react";
+import { Badge, Button, EmptyState, ListSkeleton, PageBody, PageHeader, Skeleton, cn } from "@/components/kit";
 import { I18nProvider } from "@/components/i18n";
+import { Toaster } from "@/components/ui/sonner";
 import { IN_APP, pinnedFolder, routeFor } from "@/lib/app-mode";
 import { AJUDAN_HOME, folderInfo, knownFolders, readConfig, type FolderInfo } from "@/lib/folders";
-import { t, tn, type MessageKey, type UiLang } from "@/lib/i18n";
+import { t, tn, type UiLang } from "@/lib/i18n";
 import { chromeLang } from "@/lib/i18n/server";
+import { statusTone } from "@/lib/status-tones";
 import { folderWorker } from "@/lib/worker-lock";
-import { forgetFolderAction, openFolder } from "./actions";
-import { AppOpenButton, NewBusinessForm, OpenFolderForm } from "./home-forms";
-
-const STATUS: Record<string, { label: MessageKey; tone: "amber" | "blue" | "violet" | "green" }> = {
-  onboarding: { label: "businessStatus.onboarding", tone: "amber" },
-  designing: { label: "businessStatus.designing", tone: "blue" },
-  team_proposed: { label: "businessStatus.team_proposed", tone: "violet" },
-  active: { label: "businessStatus.active", tone: "green" },
-};
+import { openFolder } from "./actions";
+import { AppOpenButton, FolderMenu, NewBusinessDialog, OpenFolderDialog, SiteHeaderActions } from "./home-forms";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
 
-// The UI language is a request-time read (open business, else Accept-Language: see
-// chromeLang), so the whole page sits inside Suspense under Cache Components.
+/**
+ * Home: the businesses on this computer (UI-PLAN §3.13). Rows in one hairline list;
+ * "New business" sits in the top bar (#site-header-actions), "Open a folder…" under the
+ * list. Web: one business works at a time (Continue / Switch). Desktop app: each business
+ * opens in its own window (Open in window / Show window).
+ *
+ * The UI language is a request-time read (open business, else Accept-Language: see
+ * chromeLang), so the whole page sits inside Suspense under Cache Components.
+ */
 export default function Home() {
   return (
     <Suspense
       fallback={
-        <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
-          <PageSkeleton />
-        </main>
+        <PageBody className="sm:pt-16">
+          <Skeleton className="h-[34px] w-60 rounded-md" />
+          <Skeleton className="mt-3 h-4 w-96 max-w-full" />
+          <ListSkeleton rows={3} className="mt-10" />
+        </PageBody>
       }
     >
       <Content />
@@ -43,129 +48,103 @@ async function Content() {
     const info = folderInfo(pinned);
     if (info.businessId) redirect(routeFor(info.businessId, info.status));
   }
+  const active = readConfig().activeFolder;
+  const folders = knownFolders();
+  const running = IN_APP ? new Set(folders.filter((f) => folderWorker(f.dir)).map((f) => f.dir)) : new Set<string>();
+  // The open one (web) or the running ones (app) first.
+  const sorted = [...folders].sort((a, b) =>
+    IN_APP ? Number(running.has(b.dir)) - Number(running.has(a.dir)) : Number(b.dir === active) - Number(a.dir === active),
+  );
+
   return (
     <I18nProvider lang={lang}>
-      <main lang={lang} className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
-        <PageHeader title={t(lang, "home.title")} subtitle={IN_APP ? t(lang, "home.subtitleApp") : t(lang, "home.subtitleWeb")} />
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-8">
-          {IN_APP ? <AppFolderList lang={lang} /> : <FolderList lang={lang} />}
-
-          <Card className="p-5">
-            <h2 className="mb-1 text-lg text-foreground">{t(lang, "home.newTitle")}</h2>
-            <p className="mb-4 text-sm text-muted-foreground">{t(lang, "home.newBody")}</p>
-            <NewBusinessForm home={AJUDAN_HOME} defaultLanguage={lang} />
-          </Card>
-
-          <Card className="p-5">
-            <h2 className="mb-1 text-lg text-foreground">{t(lang, "home.openTitle")}</h2>
-            <p className="mb-4 text-sm text-muted-foreground">{t(lang, "home.openBody")}</p>
-            <OpenFolderForm />
-          </Card>
-        </div>
+      <Toaster />
+      <SiteHeaderActions>
+        <NewBusinessDialog home={AJUDAN_HOME} defaultLanguage={lang} />
+      </SiteHeaderActions>
+      <main lang={lang} className="flex-1">
+        <PageBody className="sm:pt-16">
+          <PageHeader title={t(lang, "home.title")} description={IN_APP ? t(lang, "home.subtitleApp") : t(lang, "home.subtitleWeb")} />
+          {sorted.length ? (
+            <>
+              <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+                {sorted.map((f) => (
+                  <FolderRow key={f.dir} f={f} lang={lang} isOpen={IN_APP ? running.has(f.dir) : f.dir === active} />
+                ))}
+              </ul>
+              <div className="mt-2 flex items-center gap-2">
+                <OpenFolderDialog />
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              icon={<Store />}
+              title={t(lang, "home.emptyTitle")}
+              body={t(lang, "home.emptyBody", { dir: tilde(AJUDAN_HOME) })}
+              action={
+                <>
+                  <NewBusinessDialog home={AJUDAN_HOME} defaultLanguage={lang} />
+                  <OpenFolderDialog variant="secondary" />
+                </>
+              }
+            />
+          )}
+        </PageBody>
       </main>
     </I18nProvider>
   );
 }
 
-function FolderList({ lang }: { lang: UiLang }) {
-  const active = readConfig().activeFolder;
-  const folders = knownFolders().sort((a, b) => Number(b.dir === active) - Number(a.dir === active));
-  if (!folders.length) {
-    return <p className="text-sm text-muted-foreground">{t(lang, "home.empty", { dir: tilde(AJUDAN_HOME) })}</p>;
+/** One business: initial tile, name + tags, path and meta; the open/switch action and a "…" menu on the right. */
+function FolderRow({ f, isOpen, lang }: { f: FolderInfo; isOpen: boolean; lang: UiLang }) {
+  const s = f.status ? statusTone("business", f.status) : undefined;
+  let action: ReactNode = null;
+  if (f.exists && f.businessId) {
+    action = IN_APP ? (
+      <AppOpenButton dir={f.dir} label={isOpen ? t(lang, "home.showWindow") : t(lang, "home.openInWindow")} />
+    ) : (
+      <form action={openFolder.bind(null, f.dir)}>
+        <Button type="submit" size="sm" variant={isOpen ? "primary" : "secondary"}>
+          {isOpen ? t(lang, "home.continue") : t(lang, "home.switchTo")}
+        </Button>
+      </form>
+    );
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-      {folders.map((f) => (
-        <FolderCard key={f.dir} f={f} isOpen={f.dir === active} lang={lang} />
-      ))}
-    </div>
-  );
-}
-
-function FolderMeta({ f, lang }: { f: FolderInfo; lang: UiLang }) {
-  return (
-    <>
-      <div className="truncate font-mono text-xs text-muted-foreground">{tilde(f.dir)}</div>
-      <div className="text-xs text-muted-foreground">
-        {f.website ?? t(lang, "home.noWebsite")} · {tn(lang, "teammates", f.teammates)}
-      </div>
-    </>
-  );
-}
-
-function RemoveButton({ dir, lang }: { dir: string; lang: UiLang }) {
-  return (
-    <form action={forgetFolderAction.bind(null, dir)}>
-      <Button type="submit" variant="ghost" title={t(lang, "home.removeTitle")}>
-        {t(lang, "home.remove")}
-      </Button>
-    </form>
-  );
-}
-
-/** Desktop app: every business opens in its own window and keeps working while it's open. */
-function AppFolderList({ lang }: { lang: UiLang }) {
-  const folders = knownFolders().sort((a, b) => Number(!!folderWorker(b.dir)) - Number(!!folderWorker(a.dir)));
-  if (!folders.length) {
-    return <p className="text-sm text-muted-foreground">{t(lang, "home.empty", { dir: tilde(AJUDAN_HOME) })}</p>;
-  }
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-      {folders.map((f) => {
-        const running = !!folderWorker(f.dir);
-        const s = f.status ? STATUS[f.status] : undefined;
-        return (
-          <Card key={f.dir} className={`flex flex-wrap items-center gap-4 p-4 ${running ? "outline-3 outline-primary" : ""}`}>
-            <span aria-hidden className="font-pixel text-3xl leading-none text-primary">
-              {running ? "▣" : "▢"}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-pixel text-lg">{f.name}</span>
-                {running && <Badge tone="green">{t(lang, "home.running")}</Badge>}
-                {!f.exists && <Badge tone="red">{t(lang, "home.folderMissing")}</Badge>}
-                {s && <Badge tone={s.tone}>{t(lang, s.label)}</Badge>}
-              </div>
-              <FolderMeta f={f} lang={lang} />
-            </div>
-            <div className="flex gap-2">
-              {f.exists && f.businessId && (
-                <AppOpenButton dir={f.dir} label={running ? t(lang, "home.showWindow") : t(lang, "home.openInWindow")} />
-              )}
-              {!running && <RemoveButton dir={f.dir} lang={lang} />}
-            </div>
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
-
-function FolderCard({ f, isOpen, lang }: { f: FolderInfo; isOpen: boolean; lang: UiLang }) {
-  const s = f.status ? STATUS[f.status] : undefined;
-  return (
-    <Card className={`flex flex-wrap items-center gap-4 p-4 ${isOpen ? "outline-3 outline-primary" : ""}`}>
-      <span aria-hidden className="font-pixel text-3xl leading-none text-primary">
-        {isOpen ? "▣" : "▢"}
+    <li className={cn("flex min-h-14 items-center gap-3 px-3 py-2.5 transition-colors duration-100 hover:bg-hover/50", !f.exists && "opacity-70")}>
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-md text-[13px] font-semibold",
+          isOpen ? "bg-foreground text-background" : "bg-secondary text-muted-foreground",
+        )}
+      >
+        {(f.name.trim()[0] ?? "?").toUpperCase()}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-pixel text-lg">{f.name}</span>
-          {isOpen && <Badge tone="green">{t(lang, "home.open")}</Badge>}
-          {!isOpen && f.exists && <Badge>{t(lang, "home.paused")}</Badge>}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate text-sm leading-5 font-semibold text-foreground">{f.name}</span>
+          {isOpen && <Badge tone="green">{IN_APP ? t(lang, "home.running") : t(lang, "home.open")}</Badge>}
+          {!IN_APP && !isOpen && f.exists && <Badge>{t(lang, "home.paused")}</Badge>}
           {!f.exists && <Badge tone="red">{t(lang, "home.folderMissing")}</Badge>}
           {s && <Badge tone={s.tone}>{t(lang, s.label)}</Badge>}
         </div>
-        <FolderMeta f={f} lang={lang} />
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-tertiary">
+          <span className="truncate font-mono" title={f.dir}>
+            {tilde(f.dir)}
+          </span>
+          <span aria-hidden>·</span>
+          <span className="shrink-0 truncate">{f.website?.replace(/^https?:\/\//, "") ?? t(lang, "home.noWebsite")}</span>
+          <span aria-hidden className="hidden sm:inline">
+            ·
+          </span>
+          <span className="hidden shrink-0 sm:inline">{tn(lang, "teammates", f.teammates)}</span>
+        </div>
       </div>
-      <div className="flex gap-2">
-        {f.exists && f.businessId && (
-          <form action={openFolder.bind(null, f.dir)}>
-            <Button type="submit">{isOpen ? t(lang, "home.continue") : t(lang, "home.switchTo")}</Button>
-          </form>
-        )}
-        {!isOpen && <RemoveButton dir={f.dir} lang={lang} />}
+      <div className="flex shrink-0 items-center gap-1">
+        {action}
+        {isOpen ? <span aria-hidden className="size-7" /> : <FolderMenu dir={f.dir} name={f.name} />}
       </div>
-    </Card>
+    </li>
   );
 }
