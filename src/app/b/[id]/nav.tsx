@@ -13,6 +13,7 @@ const TABS: { href: string; label: MessageKey; icon: string }[] = [
   { href: "/desk", label: "nav.desk", icon: "☎" },
   { href: "/deliverables", label: "nav.work", icon: "▤" },
   { href: "/studio", label: "nav.studio", icon: "✦" },
+  { href: "/context", label: "nav.context", icon: "❖" },
   { href: "/files", label: "nav.files", icon: "▥" },
   { href: "/team", label: "nav.team", icon: "☺" },
   { href: "/onboarding", label: "nav.interview", icon: "✎" },

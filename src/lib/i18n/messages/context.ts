@@ -110,6 +110,7 @@ export const en = {
   "context.people.empty": "Nobody here yet. Add people or import a CSV in Studio → Contacts.",
   "context.people.noMatch": "Nobody in this view.",
   "context.people.manage": "Add, import & export in Studio",
+  "context.people.inContext": "Also in Context → People: saved views, summaries and follow-ups.",
   "context.peek.properties": "Properties",
   "context.peek.summary": "Summary",
   "context.peek.summaryHelp": "What the team knows about them. Teammates read this; edit it freely.",
@@ -123,6 +124,8 @@ export const en = {
   "context.peek.followUpSent": "Sent to {manager}, who passes it to {name}.",
   "context.peek.close": "Close",
   "context.peek.tagFollowUp": "Needs follow-up",
+  "context.peek.taskSelf": "Please follow up with {who} from our address book.",
+  "context.peek.taskOther": "Please ask {name} to follow up with {who} from our address book.",
 
   "context.readers.title": "What {name} reads",
   "context.readers.help": "Everything a teammate starts a task with, and the pages it fetched along the way.",
@@ -268,6 +271,7 @@ export const id: Record<keyof typeof en, string> = {
   "context.people.empty": "Belum ada orang. Tambahkan atau impor CSV di Studio → Kontak.",
   "context.people.noMatch": "Tidak ada orang di tampilan ini.",
   "context.people.manage": "Tambah, impor & ekspor di Studio",
+  "context.people.inContext": "Juga ada di Konteks → Orang: tampilan tersimpan, ringkasan, dan tindak lanjut.",
   "context.peek.properties": "Properti",
   "context.peek.summary": "Ringkasan",
   "context.peek.summaryHelp": "Yang diketahui tim tentang mereka. Tim membaca ini; silakan ubah.",
@@ -281,6 +285,8 @@ export const id: Record<keyof typeof en, string> = {
   "context.peek.followUpSent": "Dikirim ke {manager}, yang meneruskannya ke {name}.",
   "context.peek.close": "Tutup",
   "context.peek.tagFollowUp": "Perlu ditindaklanjuti",
+  "context.peek.taskSelf": "Tolong tindak lanjuti {who} dari buku alamat kita.",
+  "context.peek.taskOther": "Tolong minta {name} menindaklanjuti {who} dari buku alamat kita.",
 
   "context.readers.title": "Yang dibaca {name}",
   "context.readers.help": "Semua yang dibawa anggota tim saat mulai tugas, plus halaman yang diambilnya di tengah jalan.",
