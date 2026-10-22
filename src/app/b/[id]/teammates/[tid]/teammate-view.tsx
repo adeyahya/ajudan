@@ -522,7 +522,12 @@ async function HumanView({ businessId, human, mates }: { businessId: string; hum
                     <span className="block truncate">{r.title}</span>
                     <span className="text-xs text-muted-foreground">{createdByLabel(r.createdBy, mates)} · {time(r.createdAt)}</span>
                   </span>
-                  <Badge tone={TASK_TONE[r.status]}>{r.status === "waiting_human" ? "waiting" : r.status.replace("_", " ")}</Badge>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <Badge tone={TASK_TONE[r.status]}>{r.status === "waiting_human" ? "waiting" : r.status.replace("_", " ")}</Badge>
+                    {(r.status === "queued" || r.status === "waiting_human") && (
+                      <TaskButton action={cancelTaskAction} businessId={businessId} taskId={r.id} label="Cancel" />
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
