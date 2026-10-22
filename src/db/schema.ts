@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const id = () =>
   text("id")
@@ -132,7 +132,7 @@ export const tasks = sqliteTable("tasks", {
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
-});
+}, (t) => [index("tasks_teammate_status_idx").on(t.teammateId, t.status)]);
 
 export const approvals = sqliteTable("approvals", {
   id: id(),
@@ -150,7 +150,7 @@ export const approvals = sqliteTable("approvals", {
   note: text("note"),
   decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
-});
+}, (t) => [index("approvals_business_status_idx").on(t.businessId, t.status)]);
 
 /**
  * Nothing a teammate makes is posted by Ajudan: "ready_to_post" means the teammate finished
@@ -190,7 +190,7 @@ export const activityEvents = sqliteTable("activity_events", {
   message: text("message").notNull(),
   data: text("data", { mode: "json" }).$type<Record<string, unknown>>(),
   createdAt: createdAt(),
-});
+}, (t) => [index("activity_events_business_id_idx").on(t.businessId, t.id)]);
 
 /**
  * The WhatsApp conversation with human teammates, as Ajudan saw it: requests and
@@ -276,7 +276,7 @@ export const jobs = sqliteTable("jobs", {
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
-});
+}, (t) => [index("jobs_status_idx").on(t.status)]);
 
 export type Business = typeof businesses.$inferSelect;
 export type OnboardingMessage = typeof onboardingMessages.$inferSelect;

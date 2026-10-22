@@ -41,19 +41,16 @@ export async function decide(p: {
   if (!pending) return { ok: false, error: "This request was already decided." };
   const note = p.note?.trim() || null;
 
-  if (pending.toolName === CAPABILITY && p.decision === "approved") {
+  const granting = pending.toolName === CAPABILITY && p.decision === "approved";
+  if (granting) {
     const r = pending.input as CapabilityRequest;
     if (r.kind === "secret" && !p.secretValue?.trim()) {
       return { ok: false, error: `${r.name} is a credential: enter it in the app (Approvals page), never in a chat.` };
     }
-    try {
-      await grantCapability(pending, { secretValue: p.secretValue, note });
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
   }
 
-  // Only one decision wins (double clicks, the app and WhatsApp at the same time).
+  // Only one decision wins (double clicks, the app and WhatsApp at the same time):
+  // compare-and-set the status first, and only the winner runs the side effects.
   const decided = db
     .update(schema.approvals)
     .set({ status: p.decision, note, decidedAt: new Date() })
@@ -61,6 +58,19 @@ export async function decide(p: {
     .returning()
     .get();
   if (!decided) return { ok: false, error: "This request was already decided." };
+
+  if (granting) {
+    try {
+      await grantCapability(decided, { secretValue: p.secretValue, note });
+    } catch (err) {
+      // Back to pending so the owner can try again (e.g. the Keychain refused).
+      db.update(schema.approvals)
+        .set({ status: "pending", note: pending.note, decidedAt: null })
+        .where(and(eq(schema.approvals.id, decided.id), eq(schema.approvals.status, p.decision)))
+        .run();
+      return { ok: false, error: (err as Error).message };
+    }
+  }
   if (decided.toolName === CAPABILITY) {
     logEvent({
       businessId: p.businessId,

@@ -20,24 +20,55 @@ function alive(pid: number) {
   }
 }
 
-/** The live worker holding the folder, if any. */
-export function folderWorker(dir: string): Lock | null {
+function readLock(dir: string): Lock | null {
   try {
     const lock = JSON.parse(fs.readFileSync(lockPath(dir), "utf8")) as Lock;
-    return lock.pid && alive(lock.pid) ? lock : null;
+    return lock.pid ? lock : null;
   } catch {
     return null;
   }
 }
 
-/** Take the folder for this process. False if another live worker has it. */
+/** The live worker holding the folder, if any. */
+export function folderWorker(dir: string): Lock | null {
+  const lock = readLock(dir);
+  return lock && alive(lock.pid) ? lock : null;
+}
+
+/** Create the lock file only if it doesn't exist yet (O_EXCL: two workers can't both win). */
+function tryCreate(dir: string) {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(lockPath(dir), "wx");
+    fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * Take the folder for this process. False if another live worker has it. A lock
+ * left by a dead worker (crash, SIGKILL) is removed and taken over.
+ */
 export function acquireWorkerLock(dir: string) {
-  const held = folderWorker(dir);
-  if (held && held.pid !== process.pid) return false;
-  fs.writeFileSync(lockPath(dir), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
-  return true;
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (tryCreate(dir)) return true;
+      const held = readLock(dir);
+      if (held?.pid === process.pid) return true;
+      if (held && alive(held.pid)) return false;
+      fs.rmSync(lockPath(dir), { force: true }); // stale (dead pid or unreadable): retry once
+    }
+  } catch (err) {
+    console.error(`[worker] couldn't take the lock on ${dir}`, err);
+  }
+  return false;
 }
 
 export function releaseWorkerLock(dir: string) {
-  if (folderWorker(dir)?.pid === process.pid) fs.rmSync(lockPath(dir), { force: true });
+  if (readLock(dir)?.pid === process.pid) fs.rmSync(lockPath(dir), { force: true });
 }

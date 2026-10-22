@@ -72,10 +72,19 @@ function freePort() {
   });
 }
 
+/** A log past this size is moved aside as <name>.log.1 (the previous one is dropped). */
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
 function logStream(dir, name) {
   const logs = dir ? path.join(dir, "logs") : path.join(STATE_DIR, "logs");
   fs.mkdirSync(logs, { recursive: true });
-  return fs.createWriteStream(path.join(logs, `${name}.log`), { flags: "a" });
+  const file = path.join(logs, `${name}.log`);
+  try {
+    if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`);
+  } catch {
+    // no log yet
+  }
+  return fs.createWriteStream(file, { flags: "a" });
 }
 
 function run(name, args, { dir, port }) {
@@ -174,7 +183,10 @@ async function openSession(key, dir) {
     await ensureBuild(win);
     session.port = await freePort();
     session.web = startWeb(dir, session.port);
-    if (dir) session.worker = startWorker(dir);
+    if (dir) {
+      session.worker = startWorker(dir);
+      watchWorker(key, session);
+    }
     session.web.on("exit", (code) => {
       if (!quitting && sessions.get(key) === session && !win.isDestroyed()) {
         win.loadURL(loadingPage("The web server stopped", `Exit code ${code}. See ${dir ? path.join(dir, "logs/web.log") : "~/.ajudan/logs/web.log"}. Close this window and open it again.`));
@@ -185,6 +197,38 @@ async function openSession(key, dir) {
   } catch (err) {
     if (!win.isDestroyed()) win.loadURL(loadingPage("Couldn't open", String(err.message || err)));
   }
+}
+
+/** Restarts within this window count towards the cap; after it, the slate is clean. */
+const WORKER_RESTART_WINDOW_MS = 10 * 60_000;
+const WORKER_MAX_RESTARTS = 3;
+
+/**
+ * The worker is what makes the team work: if it dies (crash, out of memory), start
+ * it again with a growing delay. After a few crashes in a row, stop trying: the web
+ * app shows a "Worker not running" banner and logs/worker.log has the reason.
+ */
+function watchWorker(key, session) {
+  const child = session.worker;
+  child.on("exit", (code, signal) => {
+    if (quitting || sessions.get(key) !== session || session.win.isDestroyed()) return;
+    const now = Date.now();
+    session.workerExits = (session.workerExits ?? []).filter((t) => now - t < WORKER_RESTART_WINDOW_MS);
+    session.workerExits.push(now);
+    const n = session.workerExits.length;
+    const log = logStream(session.dir, "worker");
+    if (n > WORKER_MAX_RESTARTS) {
+      log.end(`--- ${new Date().toISOString()} worker stopped (${signal ?? code}) ${n - 1} times in ${WORKER_RESTART_WINDOW_MS / 60_000} min; not restarting ---\n`);
+      return;
+    }
+    const delay = 2000 * 2 ** (n - 1);
+    log.end(`--- ${new Date().toISOString()} worker stopped (${signal ?? code}); restarting in ${delay / 1000}s (${n}/${WORKER_MAX_RESTARTS}) ---\n`);
+    setTimeout(() => {
+      if (quitting || sessions.get(key) !== session || session.win.isDestroyed()) return;
+      session.worker = startWorker(session.dir);
+      watchWorker(key, session);
+    }, delay);
+  });
 }
 
 function signalGroup(child, signal) {

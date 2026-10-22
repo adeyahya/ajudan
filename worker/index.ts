@@ -14,11 +14,13 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
 import { CAPABILITY } from "@/lib/capabilities";
-import { readConfig } from "@/lib/folders";
+import { logEvent } from "@/lib/events";
+import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
+import { startMaintenance, stopMaintenance } from "./maintenance";
 import { startScheduler, stopScheduler } from "./scheduler";
 import { endFolderSession, PausedError } from "./session";
 import { startHumanInbox, stopHumanInbox } from "./humans";
@@ -86,6 +88,7 @@ function activate(dir: string | null) {
     .set({ state: "idle", currentActivity: null })
     .where(inArray(schema.teammates.state, ["working", "waiting"]))
     .run();
+  startMaintenance(dir); // daily backup and pruning; the first run is now
   if (!once) {
     startScheduler();
     startWhatsappSync();
@@ -94,17 +97,56 @@ function activate(dir: string | null) {
   console.log(`[worker] working on ${dir}`);
 }
 
-async function switchTo(dir: string | null) {
-  switching = true;
-  console.log(`[worker] switching folder → ${dir ?? "(none)"}`);
+function stopFolderServices() {
   stopScheduler();
   stopWhatsappSync();
   stopHumanInbox();
+  stopMaintenance();
   endFolderSession(); // aborts running Claude calls; their jobs go back to the queue
-  await Promise.allSettled([...inflight]);
-  if (folder) releaseWorkerLock(folder);
-  activate(dir);
-  switching = false;
+}
+
+async function switchTo(dir: string | null) {
+  switching = true;
+  console.log(`[worker] switching folder → ${dir ?? "(none)"}`);
+  try {
+    stopFolderServices();
+    await Promise.allSettled([...inflight]);
+    if (folder) releaseWorkerLock(folder);
+    tryActivate(dir);
+  } finally {
+    switching = false;
+  }
+}
+
+/** activate(), but a failure (e.g. a broken database) can't wedge the worker. */
+function tryActivate(dir: string | null) {
+  try {
+    activate(dir);
+  } catch (err) {
+    // Don't work a half-opened folder: treat it as blocked so tick() retries in a while.
+    console.error(`[worker] couldn't open ${dir ?? "(none)"}`, err);
+    stopFolderServices();
+    if (folder) releaseWorkerLock(folder);
+    pinDataDir(null);
+    folder = null;
+    blocked = dir;
+    lastBlockedTry = Date.now();
+    if (dir) noteActivationFailure(dir, err);
+  }
+}
+
+/** Best effort: tell the business's activity feed that its worker couldn't start. */
+function noteActivationFailure(dir: string, err: unknown) {
+  try {
+    const { businessId } = folderInfo(dir);
+    if (!businessId) return;
+    pinDataDir(dir);
+    logEvent({ businessId, type: "worker_error", message: `The worker couldn't open this folder: ${(err as Error)?.message ?? err}` });
+  } catch {
+    // the database itself is probably the problem
+  } finally {
+    pinDataDir(null);
+  }
 }
 
 let lastBlockedTry = 0;
@@ -116,7 +158,7 @@ function tick() {
   if (wanted && wanted === blocked) {
     if (Date.now() - lastBlockedTry > 5000) {
       lastBlockedTry = Date.now();
-      activate(wanted);
+      tryActivate(wanted);
     }
     return;
   }
@@ -139,17 +181,53 @@ function tick() {
   }
 }
 
-// Don't leave a wacli sync process holding the WhatsApp store lock behind.
-for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => {
-    stopWhatsappSync();
+/** How long a stop waits for running jobs to put themselves back in the queue. */
+const SHUTDOWN_MS = Number(process.env.AJUDAN_SHUTDOWN_MS ?? 10_000);
+let stopping = false;
+
+/**
+ * Stop cleanly: no new claims, abort running Claude calls (their jobs go back to the
+ * queue, so a restart doesn't redo their side effects), wait a little for them to
+ * settle, free the folder. A second signal exits at once.
+ */
+async function shutdown(sig: string) {
+  if (stopping) {
+    console.log(`[worker] ${sig} again; exiting now`);
+    process.exit(1);
+  }
+  stopping = true;
+  switching = true; // tick() claims nothing more
+  console.log(`[worker] ${sig}: stopping (${inflight.size} job(s) running)`);
+  try {
+    stopFolderServices();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled([...inflight]),
+      new Promise<void>((r) => {
+        timer = setTimeout(r, SHUTDOWN_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (inflight.size) console.log(`[worker] ${inflight.size} job(s) didn't settle in ${SHUTDOWN_MS}ms; leaving them for the next start`);
+  } catch (err) {
+    console.error("[worker] error while stopping", err);
+  } finally {
     if (folder) releaseWorkerLock(folder);
     process.exit(0);
-  });
+  }
 }
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => void shutdown(sig));
+}
+// Don't leave a wacli sync process holding the WhatsApp store lock behind.
 process.on("exit", () => {
   stopWhatsappSync();
   if (folder) releaseWorkerLock(folder);
+});
+// A forgotten promise mustn't take the whole worker down (and with it every job).
+process.on("unhandledRejection", (reason) => {
+  console.error("[worker] unhandled rejection", reason);
 });
 
 /** Started by the desktop app: quit if the app is gone (crashed or force-quit). */
@@ -168,7 +246,7 @@ function exitWithParent() {
 
 async function main() {
   exitWithParent();
-  activate(wantedFolder());
+  tryActivate(wantedFolder());
   if (once) {
     tick();
     while (inflight.size) {
