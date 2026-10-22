@@ -248,12 +248,7 @@ function ShellInner({ businessId, businessName, teammates, workerRunning, childr
           <main className="flex min-w-0 flex-1 flex-col">
             <div
               data-chat={chat || undefined}
-              className={cn(
-                "app-frame min-w-0 flex-1",
-                // Transitional (until the chat stream lands): chat pages size themselves with --chrome-h,
-                // the viewport height they lose to the top bar, this frame's padding and the phone's bottom bar.
-                chat && "[--chrome-h:calc(68px+56px+env(safe-area-inset-bottom))] md:[--chrome-h:68px]",
-              )}
+              className="app-frame min-w-0 flex-1"
             >
               {children}
             </div>

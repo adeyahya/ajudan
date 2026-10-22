@@ -593,7 +593,7 @@ export const id: Record<keyof typeof en, string> = {
   "manager.err.add": "Gagal menambahkan kamu ke tim",
 
   "onboarding.title": "Wawancara · {name}",
-  "onboarding.language": "Bahasa: {language}",
+  "onboarding.language": "Bahasa percakapan: {language}",
   "onboarding.doneHint": "Wawancara selesai. Kamu tetap bisa menambah detail di sini kapan saja: setiap pesan memperbarui profil bisnismu.",
   "onboarding.hint": "Pewawancara memakai jawabanmu untuk menyusun tim AI kamu.",
   "onboarding.hintFinish": " Jawab beberapa pertanyaan, lalu kamu bisa selesai kapan saja.",
