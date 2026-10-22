@@ -1,41 +1,37 @@
 import fs from "node:fs";
 import path from "node:path";
+import { CornerDownRight, Phone } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
+import { Suspense, type ReactNode } from "react";
 import { db, schema } from "@/db";
-import type { Task, TaskStatus, Teammate, TeammateState } from "@/db/schema";
+import type { Task, Teammate, TeammateState } from "@/db/schema";
 import { Chat, type ChatMessage } from "@/components/chat";
 import { ContextSuggestionCard, type SuggestionCardData } from "@/components/context-suggestion-card";
 import { ImageStrip } from "@/components/image-strip";
 import { LiveRefresh } from "@/components/live";
-import { Avatar, Badge, Button, Card, Prose } from "@/components/kit";
-import { getBusiness } from "@/lib/data";
+import { Avatar, Badge, Button, PropertyList, Prose, StatusDot, type BadgeTone } from "@/components/kit";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { getBusiness, getProgress } from "@/lib/data";
 import { resolveWorkspace } from "@/lib/paths";
 import { autonomyOptions, describeCron } from "@/lib/onboarding/schedule";
 import { dateLocale, t as tr, tn, uiLang, type MessageKey, type UiLang } from "@/lib/i18n";
 import { scheduleStatuses } from "@/lib/schedule-context";
+import { statusTone } from "@/lib/status-tones";
 import { ScheduleLine } from "@/app/b/[id]/team/schedule-line";
 import { DECISION, REPORT, RESULTS, REVISION } from "@/lib/manager";
 import { activeWatches, watchState } from "@/lib/watches";
+import { cn } from "@/lib/utils";
+import { AboutPeek, TeammateMenu } from "./about-peek";
 import { cancelTaskAction, retryTaskAction, runScheduledNow, sendTaskMessage } from "./actions";
 
-const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "red"> = {
-  idle: "neutral",
+const STATE_TONE: Record<TeammateState, BadgeTone> = {
+  idle: "gray",
   working: "green",
-  waiting: "amber",
+  waiting: "yellow",
   error: "red",
-};
-
-const TASK_TONE: Record<TaskStatus, "neutral" | "green" | "amber" | "red" | "blue"> = {
-  queued: "neutral",
-  running: "blue",
-  waiting_approval: "amber",
-  waiting_human: "amber",
-  done: "green",
-  failed: "red",
-  cancelled: "neutral",
 };
 
 async function loadTeammate(businessId: string, teammateId: string) {
@@ -181,10 +177,20 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   return createdBy;
 }
 
-const timeIn = (lang: UiLang) => (d: Date) => d.toLocaleString(dateLocale(lang), { dateStyle: "medium", timeStyle: "short" });
+/** "14:02" today, "12 Oct 2026, 14:02" otherwise. */
+const timeIn = (lang: UiLang) => {
+  const today = new Date().toDateString();
+  return (d: Date) =>
+    d.toDateString() === today
+      ? d.toLocaleTimeString(dateLocale(lang), { timeStyle: "short" })
+      : d.toLocaleString(dateLocale(lang), { dateStyle: "medium", timeStyle: "short" });
+};
 
-/** A task status badge in the UI language. */
-const statusLabel = (lang: UiLang, s: TaskStatus) => tr(lang, `taskStatus.${s}`);
+/** A task status tag in the UI language. */
+function TaskBadge({ status, lang }: { status: string; lang: UiLang }) {
+  const s = statusTone("task", status);
+  return <Badge tone={s.tone}>{tr(lang, s.label)}</Badge>;
+}
 
 /** Cancel / Retry under a task's reply (Server Functions in ./actions.ts). */
 function TaskButton({ action, businessId, taskId, label }: { action: (fd: FormData) => Promise<void>; businessId: string; taskId: string; label: string }) {
@@ -192,10 +198,22 @@ function TaskButton({ action, businessId, taskId, label }: { action: (fd: FormDa
     <form action={action} className="contents">
       <input type="hidden" name="businessId" value={businessId} />
       <input type="hidden" name="taskId" value={taskId} />
-      <Button type="submit" variant="ghost" size="xs">
+      <Button type="submit" variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
         {label}
       </Button>
     </form>
+  );
+}
+
+/** A quiet text link in a reply's action row. */
+function RowLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
+  return (
+    <Link
+      href={href}
+      className={cn("inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-hover hover:text-foreground", className)}
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -217,20 +235,21 @@ function toMessages(
     const mine = stepsByTask.get(task.id) ?? [];
     const handedOff = children.get(task.id) ?? [];
     const delegated = handedOff.length ? (
-      <div className="w-full space-y-1 pb-1">
+      <ul className="-mx-1.5 flex flex-col">
         {handedOff.map((c) => (
-          <Link
-            key={c.id}
-            href={`/b/${businessId}/teammates/${c.teammateId}`}
-            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <span aria-hidden>↳</span>
-            <span className="font-pixel text-foreground">{mates.find((m) => m.id === c.teammateId)?.name ?? tr(lang, "mate.teammate")}</span>
-            <span className="min-w-0 flex-1 truncate">{c.title}</span>
-            <Badge tone={TASK_TONE[c.status]}>{statusLabel(lang, c.status)}</Badge>
-          </Link>
+          <li key={c.id}>
+            <Link
+              href={`/b/${businessId}/teammates/${c.teammateId}`}
+              className="flex h-8 min-w-0 items-center gap-2 rounded-md px-1.5 text-[13px] leading-[18px] text-muted-foreground transition-colors duration-100 hover:bg-hover"
+            >
+              <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-tertiary" strokeWidth={1.75} />
+              <span className="shrink-0 font-medium text-foreground">{mates.find((m) => m.id === c.teammateId)?.name ?? tr(lang, "mate.teammate")}</span>
+              <span className="min-w-0 flex-1 truncate">{c.title}</span>
+              <TaskBadge status={c.status} lang={lang} />
+            </Link>
+          </li>
         ))}
-      </div>
+      </ul>
     ) : null;
     const user: ChatMessage = {
       id: `${task.id}-q`,
@@ -254,9 +273,10 @@ function toMessages(
           footer: (
             <>
               {task.status === "waiting_approval" && (
-                <Link href={`/b/${businessId}/approvals`} className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400">
-                  {tr(lang, "mate.decideOnApprovals")}
-                </Link>
+                <RowLink href={`/b/${businessId}/approvals`} className="-ml-0.5 text-warning hover:text-warning">
+                  <StatusDot state="waiting" className="mr-1.5" />
+                  {tr(lang, "chathome.decideInInbox")}
+                </RowLink>
               )}
               <TaskButton action={cancelTaskAction} businessId={businessId} taskId={task.id} label={tr(lang, "mate.cancel")} />
             </>
@@ -264,6 +284,8 @@ function toMessages(
         },
       ];
     }
+    const images = taskImages.get(task.id) ?? [];
+    const suggestions = pageSuggestions.get(task.id) ?? [];
     return [
       ...(task.createdBy === REPORT || task.createdBy === DECISION ? [] : [user]),
       {
@@ -278,18 +300,21 @@ function toMessages(
         ]
           .filter(Boolean)
           .join(" · "),
+        extras:
+          suggestions.length || delegated || images.length ? (
+            <>
+              {suggestions.map((s) => (
+                <ContextSuggestionCard key={s.id} businessId={businessId} s={s} />
+              ))}
+              {delegated}
+              {images.length > 0 && <ImageStrip businessId={businessId} images={images} />}
+            </>
+          ) : undefined,
         footer: (
           <>
-            {pageSuggestions.get(task.id)?.map((s) => <ContextSuggestionCard key={s.id} businessId={businessId} s={s} />)}
-            {delegated}
-            {(taskImages.get(task.id)?.length ?? 0) > 0 && (
-              <ImageStrip businessId={businessId} images={taskImages.get(task.id)!} className="w-full pb-1" />
-            )}
-            <Badge tone={TASK_TONE[task.status]}>{statusLabel(lang, task.status)}</Badge>
-            {task.costUsd > 0 && <span className="text-xs text-muted-foreground">${task.costUsd.toFixed(2)}</span>}
-            <Link href={`/b/${businessId}/deliverables`} className="text-xs text-muted-foreground hover:text-foreground">
-              {tr(lang, "mate.viewWork")}
-            </Link>
+            <TaskBadge status={task.status} lang={lang} />
+            {task.costUsd > 0 && <span className="px-1.5 tabular-nums">${task.costUsd.toFixed(2)}</span>}
+            <RowLink href={`/b/${businessId}/deliverables`}>{tr(lang, "chathome.viewWork")}</RowLink>
             {(task.status === "failed" || task.status === "cancelled") && (
               <TaskButton action={retryTaskAction} businessId={businessId} taskId={task.id} label={tr(lang, "mate.retry")} />
             )}
@@ -300,10 +325,44 @@ function toMessages(
   });
 }
 
+/** The 44px bar over a conversation: who, their state, what needs the owner, and the "…" menu. */
+function ConversationHeader({
+  person,
+  profileHref,
+  badge,
+  sub,
+  aside,
+}: {
+  person: Teammate;
+  profileHref: string;
+  badge: ReactNode;
+  sub: ReactNode;
+  aside?: ReactNode;
+}) {
+  return (
+    <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-4">
+      <Link
+        href={profileHref}
+        scroll={false}
+        className="-ml-1 flex min-w-0 shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 transition-colors duration-100 hover:bg-hover"
+      >
+        <Avatar seed={person.id} name={person.name} color={person.color} size={28} />
+        <span className="max-w-[12rem] truncate text-sm leading-5 font-semibold text-foreground">{person.name}</span>
+      </Link>
+      {badge}
+      <span className="hidden min-w-0 flex-1 truncate text-xs text-tertiary sm:block">{sub}</span>
+      <span className="flex-1 sm:hidden" />
+      {aside}
+    </header>
+  );
+}
+
 /**
- * A teammate's chat page. With `manager`, it's the owner's main conversation: team
+ * A teammate's conversation. With `manager`, it's the owner's main conversation: team
  * updates appear as the manager's messages, and each reply lists what was delegated.
- * `embedded` (the chat home): only the conversation, filling its parent's height.
+ * `embedded` (the chat home): only the conversation, filling its parent's height; its
+ * profile opens on the manager's own page. Otherwise the profile is a side peek (`?about=1`)
+ * beside the conversation.
  */
 export async function TeammateView({ id, tid, manager = false, embedded = false }: { id: string; tid: string; manager?: boolean; embedded?: boolean }) {
   const [biz, data] = await Promise.all([getBusiness(id), loadTeammate(id, tid)]);
@@ -311,166 +370,232 @@ export async function TeammateView({ id, tid, manager = false, embedded = false 
   const lang = uiLang(biz.language);
   if (data.teammate.kind === "human") return <HumanView businessId={id} human={data.teammate} mates={data.mates} lang={lang} />;
   const { teammate: t, tasks, steps, deliverableCount, mates, memory, taskImages, children, pageSuggestions } = data;
+  const progress = await getProgress(id);
+  const trust = progress.mates[t.id]?.trust;
   const managerSuggestions = [tr(lang, "mate.suggest1"), tr(lang, "mate.suggest2"), tr(lang, "mate.suggest3")];
   const waiting = tasks.some((task) => task.status === "waiting_approval");
   // The manager's page shows whose WhatsApp replies the team is waiting for.
   const watches = manager ? activeWatches(id) : [];
   const schedule = scheduleStatuses([t]).get(t.id);
+  const profileHref = `/b/${id}/teammates/${t.id}?about=1`;
+  const filesHref = t.workspaceDir
+    ? `/b/${id}/files?path=${encodeURIComponent(`${t.workspaceDir.replace(/^.*?(teammates\/)/, "$1")}/memory.md`)}`
+    : undefined;
 
+  const conversation = (
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <ConversationHeader
+        person={t}
+        profileHref={profileHref}
+        badge={<Badge tone={STATE_TONE[t.state]}>{tr(lang, `mate.state.${t.state}`)}</Badge>}
+        sub={
+          <>
+            {t.currentActivity || t.title}
+            {trust && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="ml-2 rounded-sm tabular-nums">
+                    · {tr(lang, "chathome.trustShort", { score: trust.score })}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-64">{tr(lang, "chathome.trustTitle", { score: trust.score, good: trust.good, changes: trust.changes })}</TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+        aside={
+          <>
+            {waiting && (
+              <Button variant="secondary" size="sm" asChild>
+                <Link href={`/b/${id}/approvals`}>
+                  <StatusDot state="waiting" />
+                  {tr(lang, "chathome.needsApproval")}
+                </Link>
+              </Button>
+            )}
+            <TeammateMenu
+              businessId={id}
+              teammateId={t.id}
+              profileHref={profileHref}
+              filesHref={filesHref}
+              teamHref={`/b/${id}/team`}
+              runNow={t.schedulePrompt ? runScheduledNow : undefined}
+            />
+          </>
+        }
+      />
+      <Chat
+        className="flex-1"
+        agent={{ id: t.id, name: t.name, color: t.color }}
+        messages={toMessages(id, tasks, steps, mates, taskImages, children, lang, pageSuggestions)}
+        busy={false}
+        sendAction={sendTaskMessage.bind(null, id, t.id)}
+        uploadBusinessId={id}
+        placeholder={manager ? tr(lang, "mate.askManager", { name: t.name }) : tr(lang, "mate.askTeammate", { name: t.name })}
+        suggestions={tasks.length === 0 ? (manager ? managerSuggestions : t.responsibilities.slice(0, 3)) : []}
+        emptyState={
+          <Intro
+            person={t}
+            title={manager ? tr(lang, "chathome.talkTo", { name: t.name }) : `${t.name} · ${t.title}`}
+            body={manager ? tr(lang, "mate.emptyManager", { name: t.name }) : tr(lang, "mate.emptyTeammate", { name: t.name })}
+          />
+        }
+      />
+    </section>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <LiveRefresh businessId={id} />
+        {conversation}
+      </>
+    );
+  }
+
+  const autonomy = autonomyOptions(lang).find((o) => o.value === t.autonomy)?.label ?? t.autonomy;
   return (
-    <div className={embedded ? "flex h-full min-h-0 flex-col" : "grid gap-6 lg:grid-cols-[1fr_19rem]"}>
+    <div className="flex h-full min-h-0 min-w-0 flex-1">
       <LiveRefresh businessId={id} />
-
-      <section className={embedded ? "flex min-h-0 min-w-0 flex-1 flex-col" : "flex h-[calc(100dvh-var(--chrome-h,8.75rem))] min-w-0 flex-col"}>
-        <div className="flex items-center gap-3 border-b pb-3">
-          <Link href={`/b/${id}/office`} className="text-xs text-muted-foreground hover:text-foreground">
-            {tr(lang, "mate.backToOffice")}
-          </Link>
-          <Avatar seed={t.id} name={t.name} color={t.color} size={36} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="font-semibold tracking-tight">{t.name}</h1>
-              <Badge tone={STATE_TONE[t.state]}>{tr(lang, `mate.state.${t.state}`)}</Badge>
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              {t.currentActivity ? <span className="italic">{t.currentActivity}</span> : t.title}
-            </p>
-          </div>
-          {waiting && (
-            <Link href={`/b/${id}/approvals`} className="text-xs font-medium text-amber-600 hover:underline dark:text-amber-400">
-              {tr(lang, "mate.needsApproval")}
-            </Link>
-          )}
-        </div>
-        <Chat
-          className="flex-1"
-          agent={{ id: t.id, name: t.name, color: t.color }}
-          messages={toMessages(id, tasks, steps, mates, taskImages, children, lang, pageSuggestions)}
-          busy={false}
-          sendAction={sendTaskMessage.bind(null, id, t.id)}
-          uploadBusinessId={id}
-          placeholder={manager ? tr(lang, "mate.askManager", { name: t.name }) : tr(lang, "mate.askTeammate", { name: t.name })}
-          suggestions={tasks.length === 0 ? (manager ? managerSuggestions : t.responsibilities.slice(0, 3)) : []}
-          emptyState={
-            <div className="py-12 text-center">
-              <Avatar seed={t.id} name={t.name} color={t.color} size={48} />
-              <p className="mt-3 font-medium">
-                {t.name} · {t.title}
-              </p>
-              <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-                {manager ? tr(lang, "mate.emptyManager", { name: t.name }) : tr(lang, "mate.emptyTeammate", { name: t.name })}
-              </p>
-            </div>
-          }
+      {conversation}
+      <Suspense fallback={null}>
+      <AboutPeek title={tr(lang, "chathome.about", { name: t.name })}>
+        <PeekIdentity person={t} sub={t.title} />
+        <PropertyList
+          className="mt-4"
+          items={[
+            { label: tr(lang, "mate.autonomy"), value: autonomy },
+            {
+              label: tr(lang, "mate.workSaved"),
+              value: (
+                <Link href={`/b/${id}/deliverables`} className="rounded-sm hover:underline">
+                  {tn(lang, "mate.items", deliverableCount)}
+                </Link>
+              ),
+            },
+            ...(trust ? [{ label: tr(lang, "chathome.trustLabel"), value: tr(lang, "chathome.trustShort", { score: trust.score }) }] : []),
+            ...(t.schedule ? [{ label: tr(lang, "mate.scheduled"), value: describeCron(t.schedule, lang) }] : []),
+          ]}
         />
-      </section>
 
-      <aside className={embedded ? "hidden" : "space-y-4 lg:pt-1"}>
-        <Card className="space-y-3 p-4">
-          <div className="flex items-center gap-3">
-            <Avatar seed={t.id} name={t.name} color={t.color} size={44} />
-            <div>
-              <div className="font-semibold">{t.name}</div>
-              <div className="text-xs text-muted-foreground">{t.title}</div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-lg bg-muted p-2">
-              <div className="text-muted-foreground">{tr(lang, "mate.autonomy")}</div>
-              <div className="font-medium">{autonomyOptions(lang).find((o) => o.value === t.autonomy)?.label ?? t.autonomy}</div>
-            </div>
-            <div className="rounded-lg bg-muted p-2">
-              <div className="text-muted-foreground">{tr(lang, "mate.workSaved")}</div>
-              <Link href={`/b/${id}/deliverables`} className="font-medium hover:underline">
-                {tn(lang, "mate.items", deliverableCount)}
-              </Link>
-            </div>
-          </div>
-          {t.schedulePrompt && (
-            <form action={runScheduledNow} className="space-y-2 border-t pt-3">
+        {t.schedulePrompt && (
+          <PeekSection title={tr(lang, "mate.scheduled")}>
+            <p className="text-[13px] leading-5 text-muted-foreground">{t.schedulePrompt}</p>
+            {schedule && (
+              <div className="mt-1.5 [&_p]:flex [&_p]:flex-col [&_p]:text-xs [&_p]:text-tertiary">
+                <ScheduleLine s={schedule} lang={lang} />
+              </div>
+            )}
+            <form action={runScheduledNow} className="mt-3">
               <input type="hidden" name="businessId" value={id} />
               <input type="hidden" name="teammateId" value={t.id} />
-              <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{t.schedule ? describeCron(t.schedule, lang) : tr(lang, "mate.scheduled")}:</span>{" "}
-                {t.schedulePrompt}
-              </p>
-              {schedule && <ScheduleLine s={schedule} lang={lang} />}
-              <Button variant="secondary" size="sm" className="w-full">
-                {tr(lang, "mate.runNow")}
+              <Button variant="secondary" size="sm">
+                {tr(lang, "chathome.runNow")}
               </Button>
             </form>
-          )}
-        </Card>
+          </PeekSection>
+        )}
 
         {watches.length > 0 && (
-          <Card className="space-y-2 p-4">
-            <h2 className="text-sm font-semibold">{tr(lang, "mate.waitingReplies")}</h2>
-            <ul className="space-y-2 text-sm">
+          <PeekSection title={tr(lang, "mate.waitingReplies")}>
+            <ul className="divide-y divide-border">
               {watches.slice(0, 12).map((w) => {
                 const state = watchState(w);
                 return (
-                  <li key={w.id} className="flex items-start justify-between gap-2">
+                  <li key={w.id} className="flex items-center justify-between gap-2 py-2">
                     <span className="min-w-0">
-                      <span className="block truncate">{w.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block truncate text-[13px] leading-[18px] font-medium">{w.name}</span>
+                      <span className="block truncate text-xs text-tertiary">
                         {mates.find((m) => m.id === w.teammateId)?.name ?? tr(lang, "mate.team")}
                         {w.purpose ? ` · ${w.purpose}` : ""}
                       </span>
                     </span>
-                    <Badge tone={state === "replied" ? "green" : state === "no reply" ? "red" : "amber"}>
+                    <Badge tone={state === "replied" ? "green" : state === "no reply" ? "red" : "yellow"}>
                       {tr(lang, state === "replied" ? "mate.watch.replied" : state === "no reply" ? "mate.watch.noReply" : "mate.watch.waiting")}
                     </Badge>
                   </li>
                 );
               })}
             </ul>
-          </Card>
+          </PeekSection>
         )}
 
         {t.persona && (
-          <Card className="space-y-2 p-4">
-            <h2 className="text-sm font-semibold">{tr(lang, "mate.brief")}</h2>
-            <p className="whitespace-pre-line text-sm">{t.persona}</p>
-            <Link href={`/b/${id}/team`} className="text-xs text-muted-foreground hover:text-foreground">
-              {tr(lang, "mate.editOnTeam")}
-            </Link>
-          </Card>
+          <PeekSection title={tr(lang, "mate.brief")}>
+            <p className="text-[13px] leading-[22px] whitespace-pre-line text-foreground">{t.persona}</p>
+          </PeekSection>
         )}
 
-        <Card className="space-y-2 p-4">
-          <h2 className="text-sm font-semibold">{tr(lang, "mate.responsibilities")}</h2>
-          <ul className="list-disc space-y-1 pl-4 text-sm">
+        <PeekSection title={tr(lang, "mate.responsibilities")}>
+          <ul className="list-disc space-y-1 pl-4 text-[13px] leading-5 marker:text-tertiary">
             {t.responsibilities.map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
           {t.kpis.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
+            <div className="mt-3 flex flex-wrap gap-1">
               {t.kpis.map((k) => (
                 <Badge key={k}>{k}</Badge>
               ))}
             </div>
           )}
-        </Card>
+        </PeekSection>
 
-        <Card className="space-y-2 p-4">
-          <h2 className="text-sm font-semibold">{tr(lang, "mate.memory")}</h2>
-          <p className="text-xs text-muted-foreground">
-            {tr(lang, "mate.memoryNotes", { name: t.name })}{" "}
-            {t.workspaceDir && (
-              <Link href={`/b/${id}/files?path=${encodeURIComponent(`${t.workspaceDir.replace(/^.*?(teammates\/)/, "$1")}/memory.md`)}`} className="underline hover:text-foreground">
+        <PeekSection
+          title={tr(lang, "mate.memory")}
+          action={
+            filesHref && (
+              <Link href={filesHref} className="rounded-sm text-xs text-tertiary hover:text-foreground">
                 {tr(lang, "mate.openInFiles")}
               </Link>
-            )}
-          </p>
+            )
+          }
+        >
           {memory ? (
-            <Prose className="max-h-80 overflow-y-auto text-xs">{memory}</Prose>
+            <div className="rounded-lg bg-muted px-4 py-3 text-[13px] [&_p]:text-[13px]">
+              <Prose>{memory}</Prose>
+            </div>
           ) : (
-            <p className="text-sm text-muted-foreground">{tr(lang, "mate.noMemory")}</p>
+            <p className="text-[13px] text-muted-foreground">{tr(lang, "mate.noMemory")}</p>
           )}
-        </Card>
-      </aside>
+        </PeekSection>
+      </AboutPeek>
+      </Suspense>
     </div>
+  );
+}
+
+function Intro({ person, title, body }: { person: Teammate; title: string; body: string }) {
+  return (
+    <div className="flex max-w-md flex-col items-center py-12 text-center">
+      <Avatar seed={person.id} name={person.name} color={person.color} size={64} />
+      <p className="mt-4 text-base leading-6 font-semibold text-foreground">{title}</p>
+      <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">{body}</p>
+    </div>
+  );
+}
+
+function PeekIdentity({ person, sub }: { person: Teammate; sub: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <Avatar seed={person.id} name={person.name} color={person.color} size={40} />
+      <div className="min-w-0">
+        <p className="truncate text-base leading-6 font-semibold text-foreground">{person.name}</p>
+        <p className="truncate text-[13px] leading-[18px] text-muted-foreground">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
+function PeekSection({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="mt-6 border-t border-border pt-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-sm leading-5 font-semibold text-foreground">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -520,31 +645,21 @@ async function HumanView({
           role: "assistant",
           content: m.text,
           meta: `WhatsApp · ${time(m.sentAt)}`,
-          footer: m.attachments.length ? (
-            <ImageStrip businessId={businessId} images={m.attachments} className="w-full pb-1" />
-          ) : undefined,
+          extras: m.attachments.length ? <ImageStrip businessId={businessId} images={m.attachments} /> : undefined,
         },
   );
   const queued = requests.some((r) => r.status === "queued" || r.status === "running");
+  const profileHref = `/b/${businessId}/teammates/${human.id}?about=1`;
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
+    <div className="flex h-full min-h-0 min-w-0 flex-1">
       <LiveRefresh businessId={businessId} />
-      <section className="flex h-[calc(100dvh-var(--chrome-h,8.75rem))] min-w-0 flex-col">
-        <div className="flex items-center gap-3 border-b pb-3">
-          <Link href={`/b/${businessId}/team`} className="text-xs text-muted-foreground hover:text-foreground">
-            {tr(lang, "mate.backToTeam")}
-          </Link>
-          <Avatar seed={human.id} name={human.name} color={human.color} size={36} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="font-semibold tracking-tight">{human.name}</h1>
-              <Badge tone="blue">{tr(lang, "mate.personBadge")}</Badge>
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              {human.title} · +{human.phone}
-            </p>
-          </div>
-        </div>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ConversationHeader
+          person={human}
+          profileHref={profileHref}
+          badge={<Badge tone="blue">{tr(lang, "mate.personBadge")}</Badge>}
+          sub={`${human.title} · +${human.phone}`}
+        />
         <Chat
           className="flex-1"
           agent={{ id: human.id, name: human.name, color: human.color }}
@@ -554,30 +669,32 @@ async function HumanView({
           sendAction={sendTaskMessage.bind(null, businessId, human.id)}
           uploadBusinessId={businessId}
           placeholder={tr(lang, "mate.sendPlaceholder", { name: human.name })}
-          emptyState={
-            <div className="py-12 text-center">
-              <Avatar seed={human.id} name={human.name} color={human.color} size={48} />
-              <p className="mt-3 font-medium">
-                {human.name} · {human.title}
-              </p>
-              <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{tr(lang, "mate.humanEmpty", { name: human.name })}</p>
-            </div>
-          }
+          emptyState={<Intro person={human} title={`${human.name} · ${human.title}`} body={tr(lang, "mate.humanEmpty", { name: human.name })} />}
         />
       </section>
-      <aside className="space-y-4 lg:pt-1">
-        <Card className="space-y-2 p-4">
-          <h2 className="text-sm font-semibold">{tr(lang, "mate.requests")}</h2>
+      <Suspense fallback={null}>
+      <AboutPeek title={tr(lang, "chathome.about", { name: human.name })}>
+        <PeekIdentity
+          person={human}
+          sub={
+            <span className="inline-flex items-center gap-1.5">
+              <Phone aria-hidden className="size-3.5" strokeWidth={1.75} />+{human.phone}
+            </span>
+          }
+        />
+        <PeekSection title={tr(lang, "mate.requests")}>
           {requests.length ? (
-            <ul className="space-y-2 text-sm">
+            <ul className="divide-y divide-border">
               {requests.map((r) => (
-                <li key={r.id} className="flex items-start justify-between gap-2">
+                <li key={r.id} className="flex items-center justify-between gap-2 py-2">
                   <span className="min-w-0">
-                    <span className="block truncate">{r.title}</span>
-                    <span className="text-xs text-muted-foreground">{createdByLabel(r.createdBy, mates, lang)} · {time(r.createdAt)}</span>
+                    <span className="block truncate text-[13px] leading-[18px] font-medium">{r.title}</span>
+                    <span className="block truncate text-xs text-tertiary">
+                      {createdByLabel(r.createdBy, mates, lang)} · {time(r.createdAt)}
+                    </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
-                    <Badge tone={TASK_TONE[r.status]}>{r.status === "waiting_human" ? tr(lang, "mate.waiting") : statusLabel(lang, r.status)}</Badge>
+                    <TaskBadge status={r.status} lang={lang} />
                     {(r.status === "queued" || r.status === "waiting_human") && (
                       <TaskButton action={cancelTaskAction} businessId={businessId} taskId={r.id} label={tr(lang, "mate.cancel")} />
                     )}
@@ -586,20 +703,20 @@ async function HumanView({
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">{tr(lang, "mate.noRequests")}</p>
+            <p className="text-[13px] text-muted-foreground">{tr(lang, "mate.noRequests")}</p>
           )}
-        </Card>
+        </PeekSection>
         {human.responsibilities.length > 0 && (
-          <Card className="space-y-2 p-4">
-            <h2 className="text-sm font-semibold">{tr(lang, "mate.canAskFor", { name: human.name })}</h2>
-            <ul className="list-disc space-y-1 pl-4 text-sm">
+          <PeekSection title={tr(lang, "mate.canAskFor", { name: human.name })}>
+            <ul className="list-disc space-y-1 pl-4 text-[13px] leading-5 marker:text-tertiary">
               {human.responsibilities.map((r) => (
                 <li key={r}>{r}</li>
               ))}
             </ul>
-          </Card>
+          </PeekSection>
         )}
-      </aside>
+      </AboutPeek>
+      </Suspense>
     </div>
   );
 }

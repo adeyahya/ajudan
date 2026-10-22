@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertCircleIcon,
   ArrowUpIcon,
   CheckIcon,
   CopyIcon,
@@ -15,15 +16,13 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
 import { useT, useTn } from "@/components/i18n";
 import { ImageStrip, fileUrl } from "@/components/image-strip";
-import { Avatar } from "@/components/kit";
+import { Avatar, Button, IconButton } from "@/components/kit";
 import { Markdown } from "@/components/markdown";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { Button } from "@/components/ui/button";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
-import { Message, MessageContent, MessageFooter, MessageHeader } from "@/components/ui/message";
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -51,25 +50,37 @@ export type ChatMessage = {
   content: string;
   /** Files sent with the message (folder-relative paths). */
   attachments?: string[];
-  /** Small line above the message, e.g. "from schedule · 09:00". */
+  /** Small line next to the name, e.g. "Scheduled · 09:00". */
   meta?: string;
   /** Tool steps the assistant took for this message (shown collapsed). */
   steps?: string[];
-  /** Extra UI under an assistant message (badges, actions); under the trace while pending. */
+  /** Content under an assistant reply that always shows (suggestion cards, delegations, images). */
+  extras?: ReactNode;
+  /**
+   * Actions under an assistant reply (status, cost, View work, Retry). Revealed on hover or
+   * keyboard focus once the reply is done; always shown while pending or on an error.
+   */
   footer?: ReactNode;
   /** Shown in place of content while the assistant works on this message. */
   pending?: boolean;
   error?: boolean;
 };
 
-export type ChatAgent = { id?: string; name: string; color: string; subtitle?: string };
+/** `avatar` replaces the chibi portrait (e.g. the interviewer's icon tile). */
+export type ChatAgent = { id?: string; name: string; color: string; subtitle?: string; avatar?: ReactNode };
 
 /** A file being uploaded (or uploaded) for the next message. */
 type Upload = { key: string; name: string; progress: number; path?: string; error?: string };
 
+/** Hover-revealed on devices that hover; always visible on touch. Opacity keeps it tabbable and the layout still. */
+const REVEAL =
+  "transition-opacity duration-100 motion-reduce:transition-none pointer-fine:opacity-0 pointer-fine:group-hover/turn:opacity-100 pointer-fine:group-focus-within/turn:opacity-100";
+
 /**
- * Chat thread built from shadcn AI Elements: Message Scroller keeps the latest turn in
- * view, user turns are bubbles, agent turns are markdown with a collapsible trace.
+ * A conversation thread (UI-PLAN §2.5): agent turns are avatar + name + markdown with no
+ * box, owner turns are right-aligned grey bubbles, and the composer sits under the thread.
+ * Message Scroller keeps the latest turn in view. `?compose=1` in the URL focuses the composer
+ * (the palette's "Give a task" lands here) and is removed from the URL.
  */
 export function Chat({
   agent,
@@ -96,6 +107,7 @@ export function Chat({
   /** Lets the owner drop or pick files (uploaded to this business's media library). */
   uploadBusinessId?: string;
   placeholder?: string;
+  /** Up to three starter prompts above the composer, until the first message. */
   suggestions?: string[];
   emptyState?: ReactNode;
   inputDisabled?: boolean;
@@ -167,52 +179,52 @@ export function Chat({
   return (
     <div className={cn("relative flex min-h-0 flex-col", className)} {...dropProps}>
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80">
-          <div className="pixel-panel flex flex-col items-center gap-2 px-8 py-6 text-center">
-            <UploadIcon className="size-8 text-primary" />
-            <p className="font-pixel">{t("chat.dropTitle")}</p>
+        <div className="pointer-events-none absolute inset-0 z-20 bg-background/85 p-2">
+          <div className="flex size-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-ring bg-primary-soft text-center">
+            <UploadIcon aria-hidden className="size-5 text-primary" strokeWidth={1.75} />
+            <p className="text-sm leading-5 font-semibold text-foreground">{t("chat.dropTo", { name: agent.name })}</p>
             <p className="text-xs text-muted-foreground">{t("chat.dropBody", { name: agent.name })}</p>
           </div>
         </div>
       )}
       {optimistic.length === 0 && !showThinking ? (
         // The scroller hides itself until it has an item to anchor to.
-        <div className="flex flex-1 items-center justify-center overflow-y-auto">{emptyState}</div>
+        <div className="flex flex-1 items-center justify-center overflow-y-auto px-4">{emptyState}</div>
       ) : (
-      <MessageScrollerProvider autoScroll>
-        <MessageScroller className="flex-1">
-          <MessageScrollerViewport>
-            <MessageScrollerContent className="mx-auto w-full max-w-3xl px-1 pt-2 pb-6">
-              {optimistic.map((m) => (
-                // Only the latest user turn is an anchor. When the optimistic message is
-                // swapped for the saved one, the scroller jumps to the first anchor it hasn't
-                // scrolled to yet, which would be the oldest message if every turn were one.
-                <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.id === lastUserId}>
-                  {m.role === "user" ? <UserTurn m={m} businessId={uploadBusinessId} /> : <AgentTurn m={m} agent={agent} />}
-                </MessageScrollerItem>
-              ))}
-              {showThinking && (
-                <MessageScrollerItem messageId="thinking">
-                  <AgentTurn
-                    agent={agent}
-                    m={{ id: "thinking", role: "assistant", content: "", pending: true, steps: liveSteps, meta: busyLabel ?? t("chat.thinking") }}
-                  />
-                </MessageScrollerItem>
-              )}
-            </MessageScrollerContent>
-          </MessageScrollerViewport>
-          <MessageScrollerButton />
-        </MessageScroller>
-      </MessageScrollerProvider>
+        <MessageScrollerProvider autoScroll>
+          <MessageScroller className="flex-1">
+            <MessageScrollerViewport>
+              <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-0 px-4 pt-4 pb-6">
+                {optimistic.map((m) => (
+                  // Only the latest user turn is an anchor. When the optimistic message is
+                  // swapped for the saved one, the scroller jumps to the first anchor it hasn't
+                  // scrolled to yet, which would be the oldest message if every turn were one.
+                  <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.id === lastUserId}>
+                    {m.role === "user" ? <UserTurn m={m} businessId={uploadBusinessId} /> : <AgentTurn m={m} agent={agent} />}
+                  </MessageScrollerItem>
+                ))}
+                {showThinking && (
+                  <MessageScrollerItem messageId="thinking">
+                    <AgentTurn
+                      agent={agent}
+                      m={{ id: "thinking", role: "assistant", content: "", pending: true, steps: liveSteps, meta: busyLabel ?? t("chat.thinking") }}
+                    />
+                  </MessageScrollerItem>
+                )}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
       )}
 
       {sendAction && (
-        <div className="mx-auto w-full max-w-3xl space-y-2 pt-2">
-          {suggestions.length > 0 && !showThinking && (
+        <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-1 pb-3">
+          {suggestions.length > 0 && optimistic.length === 0 && !showThinking && (
             <div className="flex flex-wrap gap-1.5">
-              {suggestions.map((s) => (
-                <Button key={s} variant="outline" size="sm" className="rounded-full font-normal" onClick={() => send(s)}>
-                  {s}
+              {suggestions.slice(0, 3).map((s) => (
+                <Button key={s} variant="secondary" size="sm" className="h-7 max-w-full rounded-full px-3 font-normal" onClick={() => send(s)}>
+                  <span className="truncate">{s}</span>
                 </Button>
               ))}
             </div>
@@ -234,60 +246,52 @@ export function Chat({
 
 function UserTurn({ m, businessId }: { m: ChatMessage; businessId?: string }) {
   return (
-    <Message align="end">
-      <MessageContent>
-        {m.meta && <MessageHeader className="font-pixel justify-end text-xs text-muted-foreground">{m.meta}</MessageHeader>}
-        {businessId && m.attachments && m.attachments.length > 0 && (
-          <ImageStrip businessId={businessId} images={m.attachments} size={72} className="justify-end" />
-        )}
-        <Bubble align="end" variant="ghost">
-          {/* Owner's lines: a parchment speech card. */}
-          {/* `!` beats the ghost variant's transparent background and zero padding. */}
-          <BubbleContent className="pixel-paper whitespace-pre-wrap bg-parchment! px-3! py-2! text-ink!">{m.content}</BubbleContent>
-        </Bubble>
-      </MessageContent>
-    </Message>
+    <div data-slot="message" className="group/turn flex flex-col items-end gap-1 py-2">
+      {m.meta && <div className={cn("max-w-[75%] truncate text-xs text-tertiary", REVEAL)}>{m.meta}</div>}
+      {businessId && m.attachments && m.attachments.length > 0 && (
+        <ImageStrip businessId={businessId} images={m.attachments} size={72} className="max-w-[75%] justify-end" />
+      )}
+      <div className="max-w-[85%] rounded-lg bg-secondary px-3 py-2 text-sm leading-[22px] whitespace-pre-wrap text-foreground wrap-break-word sm:max-w-[75%]">
+        {m.content}
+      </div>
+    </div>
   );
 }
 
 function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
   const t = useT();
   return (
-    // RPG dialogue box: portrait on the left, a name plate, then the text.
-    <Message className="flex-row items-start gap-3">
-      <div className="hidden shrink-0 pt-4 sm:block">
-        <Avatar seed={agent.id} name={agent.name} color={agent.color} size={44} />
-      </div>
-      <MessageContent className="pixel-panel relative min-w-0 flex-1 gap-2 px-4 pb-3 pt-5">
-        <MessageHeader className="absolute -top-3 left-3 flex items-center gap-2 px-0">
-          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-medium text-primary-foreground">
-            {agent.name}
-          </span>
-          {m.meta && !m.pending && (
-            <span className="font-pixel bg-card px-1.5 text-[11px] text-muted-foreground">{m.meta}</span>
-          )}
-        </MessageHeader>
+    <div data-slot="message" className="group/turn grid grid-cols-[28px_minmax(0,1fr)] gap-3 py-3">
+      <div className="pt-px">{agent.avatar ?? <Avatar seed={agent.id} name={agent.name} color={agent.color} size={28} />}</div>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[13px] leading-[18px]">
+          <span className="shrink-0 font-semibold text-foreground">{agent.name}</span>
+          {m.meta && !m.pending && <span className="truncate text-xs text-tertiary">{m.meta}</span>}
+        </div>
         {m.pending ? (
           <>
             <LiveTrace steps={m.steps ?? []} label={m.meta ?? t("chat.thinking")} />
-            {m.footer && <MessageFooter className="flex flex-wrap items-center gap-2">{m.footer}</MessageFooter>}
+            {m.footer && <div className="flex flex-wrap items-center gap-1">{m.footer}</div>}
           </>
         ) : (
           <>
             {m.steps && m.steps.length > 0 && <StepsTrace steps={m.steps} />}
             {m.content && (
-              <div className={cn(m.error && "text-destructive")}>
+              <div className={cn("min-w-0", m.error && "text-destructive")}>
                 <Markdown>{m.content}</Markdown>
               </div>
             )}
-            <MessageFooter className="flex flex-wrap items-center gap-2">
-              {m.content && <CopyButton text={m.content} />}
-              {m.footer}
-            </MessageFooter>
+            {m.extras && <div className="flex flex-col gap-2 pt-1">{m.extras}</div>}
+            {(m.content || m.footer) && (
+              <div className={cn("-ml-1.5 flex min-h-7 flex-wrap items-center gap-1 text-xs text-tertiary", !m.error && REVEAL)}>
+                {m.content && <CopyButton text={m.content} />}
+                {m.footer}
+              </div>
+            )}
           </>
         )}
-      </MessageContent>
-    </Message>
+      </div>
+    </div>
   );
 }
 
@@ -301,7 +305,7 @@ function stepIcon(step: string) {
 function LiveTrace({ steps, label }: { steps: string[]; label: string }) {
   const recent = steps.slice(-4);
   return (
-    <Trace>
+    <Trace className="text-[13px]">
       {recent.map((s, i) => (
         <div key={`${i}-${s}`}>
           <TraceLine status={i === recent.length - 1 ? "running" : undefined}>
@@ -313,7 +317,7 @@ function LiveTrace({ steps, label }: { steps: string[]; label: string }) {
       <div>
         <TraceLine status="running">
           <TraceIcon>
-            <LoaderCircleIcon className="animate-spin" />
+            <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
           </TraceIcon>
           <TraceTitle>{label}</TraceTitle>
         </TraceLine>
@@ -326,7 +330,7 @@ function LiveTrace({ steps, label }: { steps: string[]; label: string }) {
 function StepsTrace({ steps }: { steps: string[] }) {
   const tn = useTn();
   return (
-    <Trace>
+    <Trace className="text-[13px]">
       <TraceCollapsible>
         <TraceCollapsibleTrigger>
           <TraceLine>
@@ -337,7 +341,7 @@ function StepsTrace({ steps }: { steps: string[] }) {
           </TraceLine>
         </TraceCollapsibleTrigger>
         <TraceCollapsibleContent>
-          <div className="flex flex-col gap-1.5 border-l pl-3 ml-2">
+          <div className="mt-1.5 ml-2 flex flex-col gap-1.5 border-l border-border pl-3">
             {steps.map((s, i) => (
               <TraceLine key={`${i}-${s}`}>
                 <TraceIcon>{stepIcon(s)}</TraceIcon>
@@ -355,18 +359,19 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const t = useT();
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label={t("chat.copy")}
+    <IconButton
+      label={copied ? t("chat.copied") : t("chat.copy")}
+      side="top"
       onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {}
       }}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
+    </IconButton>
   );
 }
 
@@ -392,40 +397,62 @@ function uploadFile(businessId: string, file: File, onProgress: (p: number) => v
   });
 }
 
+/** 36px chip for a file attached to the next message: thumb, name, a 2px progress line. */
 function UploadChip({ u, businessId, onRemove }: { u: Upload; businessId?: string; onRemove: () => void }) {
   const kind = mediaKind(u.name);
   const Icon = kind === "video" ? VideoIcon : kind === "audio" ? MusicIcon : FileIcon;
   const t = useT();
+  const status = u.error ?? (u.path ? t("chat.ready") : t("chat.uploading", { pct: Math.round(u.progress * 100) }));
   return (
     <div
       className={cn(
-        "pixel-frame relative m-[3px] flex h-12 w-44 items-center gap-2 overflow-hidden bg-muted pr-7 text-xs",
-        u.error && "text-destructive",
+        "relative flex h-9 max-w-52 items-center gap-2 overflow-hidden rounded-md border border-border bg-muted pr-1 pl-1",
+        u.error && "border-destructive/40 bg-destructive-soft",
       )}
-      title={u.error ?? u.name}
+      title={`${u.name} · ${status}`}
     >
-      <div className="flex size-12 shrink-0 items-center justify-center bg-card">
-        {kind === "image" && u.path && businessId ? (
+      <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-background text-tertiary">
+        {u.error ? (
+          <AlertCircleIcon className="size-4 text-destructive" />
+        ) : kind === "image" && u.path && businessId ? (
           // eslint-disable-next-line @next/next/no-img-element -- local upload preview
           <img src={fileUrl(businessId, u.path)} alt="" className="size-full object-cover" />
         ) : (
-          <Icon className="size-5 text-muted-foreground" />
+          <Icon className="size-4" />
         )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate">{u.name}</div>
-        <div className="text-[10px] text-muted-foreground">
-          {u.error ? t("chat.failed") : u.path ? t("chat.ready") : t("chat.uploading", { pct: Math.round(u.progress * 100) })}
-        </div>
-      </div>
+      </span>
+      <span className={cn("min-w-0 flex-1 truncate text-xs text-foreground", u.error && "text-destructive")}>{u.name}</span>
+      <span className="sr-only">{status}</span>
       {!u.path && !u.error && (
-        <div className="absolute bottom-0 left-0 h-[3px] bg-primary" style={{ width: `${u.progress * 100}%` }} />
+        <span aria-hidden className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-150" style={{ width: `${u.progress * 100}%` }} />
       )}
-      <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-muted-foreground hover:text-foreground" aria-label={t("chat.removeFile", { name: u.name })}>
-        <XIcon className="size-3.5" />
-      </button>
+      <IconButton label={t("chat.removeFile", { name: u.name })} size="icon-xs" side="top" onClick={onRemove}>
+        <XIcon />
+      </IconButton>
     </div>
   );
+}
+
+/**
+ * `?compose=1` (the palette's "Give a task", the conversation list's "+") asks for the
+ * composer: true once, and the param leaves the URL (native replaceState, which the Next
+ * router follows).
+ */
+function takeCompose() {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("compose") !== "1") return false;
+  url.searchParams.delete("compose");
+  window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  return true;
+}
+
+/** Re-checks `?compose=1` on client navigations (e.g. the palette while already on this chat). */
+function ComposeWatcher({ onCompose }: { onCompose: () => void }) {
+  const compose = useSearchParams().get("compose") === "1";
+  useEffect(() => {
+    if (compose && takeCompose()) onCompose();
+  }, [compose, onCompose]);
+  return null;
 }
 
 /** Message field: Enter sends, Shift+Enter adds a line. Files can be picked, dropped or pasted. */
@@ -458,6 +485,12 @@ function PromptInput({
     onSubmit(text);
     setText("");
   };
+
+  // ?compose=1 on a full page load: focus once mounted (client navigations go through ComposeWatcher).
+  useEffect(() => {
+    if (takeCompose()) ref.current?.focus();
+  }, []);
+
   return (
     <form
       onSubmit={(e) => {
@@ -465,7 +498,12 @@ function PromptInput({
         submit();
       }}
     >
-      <InputGroup className="rounded-2xl bg-card shadow-sm">
+      {/* useSearchParams in its own boundary, so it never holds up the composer's hydration. */}
+      <Suspense fallback={null}>
+        <ComposeWatcher onCompose={() => ref.current?.focus()} />
+      </Suspense>
+      {/* The group dims on any disabled child; only a disabled field should dim it, not the empty-state send button. */}
+      <InputGroup className="rounded-lg bg-background hover:border-border-strong has-disabled:bg-background has-disabled:opacity-100 has-[textarea:disabled]:bg-muted has-[textarea:disabled]:opacity-70">
         {uploads.length > 0 && (
           <InputGroupAddon align="block-start" className="flex flex-wrap gap-1.5">
             {uploads.map((u) => (
@@ -475,6 +513,7 @@ function PromptInput({
         )}
         <InputGroupTextarea
           ref={ref}
+          data-composer
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
@@ -489,13 +528,14 @@ function PromptInput({
               submit();
             }
           }}
-          rows={2}
+          rows={1}
+          aria-label={placeholder ?? t("chat.send")}
           placeholder={placeholder}
           disabled={disabled}
-          className="max-h-48 min-h-12"
+          className="max-h-48 min-h-11 px-3 pt-2.5 text-sm leading-[22px]"
         />
-        <InputGroupAddon align="block-end" className="justify-between">
-          <div className="flex items-center gap-2">
+        <InputGroupAddon align="block-end" className="justify-between px-1.5 pb-1.5">
+          <div className="flex items-center gap-1">
             {onAddFiles && (
               <>
                 <input
@@ -504,31 +544,21 @@ function PromptInput({
                   multiple
                   accept={MEDIA_ACCEPT}
                   className="hidden"
+                  tabIndex={-1}
                   onChange={(e) => {
                     if (e.target.files?.length) onAddFiles(e.target.files);
                     e.target.value = "";
                   }}
                 />
-                <InputGroupButton
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => picker.current?.click()}
-                  aria-label={t("chat.attach")}
-                  title={t("chat.attachTitle")}
-                >
+                <IconButton type="button" label={t("chat.attachTitle")} side="top" onClick={() => picker.current?.click()}>
                   <PaperclipIcon />
-                </InputGroupButton>
+                </IconButton>
               </>
             )}
-            <span className="text-xs text-muted-foreground">
-              {t("chat.hint")}
-              {onAddFiles ? t("chat.hintDrop") : ""}
-            </span>
           </div>
-          <InputGroupButton type="submit" variant="default" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label={t("chat.send")}>
+          <IconButton type="submit" variant="primary" label={t("chat.send")} shortcut="↵" side="top" disabled={!canSend}>
             <ArrowUpIcon />
-          </InputGroupButton>
+          </IconButton>
         </InputGroupAddon>
       </InputGroup>
     </form>

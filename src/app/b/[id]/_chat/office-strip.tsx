@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, useTn } from "@/components/i18n";
+import { Button, IconButton, StatusDot } from "@/components/kit";
 import { cn } from "@/lib/utils";
 import { OfficeCanvas } from "../office/office-canvas";
 import { layoutFor, TILE } from "../office/room";
@@ -61,13 +62,10 @@ export function OfficeStrip({ businessId, businessName, initialState, initialNow
 
   if (!isDesktop || state.teammates.length === 0) return null;
 
-  const button =
-    "inline-flex items-center gap-1.5 rounded-md border border-frame bg-card/85 px-2 py-1 text-xs text-card-foreground backdrop-blur-sm transition-colors hover:bg-card";
-
   return (
     <section
       aria-label={t("chathome.office")}
-      className="pixel-panel relative shrink-0 overflow-hidden p-0 transition-[height] duration-300 ease-out motion-reduce:transition-none"
+      className="relative shrink-0 overflow-hidden rounded-lg border border-border bg-muted transition-[height] duration-300 ease-out motion-reduce:transition-none"
       style={{ height: open ? STRIP_H : 40 }}
     >
       {open ? (
@@ -89,29 +87,32 @@ export function OfficeStrip({ businessId, businessName, initialState, initialNow
           )}
         </div>
       ) : null}
-      <div className={cn("pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-between gap-2", open ? "p-2" : "h-full px-3")}>
-        <span className={cn("pointer-events-auto inline-flex items-center gap-2 text-xs", open && "rounded-md border border-frame bg-card/85 px-2 py-1 backdrop-blur-sm")}>
-          <span className={cn("size-2 rounded-full", working ? "animate-pulse bg-good" : "bg-muted-foreground/50")} />
-          <span className="font-pixel">{t("chathome.office")}</span>
-          <span className="text-muted-foreground tabular-nums">
+      <div className={cn("pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-between gap-2", open ? "p-1.5" : "h-full px-1.5")}>
+        <span
+          className={cn(
+            "pointer-events-auto inline-flex h-7 min-w-0 items-center gap-2 rounded-md px-2 text-[13px] leading-[18px]",
+            open && "bg-background/90 shadow-(--elev-xs) backdrop-blur-sm",
+          )}
+        >
+          <StatusDot state={working ? "working" : "idle"} />
+          <span className="font-medium text-foreground">{t("chathome.office")}</span>
+          <span className="truncate text-muted-foreground tabular-nums">
             {t("office.working", { count: working })}
             {state.pendingApprovals > 0 && ` · ${tn("office.needApproval", state.pendingApprovals)}`}
           </span>
         </span>
-        <span className="pointer-events-auto flex items-center gap-1.5">
-          <Link href={`/b/${businessId}/office`} className={button}>
-            {t("chathome.openOffice")}
-          </Link>
-          <button
-            type="button"
+        <span className="pointer-events-auto flex shrink-0 items-center gap-1">
+          <Button variant="secondary" size="sm" className={cn(open && "bg-background/90 backdrop-blur-sm")} asChild>
+            <Link href={`/b/${businessId}/office`}>{t("chathome.openOffice")}</Link>
+          </Button>
+          <IconButton
+            label={open ? t("chathome.minimise") : t("chathome.showOffice")}
             onClick={() => setStored(open ? "min" : "open")}
             aria-expanded={open}
-            className={button}
-            title={open ? t("chathome.minimise") : t("chathome.showOffice")}
+            className={cn(open && "bg-background/90 backdrop-blur-sm hover:bg-background")}
           >
-            {open ? <Minimize2 aria-hidden className="size-3.5" /> : <Maximize2 aria-hidden className="size-3.5" />}
-            <span className="sr-only sm:not-sr-only">{open ? t("chathome.minimise") : t("chathome.showOffice")}</span>
-          </button>
+            {open ? <Minimize2 /> : <Maximize2 />}
+          </IconButton>
         </span>
       </div>
     </section>

@@ -10,7 +10,7 @@ function Submit() {
   const { pending } = useFormStatus();
   const t = useT();
   return (
-    <Button type="submit" variant="secondary" disabled={pending}>
+    <Button type="submit" variant="secondary" loading={pending} disabled={pending}>
       {pending ? t("manager.owner.checking") : t("manager.owner.submit")}
     </Button>
   );
@@ -21,18 +21,31 @@ export function OwnerNumberForm({ action }: { action: (prev: FormState, fd: Form
   const [state, formAction] = useActionState(action, {});
   const t = useT();
   return (
-    <form action={formAction} className="grid gap-2 text-sm sm:grid-cols-[1fr_1.4fr_auto] sm:items-end">
+    <form action={formAction} className="grid gap-3 pt-1 sm:grid-cols-[1fr_1.4fr_auto] sm:items-end">
       <LangField />
-      <div className="grid gap-1">
-        <Label>{t("manager.owner.name")}</Label>
-        <Input name="name" placeholder={t("manager.owner.namePlaceholder")} />
+      <div className="grid gap-1.5">
+        <Label htmlFor="owner-name">{t("manager.owner.name")}</Label>
+        <Input id="owner-name" name="name" autoComplete="name" placeholder={t("manager.owner.namePlaceholder")} />
       </div>
-      <div className="grid gap-1">
-        <Label>{t("manager.owner.phone")}</Label>
-        <Input name="phone" required inputMode="tel" placeholder="+62 812 3456 7890" />
+      <div className="grid gap-1.5">
+        <Label htmlFor="owner-phone">{t("manager.owner.phone")}</Label>
+        <Input
+          id="owner-phone"
+          name="phone"
+          required
+          inputMode="tel"
+          autoComplete="tel"
+          placeholder="+62 812 3456 7890"
+          aria-invalid={state.error ? true : undefined}
+          aria-describedby={state.error ? "owner-error" : undefined}
+        />
       </div>
       <Submit />
-      {state.error && <p className="text-xs text-red-600 dark:text-red-400 sm:col-span-3">{state.error}</p>}
+      {state.error && (
+        <p id="owner-error" role="alert" className="text-xs text-destructive sm:col-span-3">
+          {state.error}
+        </p>
+      )}
     </form>
   );
 }
