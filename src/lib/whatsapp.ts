@@ -74,11 +74,22 @@ export type WaMessage = {
   ReactionEmoji?: string;
 };
 
+/** wacli fills media messages with placeholders ("[Audio]", "Sent image", "[Album: 2 images]"). */
+const PLACEHOLDER = /^(\[[^\]]*\]|sent (an? )?(audio|image|video|document|sticker|file|gif|photo|voice message)|\(message\))$/i;
+
+/** What the person actually wrote: text or caption, without wacli's placeholders. */
+export function messageText(m: WaMessage) {
+  for (const t of [m.Text, m.MediaCaption, m.DisplayText]) {
+    const s = (t ?? "").trim();
+    if (s && !PLACEHOLDER.test(s)) return s;
+  }
+  return "";
+}
+
 /** A real message: not an emoji reaction, and has text or media. */
 export function isRealMessage(m: WaMessage) {
   if (m.ReactionToID || m.ReactionEmoji) return false;
-  const text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
-  return !!m.MediaType || (!!text && text !== "(message)");
+  return !!m.MediaType || !!messageText(m);
 }
 
 export async function isLinked() {
@@ -181,7 +192,7 @@ export function formatMessage(m: WaMessage) {
   const ts = Number.isNaN(when.getTime()) ? m.Timestamp : when.toISOString().slice(0, 16).replace("T", " ");
   const who = m.FromMe ? "Business (you)" : m.SenderName || m.SenderJID.split("@")[0];
   const media = m.MediaType ? ` [${m.MediaType}${m.Filename ? `: ${m.Filename}` : ""}]` : "";
-  const text = m.DisplayText || m.Text || m.MediaCaption || "";
+  const text = messageText(m);
   return `[${ts}] ${who}:${media} ${text}`.trim();
 }
 

@@ -20,7 +20,7 @@ import { pollWatches } from "./replies";
 import { handleOwnerAnswers, isApprovalAnswer } from "./owner-approvals";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
-import { downloadMedia, isLinked, isRealMessage, listMessages, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
+import { downloadMedia, isLinked, isRealMessage, listMessages, messageText, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
 
 const POLL_MS = 10_000;
 /** Wait this long after a person's last message before handing the batch over. */
@@ -147,7 +147,8 @@ async function pollHuman(business: Business, human: Teammate) {
   if (!fresh.length) return;
   // Still typing / sending files: wait for a quiet moment (the owner's "ya A7F2" doesn't wait).
   const isOwner = business.ownerHumanId === human.id;
-  const quickAnswer = isOwner && fresh.every((m) => isApprovalAnswer(m.Text || m.DisplayText || ""));
+  // When the owner's last message is "ya A7F2", they're done: handle the batch now.
+  const quickAnswer = isOwner && isApprovalAnswer(messageText(fresh.at(-1)!));
   if (!quickAnswer && Date.now() - new Date(fresh.at(-1)!.Timestamp).getTime() < QUIET_MS) return;
 
   const request = openRequest(human.id);
@@ -199,7 +200,7 @@ export async function readIncoming(business: Pick<Business, "language">, jid: st
     });
     if (file) attachments.push(file);
   }
-  let text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
+  let text = messageText(m);
   const audio = attachments.find((f) => mediaKind(f) === "audio");
   const voice = !!audio && !text;
   if (voice) {
