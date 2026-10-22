@@ -108,6 +108,7 @@ export function Chat({
   );
   const [sending, startSending] = useTransition();
   const showThinking = busy || sending;
+  const lastUserId = optimistic.findLast((m) => m.role === "user")?.id;
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -178,7 +179,10 @@ export function Chat({
           <MessageScrollerViewport>
             <MessageScrollerContent className="mx-auto w-full max-w-3xl px-1 pt-2 pb-6">
               {optimistic.map((m) => (
-                <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.role === "user"}>
+                // Only the latest user turn is an anchor. When the optimistic message is
+                // swapped for the saved one, the scroller jumps to the first anchor it hasn't
+                // scrolled to yet, which would be the oldest message if every turn were one.
+                <MessageScrollerItem key={m.id} messageId={m.id} scrollAnchor={m.id === lastUserId}>
                   {m.role === "user" ? <UserTurn m={m} businessId={uploadBusinessId} /> : <AgentTurn m={m} agent={agent} />}
                 </MessageScrollerItem>
               ))}
