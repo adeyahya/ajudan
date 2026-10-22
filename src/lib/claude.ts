@@ -33,6 +33,8 @@ export type RunAgentOptions = {
   allowedTools?: string[];
   disallowedTools?: string[];
   mcpServers?: Record<string, McpServerConfig>;
+  /** Reasoning effort ("low" for quick replies). */
+  effort?: Options["effort"];
   /** Sandbox for Bash (filesystem and network limits), see the SDK's SandboxSettings. */
   sandbox?: Options["sandbox"];
   /** Local plugin folders to load (their skills become available). */
@@ -77,6 +79,7 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
       mcpServers: opts.mcpServers,
       plugins: opts.plugins?.map((p) => ({ type: "local" as const, path: p })),
       sandbox: opts.sandbox,
+      effort: opts.effort,
       skills: opts.skills,
       canUseTool: opts.canUseTool,
       resume: opts.resume,

@@ -13,7 +13,7 @@ import { Avatar, Badge, Button, Card, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
-import { REPORT } from "@/lib/manager";
+import { DECISION, REPORT } from "@/lib/manager";
 import { runScheduledNow, sendTaskMessage } from "./actions";
 
 const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "red"> = {
@@ -141,6 +141,7 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   if (createdBy === "user") return "You";
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === REPORT) return "Team update";
+  if (createdBy === DECISION) return "After your decision";
   if (createdBy === "system:capability") return "You approved";
   if (createdBy.startsWith("human:")) {
     const id = createdBy.slice("human:".length);
@@ -196,26 +197,26 @@ function toMessages(
       const label =
         task.status === "queued" ? "Queued…" : task.status === "running" ? "Working on it…" : "Waiting for your approval";
       return [
-        ...(task.createdBy === REPORT ? [] : [user]),
+        ...(task.createdBy === REPORT || task.createdBy === DECISION ? [] : [user]),
         {
           id: `${task.id}-a`,
           role: "assistant",
           content: "",
           pending: true,
           steps: mine,
-          meta: task.createdBy === REPORT ? "Writing the team update…" : label,
+          meta: task.createdBy === REPORT ? "Writing the team update…" : task.createdBy === DECISION ? "Following up on your decision…" : label,
         },
       ];
     }
     return [
-      ...(task.createdBy === REPORT ? [] : [user]),
+      ...(task.createdBy === REPORT || task.createdBy === DECISION ? [] : [user]),
       {
         id: `${task.id}-a`,
         role: "assistant",
         content: task.result ?? (task.status === "cancelled" ? "Cancelled." : ""),
         error: task.status === "failed",
         steps: mine,
-        meta: [task.createdBy === REPORT ? "Team update" : null, task.finishedAt ? time(task.finishedAt) : null]
+        meta: [task.createdBy === REPORT ? "Team update" : task.createdBy === DECISION ? "After your decision" : null, task.finishedAt ? time(task.finishedAt) : null]
           .filter(Boolean)
           .join(" · "),
         footer: (

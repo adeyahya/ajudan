@@ -1,6 +1,7 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { JobKind } from "@/db/schema";
+import type { Job, JobKind } from "@/db/schema";
+import { MANAGER_ROLE } from "@/lib/roles";
 
 /** Payload shape per job kind. */
 export type JobPayloads = {
@@ -15,18 +16,30 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
   return db.insert(schema.jobs).values({ kind, payload }).returning({ id: schema.jobs.id }).get().id;
 }
 
-/** Atomically claim the oldest queued job of any of the given kinds. */
-export function claimJob(kinds?: JobKind[]) {
+/**
+ * Two lanes, each with its own slots in the worker: "owner" is everything the owner is
+ * waiting on in a chat (the manager, the interview, team design); "team" is the
+ * teammates' work. The manager never queues behind long teammate runs.
+ */
+export type Lane = "owner" | "team";
+
+export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
+  if (job.kind !== "run_task") return "owner";
+  const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
+  const row = db
+    .select({ role: schema.teammates.roleKey })
+    .from(schema.tasks)
+    .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.role === MANAGER_ROLE.key ? "owner" : "team";
+}
+
+/** Atomically claim the oldest queued job (of a lane, if given). */
+export function claimJob(lane?: Lane) {
   return db.transaction((tx) => {
-    const filters = [eq(schema.jobs.status, "queued")];
-    if (kinds?.length) filters.push(sql`${schema.jobs.kind} in ${kinds}`);
-    const job = tx
-      .select()
-      .from(schema.jobs)
-      .where(and(...filters))
-      .orderBy(asc(schema.jobs.id))
-      .limit(1)
-      .get();
+    const queued = tx.select().from(schema.jobs).where(eq(schema.jobs.status, "queued")).orderBy(asc(schema.jobs.id)).limit(200).all();
+    const job = lane ? queued.find((j) => laneOf(j) === lane) : queued[0];
     if (!job) return undefined;
     tx.update(schema.jobs)
       .set({ status: "running", startedAt: new Date(), attempts: job.attempts + 1 })

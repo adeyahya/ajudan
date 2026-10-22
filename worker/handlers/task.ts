@@ -14,7 +14,7 @@ import os from "node:os";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { dataDir, resolveWorkspace } from "@/lib/paths";
 import { HUMAN, humanThread, listHumans } from "@/lib/humans";
-import { managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
+import { DECISION, managerHistory, onTaskFinished, REPORT } from "@/lib/manager";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { PausedError, runAbortController } from "../session";
@@ -222,6 +222,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         canUseTool,
         onMessage,
         maxTurns: useBrowser || videoWork ? 80 : 40,
+        // Reacting to an approval is a quick note to the owner: answer fast.
+        effort: task.createdBy === DECISION ? "low" : undefined,
         maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : BUDGET_USD,
         abortController: ac,
       });
@@ -518,6 +520,8 @@ function buildPrompt(task: Task, history = "", files = "") {
   const from =
     task.createdBy === REPORT
       ? "Your team finished work you delegated. Report back to the owner in this chat."
+      : task.createdBy === DECISION
+        ? "The owner just made an approval decision. React to it in this chat, briefly."
       : task.createdBy === "schedule"
         ? "This is your scheduled recurring work."
         : task.createdBy.startsWith("teammate:")

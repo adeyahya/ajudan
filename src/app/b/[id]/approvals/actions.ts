@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { CAPABILITY, grantCapability } from "@/lib/capabilities";
+import { reactToDecision } from "@/lib/manager";
 import { logEvent } from "@/lib/events";
 
 /**
@@ -17,7 +18,8 @@ export async function decideApproval(formData: FormData) {
   const decision = String(formData.get("decision") ?? "");
   const note = String(formData.get("note") ?? "").trim() || null;
   if (decision !== "approved" && decision !== "rejected") throw new Error("Invalid decision");
-  db.update(schema.approvals)
+  const decided = db
+    .update(schema.approvals)
     .set({ status: decision, note, decidedAt: new Date() })
     .where(
       and(
@@ -26,7 +28,10 @@ export async function decideApproval(formData: FormData) {
         eq(schema.approvals.status, "pending"),
       ),
     )
-    .run();
+    .returning()
+    .get();
+  // Only the click that decided it (not a double click).
+  if (decided) reactToDecision(decided);
   refresh();
 }
 
@@ -50,15 +55,19 @@ export async function approveCapability(businessId: string, approvalId: string, 
   }
   db.update(schema.approvals).set({ status: "approved", note, decidedAt: new Date() }).where(eq(schema.approvals.id, approval.id)).run();
   logEvent({ businessId, teammateId: approval.teammateId, taskId: approval.taskId, type: "approval_granted", message: `Owner approved: ${approval.summary}`, data: { approvalId } });
+  reactToDecision({ ...approval, status: "approved", note });
   refresh();
   return { ok: "Approved" };
 }
 
 export async function rejectCapability(businessId: string, approvalId: string, fd: FormData) {
   const note = String(fd.get("note") ?? "").trim() || null;
-  db.update(schema.approvals)
+  const decided = db
+    .update(schema.approvals)
     .set({ status: "rejected", note, decidedAt: new Date() })
     .where(and(eq(schema.approvals.id, approvalId), eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
-    .run();
+    .returning()
+    .get();
+  if (decided) reactToDecision(decided);
   refresh();
 }

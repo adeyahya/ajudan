@@ -15,7 +15,7 @@ import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
 import { CAPABILITY } from "@/lib/capabilities";
 import { readConfig } from "@/lib/folders";
-import { claimJob, finishJob, requeueJob, requeueStaleJobs } from "@/lib/jobs";
+import { claimJob, finishJob, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
@@ -24,10 +24,12 @@ import { endFolderSession, PausedError } from "./session";
 import { startHumanInbox, stopHumanInbox } from "./humans";
 import { startWhatsappSync, stopWhatsappSync } from "./whatsapp-sync";
 
+/** Teammates' work at once. The owner lane (manager, interview) has its own slots. */
 const CONCURRENCY = Number(process.env.AJUDAN_CONCURRENCY ?? 2);
+const OWNER_CONCURRENCY = Number(process.env.AJUDAN_OWNER_CONCURRENCY ?? 2);
 const once = process.argv.includes("--once");
 
-let running = 0;
+const running: Record<Lane, number> = { owner: 0, team: 0 };
 const inflight = new Set<Promise<void>>();
 let folder: string | null = null;
 let switching = false;
@@ -123,15 +125,17 @@ function tick() {
     return;
   }
   if (!folder) return;
-  while (running < CONCURRENCY) {
-    const job = claimJob();
-    if (!job) break;
-    running++;
-    const p = runJob(job).finally(() => {
-      running--;
-      inflight.delete(p);
-    });
-    inflight.add(p);
+  for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["team", CONCURRENCY]] as const) {
+    while (running[lane] < max) {
+      const job = claimJob(lane);
+      if (!job) break;
+      running[lane]++;
+      const p = runJob(job).finally(() => {
+        running[lane]--;
+        inflight.delete(p);
+      });
+      inflight.add(p);
+    }
   }
 }
 

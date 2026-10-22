@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Task } from "@/db/schema";
+import type { Approval, Task } from "@/db/schema";
 import { MANAGER_ROLE } from "@/lib/roles";
 import { createTask } from "@/lib/tasks";
 import { initTeammateWorkspace } from "@/lib/workspace";
@@ -135,10 +135,51 @@ export function managerHistory(managerId: string, beforeTask: Pick<Task, "id" | 
   if (!rows.length) return "";
   return rows
     .map((t) => {
-      const who = t.createdBy === REPORT ? "Team update (you reported)" : t.createdBy === "user" ? "Owner" : "Scheduled";
+      const who =
+        t.createdBy === REPORT
+          ? "Team update (you reported)"
+          : t.createdBy === DECISION
+            ? "Owner's approval decision"
+            : t.createdBy === "user"
+              ? "Owner"
+              : t.createdBy.startsWith("human:")
+                ? "WhatsApp from a person on the team"
+                : "Scheduled";
       const files = t.attachments.length ? ` [attached: ${t.attachments.join(", ")}]` : "";
       const ask = t.createdBy === REPORT ? "" : `${who}: ${t.instructions.slice(0, 500)}${files}\n`;
       return `${ask}You: ${(t.result ?? `(${t.status})`).slice(0, 700)}`;
     })
     .join("\n\n");
+}
+
+export const DECISION = "system:decision";
+
+/**
+ * The owner just approved or rejected something a teammate asked for. Have the
+ * manager react right away in the owner's chat (its own lane in the worker): confirm
+ * what happens next and, only if something urgent follows, get the team on it.
+ * Several decisions in a row become one reply.
+ */
+export function reactToDecision(approval: Pick<Approval, "teammateId" | "taskId" | "summary" | "status" | "note" | "businessId">) {
+  const manager = getManager(approval.businessId);
+  if (!manager || approval.teammateId === manager.id) return; // the manager's own run carries on by itself
+  const task = approval.taskId ? db.select().from(schema.tasks).where(eq(schema.tasks.id, approval.taskId)).get() : undefined;
+  const mate = db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, approval.teammateId)).get();
+  const line = `- ${approval.status === "approved" ? "APPROVED" : "REJECTED"}: ${approval.summary}${approval.note ? ` (owner's note: "${approval.note}")` : ""}${task ? ` [${mate?.name ?? "teammate"}'s task: "${task.title}"]` : ""}`;
+  const queued = db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.teammateId, manager.id), eq(schema.tasks.createdBy, DECISION), eq(schema.tasks.status, "queued")))
+    .get();
+  if (queued) {
+    db.update(schema.tasks).set({ instructions: queued.instructions.replace("\n\nWhat to do:", `\n${line}\n\nWhat to do:`) }).where(eq(schema.tasks.id, queued.id)).run();
+    return;
+  }
+  createTask({
+    businessId: approval.businessId,
+    teammateId: manager.id,
+    title: approval.status === "approved" ? `Approved: ${approval.summary}`.slice(0, 80) : `Rejected: ${approval.summary}`.slice(0, 80),
+    createdBy: DECISION,
+    instructions: `The owner just decided on the Approvals page:\n${line}\n\nWhat to do: reply to the owner now in 1–3 short lines: what happens next and when they'll see the result. If approved, the teammate is already carrying on: don't redo or duplicate their work. If rejected, say how it'll be adjusted (the teammate gets the note). Only use assign_task if something new and time-sensitive follows from this decision (for example, after a post goes live, someone should watch and answer the replies); otherwise don't delegate. Check team_status if you're unsure what's happening.`,
+  });
 }
