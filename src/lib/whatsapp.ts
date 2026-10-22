@@ -70,7 +70,16 @@ export type WaMessage = {
   MediaCaption: string;
   Filename: string;
   MimeType?: string;
+  ReactionToID?: string;
+  ReactionEmoji?: string;
 };
+
+/** A real message: not an emoji reaction, and has text or media. */
+export function isRealMessage(m: WaMessage) {
+  if (m.ReactionToID || m.ReactionEmoji) return false;
+  const text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
+  return !!m.MediaType || (!!text && text !== "(message)");
+}
 
 export async function isLinked() {
   try {

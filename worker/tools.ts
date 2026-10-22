@@ -19,6 +19,7 @@ import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
+import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished } from "@/lib/manager";
@@ -756,7 +757,10 @@ export function createBizServer(ctx: BizContext) {
           const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp"].filter(Boolean).join(", ") || "no browser/WhatsApp";
           return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
         });
-        return ok(lines.join("\n") || "No teammates yet.");
+        const waits = activeWatches(businessId);
+        const names = new Map(mates().map((m) => [m.id, m.name]));
+        const waiting = waits.length ? `\n\nWaiting for WhatsApp replies:\n${waits.map((w) => describeWatch(w, names.get(w.teammateId) ?? "you")).join("\n")}` : "";
+        return ok((lines.join("\n") || "No teammates yet.") + waiting);
       }),
       tool(
         "task_results",

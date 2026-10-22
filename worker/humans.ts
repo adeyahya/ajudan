@@ -16,13 +16,14 @@ import { HUMAN, humanJid, isAcknowledgement, listHumans, openRequest, recordHuma
 import { getManager } from "@/lib/manager";
 import { isServablePath, mediaKind, newMediaPath } from "@/lib/media";
 import { transcribe } from "@/lib/speech";
+import { pollWatches } from "./replies";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
-import { downloadMedia, isLinked, listMessages, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
+import { downloadMedia, isLinked, isRealMessage, listMessages, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
 
 const POLL_MS = 10_000;
 /** Wait this long after a person's last message before handing the batch over. */
-const QUIET_MS = 25_000;
+export const QUIET_MS = 25_000;
 
 /** Send text (and files from the business folder) to a human teammate, and record it. */
 export async function sendToHuman(p: {
@@ -118,8 +119,10 @@ async function pollAll() {
   const business = db.select().from(schema.businesses).where(eq(schema.businesses.status, "active")).get();
   if (!business) return;
   const humans = listHumans(business.id).filter((h) => h.phone);
-  if (!humans.length || !(await isLinked())) return;
+  if (!(await isLinked())) return;
   for (const h of humans) await pollHuman(business, h);
+  // Replies to messages the team is waiting on (worker/replies.ts).
+  await pollWatches(business);
 }
 
 async function pollHuman(business: Business, human: Teammate) {
@@ -133,7 +136,8 @@ async function pollHuman(business: Business, human: Teammate) {
   const since = new Date(Math.max((lastIn ?? human.createdAt).getTime() - 60_000, human.createdAt.getTime()));
   const jid = humanJid(human.phone!);
   const fresh = (await listMessages(jid, { limit: 50, after: since.toISOString() }))
-    .filter((m) => !m.FromMe && new Date(m.Timestamp) >= human.createdAt)
+    // Emoji reactions aren't replies.
+    .filter((m) => !m.FromMe && new Date(m.Timestamp) >= human.createdAt && isRealMessage(m))
     .filter(
       (m) =>
         !db.select({ id: schema.humanMessages.id }).from(schema.humanMessages).where(eq(schema.humanMessages.waMessageId, m.MsgID)).get(),
@@ -147,28 +151,7 @@ async function pollHuman(business: Business, human: Teammate) {
   const texts: string[] = [];
   const files: string[] = [];
   for (const m of fresh) {
-    const attachments: string[] = [];
-    if (m.MediaType) {
-      const file = await saveMedia(jid, m).catch((err) => {
-        console.error(`[humans] media download failed for ${m.MsgID}`, err);
-        return null;
-      });
-      if (file) attachments.push(file);
-    }
-    let text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
-    // A voice note is an instruction like any other: transcribe it (on this Mac).
-    let voice = false;
-    const audio = attachments.find((f) => mediaKind(f) === "audio");
-    if (audio && !text) {
-      voice = true;
-      try {
-        const t = await transcribe(path.join(dataDir(), audio), { language: business.language });
-        text = t.text ? `🎤 ${t.text}` : "🎤 (voice note without words)";
-      } catch (err) {
-        console.error(`[humans] couldn't transcribe ${audio}`, err);
-        text = `🎤 (voice note: ${audio}; it couldn't be transcribed: ${(err as Error).message.slice(0, 120)})`;
-      }
-    }
+    const { text, attachments, handOver } = await readIncoming(business, jid, m);
     recordHumanMessage({
       businessId: business.id,
       humanId: human.id,
@@ -180,8 +163,7 @@ async function pollHuman(business: Business, human: Teammate) {
       sentAt: new Date(m.Timestamp),
     });
     if (text) texts.push(text);
-    // The transcript stands in for a voice note; other files go along to the teammate.
-    files.push(...(voice ? attachments.filter((f) => f !== audio) : attachments));
+    files.push(...handOver);
   }
   logEvent({
     businessId: business.id,
@@ -195,6 +177,35 @@ async function pollHuman(business: Business, human: Teammate) {
     .where(eq(schema.teammates.id, human.id))
     .run();
   routeReply(business, human, request, texts, files);
+}
+
+/**
+ * One incoming WhatsApp message as the team should see it: its text, its photos and
+ * videos saved to media/, and a voice note transcribed (the transcript stands in for
+ * the audio, so `handOver` leaves it out).
+ */
+export async function readIncoming(business: Pick<Business, "language">, jid: string, m: WaMessage) {
+  const attachments: string[] = [];
+  if (m.MediaType) {
+    const file = await saveMedia(jid, m).catch((err) => {
+      console.error(`[whatsapp] media download failed for ${m.MsgID}`, err);
+      return null;
+    });
+    if (file) attachments.push(file);
+  }
+  let text = (m.Text || m.MediaCaption || m.DisplayText || "").trim();
+  const audio = attachments.find((f) => mediaKind(f) === "audio");
+  const voice = !!audio && !text;
+  if (voice) {
+    try {
+      const t = await transcribe(path.join(dataDir(), audio), { language: business.language });
+      text = t.text ? `🎤 ${t.text}` : "🎤 (voice note without words)";
+    } catch (err) {
+      console.error(`[whatsapp] couldn't transcribe ${audio}`, err);
+      text = `🎤 (voice note: ${audio}; it couldn't be transcribed: ${(err as Error).message.slice(0, 120)})`;
+    }
+  }
+  return { text, attachments, handOver: voice ? attachments.filter((f) => f !== audio) : attachments };
 }
 
 const MIME_EXT: Record<string, string> = {

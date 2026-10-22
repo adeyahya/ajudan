@@ -14,6 +14,7 @@ import { getBusiness } from "@/lib/data";
 import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
 import { DECISION, REPORT } from "@/lib/manager";
+import { activeWatches, watchState } from "@/lib/watches";
 import { runScheduledNow, sendTaskMessage } from "./actions";
 
 const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "red"> = {
@@ -142,6 +143,7 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === REPORT) return "Team update";
   if (createdBy === DECISION) return "After your decision";
+  if (createdBy === "system:reply") return "WhatsApp reply";
   if (createdBy === "system:capability") return "You approved";
   if (createdBy.startsWith("human:")) {
     const id = createdBy.slice("human:".length);
@@ -251,6 +253,8 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
     ? ["Apa yang sedang dikerjakan tim?", "Siapkan konten minggu ini untuk TikTok dan Instagram", "Ada yang perlu saya setujui?"]
     : ["What is the team working on?", "Plan this week's TikTok and Instagram content", "Is anything waiting for my approval?"];
   const waiting = tasks.some((task) => task.status === "waiting_approval");
+  // The manager's page shows whose WhatsApp replies the team is waiting for.
+  const watches = manager ? activeWatches(id) : [];
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
@@ -337,6 +341,29 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
             </form>
           )}
         </Card>
+
+        {watches.length > 0 && (
+          <Card className="space-y-2 p-4">
+            <h2 className="text-sm font-semibold">Waiting for replies</h2>
+            <ul className="space-y-2 text-sm">
+              {watches.slice(0, 12).map((w) => {
+                const state = watchState(w);
+                return (
+                  <li key={w.id} className="flex items-start justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block truncate">{w.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {mates.find((m) => m.id === w.teammateId)?.name ?? "Team"}
+                        {w.purpose ? ` · ${w.purpose}` : ""}
+                      </span>
+                    </span>
+                    <Badge tone={state === "replied" ? "green" : state === "no reply" ? "red" : "amber"}>{state}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        )}
 
         <Card className="space-y-2 p-4">
           <h2 className="text-sm font-semibold">Responsibilities</h2>

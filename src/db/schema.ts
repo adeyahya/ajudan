@@ -228,6 +228,35 @@ export const secrets = sqliteTable("secrets", {
   createdAt: createdAt(),
 });
 
+/**
+ * A WhatsApp message the team sent and expects an answer to (someone outside the
+ * team, or a group asked to reply). The worker watches the chat: replies go to the
+ * teammate who wrote, and if none comes by replyBy, that teammate is reminded.
+ * See worker/replies.ts.
+ */
+export const waWatches = sqliteTable("wa_watches", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  jid: text("jid").notNull(),
+  name: text("name").notNull(),
+  teammateId: text("teammate_id")
+    .notNull()
+    .references(() => teammates.id, { onDelete: "cascade" }),
+  /** The task that sent it (its owner request gets the follow-up). */
+  taskId: text("task_id"),
+  /** What the team wants back, e.g. "confirm a 50-pc bulk order". */
+  purpose: text("purpose").notNull().default(""),
+  message: text("message").notNull().default(""),
+  status: text("status").$type<"waiting" | "replied" | "no_reply" | "closed">().notNull().default("waiting"),
+  replyBy: integer("reply_by", { mode: "timestamp_ms" }).notNull(),
+  /** Messages after this were already handed over. */
+  seenUntil: integer("seen_until", { mode: "timestamp_ms" }).notNull(),
+  lastReplyAt: integer("last_reply_at", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+});
+
 export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task";
 
 export const jobs = sqliteTable("jobs", {
@@ -252,3 +281,4 @@ export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type HumanMessage = typeof humanMessages.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
+export type WaWatch = typeof waWatches.$inferSelect;

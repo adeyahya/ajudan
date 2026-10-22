@@ -50,6 +50,13 @@
       "when": 1792644664883,
       "tag": "0006_secrets_shell",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792661344041,
+      "tag": "0007_wa_watches",
+      "breakpoints": true
     }
   ]
 }

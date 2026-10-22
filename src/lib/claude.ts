@@ -225,6 +225,10 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Getting invite link: ${short(input.chat, 40)}`;
     case "mcp__whatsapp__create_group":
       return `Creating WhatsApp group: ${short(input.name, 40)}`;
+    case "mcp__whatsapp__waiting_for_replies":
+      return "Checking who hasn't replied";
+    case "mcp__whatsapp__stop_waiting":
+      return `Done waiting for ${short(input.chat, 30)}`;
     case "mcp__whatsapp__find_contact":
       return `Looking up ${short(input.query, 30)} in contacts`;
     case "mcp__whatsapp__send_to_people":
