@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { PageSkeleton } from "@/components/kit";
 import { listContacts } from "@/lib/contacts";
 import { getBusiness } from "@/lib/data";
+import { t } from "@/lib/i18n";
 import { Contacts } from "./contacts";
 
 export default function ContactsPage(props: PageProps<"/b/[id]/studio/contacts">) {
@@ -19,5 +21,12 @@ async function Content({ params }: { params: PageProps<"/b/[id]/studio/contacts"
   const business = await getBusiness(id);
   if (!business) notFound();
   await connection();
-  return <Contacts businessId={id} contacts={listContacts(id)} />;
+  return (
+    <div className="space-y-3">
+      <Link href={`/b/${id}/context/people`} className="text-xs text-muted-foreground underline hover:text-foreground">
+        {t(business.language, "context.people.inContext")}
+      </Link>
+      <Contacts businessId={id} contacts={listContacts(id)} />
+    </div>
+  );
 }

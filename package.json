@@ -19,6 +19,9 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.304",
+    "@blocknote/core": "0.56.0",
+    "@blocknote/react": "0.56.0",
+    "@blocknote/shadcn": "0.56.0",
     "@playwright/mcp": "0.0.83",
     "@remotion/bundler": "4.0.533",
     "@remotion/captions": "4.0.533",

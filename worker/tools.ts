@@ -15,7 +15,8 @@ import { slugify } from "@/lib/folders";
 import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from "@/lib/free-assets";
 import { renderHtmlToPng } from "@/lib/images";
 import { assetRows, describeOrganization } from "@/lib/assets";
-import { describeContact, searchAddressBook } from "@/lib/contacts";
+import { describeContact, listContacts, searchAddressBook } from "@/lib/contacts";
+import { createSuggestion, findPage, forAgents, listPages, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask, delegatedInstructions, delegationDepth, deriveTaskTitle, MAX_DELEGATION_DEPTH, ownerRequest } from "@/lib/tasks";
@@ -61,6 +62,9 @@ export const SAFE_BIZ_TOOLS = [
   "team_status",
   "task_results",
   "pending_approvals",
+  "search_context",
+  "read_page",
+  "suggest_page_edit",
 ].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
@@ -548,6 +552,79 @@ export function createBizServer(ctx: BizContext) {
         return ok(
           `Message to ${a.to} saved as ready to send (id ${d.id}). Nothing was sent: the owner sends it from the Work page. Say so in your summary.`,
         );
+      },
+    ),
+
+    // The Context workspace (src/lib/context.ts): read freely, never write; suggest.
+    tool(
+      "search_context",
+      "Search the owner's Context pages (business facts, products, policies, how we work, what the team learned) and the address book for a fact. Returns the best matching pages with a snippet; read_page for the whole page.",
+      { query: z.string().describe('e.g. "ongkir gratis jawa", "reseller discount", "Bu Rina"') },
+      async (a) => {
+        const pages = listPages(businessId);
+        const rows = readerRows(businessId);
+        const shared = pages.filter((p) => p.kind === "page" && readerMode(p, teammate.id, rows) !== "never");
+        const hits = searchPages(shared, a.query);
+        const people = searchAddressBook(businessId, a.query, undefined, 5);
+        const contacts = pages.find((p) => p.source === "contacts");
+        if (!hits.length && !people.length) return ok(`Nothing matches "${a.query}". Pages: ${shared.map((p) => `"${p.title}"`).join(", ") || "none"}.`);
+        return ok(
+          [
+            ...hits.map((h) => `- "${h.title}" (id ${h.id}): ${h.snippet}`),
+            ...(people.length ? [`\nPeople${contacts ? ` ("${contacts.title}")` : ""}:`, ...people.map(describeContact)] : []),
+          ].join("\n"),
+        );
+      },
+    ),
+
+    tool(
+      "read_page",
+      "Read one of the owner's Context pages in full, by title or id (the pages listed in your instructions). When you use what it says, cite the page title.",
+      { page: z.string().describe('Title or id, e.g. "Rules & policies"') },
+      async (a) => {
+        const r = readablePage(businessId, teammate.id, a.page);
+        if ("error" in r) return fail(r.error ?? "Not found.");
+        const p = r.page;
+        let body = forAgents(p.body).trim();
+        if (p.source === "contacts") {
+          const all = listContacts(businessId);
+          body = `${all.length} people in the address book${all.length > 80 ? " (first 80; search_contacts finds the rest)" : ""}:\n${all.slice(0, 80).map(describeContact).join("\n")}`;
+        }
+        const text = `# ${p.title}\n${p.updatedAt ? `(last changed ${p.updatedAt.toISOString().slice(0, 10)})\n` : ""}\n${body.slice(0, 30_000) || "(empty page)"}`;
+        recordFetch(businessId, taskId, teammate.id, p, text.length);
+        return ok(text);
+      },
+    ),
+
+    tool(
+      "suggest_page_edit",
+      "Propose a change to the owner's Context pages when you learn something durable that's missing or out of date there (a new price or policy, a customer preference, a lesson). You never edit pages yourself: the owner sees exactly what you propose, with your reason and source, and accepts or rejects it. Prefer a short append to the right page; replace only to fix what's wrong, keeping everything else.",
+      {
+        page: z.string().optional().describe("Title or id of the page to change (omit for a new page)"),
+        mode: z.enum(["append", "replace", "new_page"]).describe("append: add markdown at the end; replace: the whole page's new markdown; new_page: a new page"),
+        markdown: z.string().describe("The text to add, the full new page, or the new page's content, as markdown"),
+        reason: z.string().describe("Why, in one line"),
+        source: z.string().describe('Where it comes from, e.g. "The owner in chat, 23 Oct: \'from next month free shipping in Java above 100k\'"'),
+        title: z.string().optional().describe("new_page: its title"),
+        section: z.enum(["business", "product", "people", "how_we_work", "team_written"]).optional().describe("new_page: where it goes (default team_written)"),
+      },
+      async (a) => {
+        if (!a.markdown.trim()) return fail("Nothing to suggest: markdown is empty.");
+        if (a.mode === "new_page") {
+          if (!a.title?.trim()) return fail("A new page needs a title.");
+          const same = findPage(businessId, a.title);
+          if (same && same.title.toLowerCase() === a.title.trim().toLowerCase()) return fail(`"${same.title}" already exists: suggest an append to it instead.`);
+          const s = createSuggestion({ businessId, teammate, taskId, kind: "new_page", body: a.markdown, title: a.title.trim(), section: a.section ?? "team_written", reason: a.reason, source: a.source });
+          return ok(`Suggested the new page "${a.title}" (suggestion ${s.id}). It exists only once the owner accepts it; they see it in Context${ctx.isManager ? " and as a card under your reply in this chat: tell them in one line what you proposed" : ""}.`);
+        }
+        if (!a.page) return fail("Say which page (title or id), or use mode new_page.");
+        const page = findPage(businessId, a.page);
+        if (!page) return fail(`No page "${a.page}". Pages: ${listPages(businessId).map((p) => `"${p.title}"`).join(", ")}.`);
+        if (page.kind === "database") return fail(`"${page.title}" is the address book, not a text page. Mention the change in your summary for the owner instead.`);
+        const dup = pendingSuggestions(businessId, page.id).find((s) => s.kind === a.mode && s.body.trim() === a.markdown.trim());
+        if (dup) return ok(`Already suggested (suggestion ${dup.id}); the owner hasn't decided yet.`);
+        const s = createSuggestion({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
+        return ok(`Suggested ${a.mode === "append" ? "an addition to" : "a new version of"} "${page.title}" (suggestion ${s.id}). It isn't on the page until the owner accepts it${ctx.isManager ? "; they see it as a card under your reply in this chat: say in one line what you proposed to save" : ""}.`);
       },
     ),
   ];

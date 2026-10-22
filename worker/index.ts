@@ -19,6 +19,7 @@ import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, needsClaude, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
 import { readRest, startRest, UsageLimitError } from "@/lib/rest";
+import { ensureContextWorkspace } from "@/lib/context";
 import { HEARTBEAT_MS, removeHeartbeat, writeHeartbeat } from "@/lib/worker-heartbeat";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
@@ -119,6 +120,8 @@ function activate(dir: string | null) {
     return;
   }
   requeueStaleJobs();
+  // The Context workspace's own pages (About, what the team learned, the address book…).
+  for (const b of db.select({ id: schema.businesses.id }).from(schema.businesses).all()) ensureContextWorkspace(b.id);
   resting = Boolean(readRest());
   // Tasks waiting for an approval keep waiting (their session resumes on the decision);
   // approvals asked by a run that restarts from scratch are superseded, it asks afresh.

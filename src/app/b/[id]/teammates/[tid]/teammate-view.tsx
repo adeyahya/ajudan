@@ -7,6 +7,7 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { Task, TaskStatus, Teammate, TeammateState } from "@/db/schema";
 import { Chat, type ChatMessage } from "@/components/chat";
+import { ContextSuggestionCard, type SuggestionCardData } from "@/components/context-suggestion-card";
 import { ImageStrip } from "@/components/image-strip";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Button, Card, Prose } from "@/components/kit";
@@ -138,7 +139,22 @@ async function loadTeammate(businessId: string, teammateId: string) {
       if (imgs.length) taskImages.set(t.id, [...(taskImages.get(t.id) ?? []), ...imgs]);
     }
   }
-  return { teammate, tasks, steps, deliverableCount, mates, memory, taskImages, children };
+  // Facts from this chat proposed for a Context page (K5 cards under the reply).
+  const pageSuggestions = new Map<string, SuggestionCardData[]>();
+  if (tasks.length) {
+    const rows = db
+      .select({ s: schema.contextSuggestions, title: schema.contextPages.title })
+      .from(schema.contextSuggestions)
+      .leftJoin(schema.contextPages, eq(schema.contextPages.id, schema.contextSuggestions.pageId))
+      .where(inArray(schema.contextSuggestions.taskId, tasks.map((t) => t.id)))
+      .orderBy(asc(schema.contextSuggestions.createdAt))
+      .all();
+    for (const { s, title } of rows) {
+      const card: SuggestionCardData = { id: s.id, kind: s.kind, body: s.body, status: s.status, pageId: s.pageId, pageTitle: title ?? s.title ?? "" };
+      pageSuggestions.set(s.taskId!, [...(pageSuggestions.get(s.taskId!) ?? []), card]);
+    }
+  }
+  return { teammate, tasks, steps, deliverableCount, mates, memory, taskImages, children, pageSuggestions };
 }
 
 const CREATED_BY: Record<string, MessageKey> = {
@@ -191,6 +207,7 @@ function toMessages(
   taskImages: Map<string, string[]>,
   children: Map<string, Task[]>,
   lang: UiLang,
+  pageSuggestions = new Map<string, SuggestionCardData[]>(),
 ): ChatMessage[] {
   const time = timeIn(lang);
   const stepsByTask = new Map<string, string[]>();
@@ -263,6 +280,7 @@ function toMessages(
           .join(" · "),
         footer: (
           <>
+            {pageSuggestions.get(task.id)?.map((s) => <ContextSuggestionCard key={s.id} businessId={businessId} s={s} />)}
             {delegated}
             {(taskImages.get(task.id)?.length ?? 0) > 0 && (
               <ImageStrip businessId={businessId} images={taskImages.get(task.id)!} className="w-full pb-1" />
@@ -292,7 +310,7 @@ export async function TeammateView({ id, tid, manager = false, embedded = false 
   if (!biz || !data) notFound();
   const lang = uiLang(biz.language);
   if (data.teammate.kind === "human") return <HumanView businessId={id} human={data.teammate} mates={data.mates} lang={lang} />;
-  const { teammate: t, tasks, steps, deliverableCount, mates, memory, taskImages, children } = data;
+  const { teammate: t, tasks, steps, deliverableCount, mates, memory, taskImages, children, pageSuggestions } = data;
   const managerSuggestions = [tr(lang, "mate.suggest1"), tr(lang, "mate.suggest2"), tr(lang, "mate.suggest3")];
   const waiting = tasks.some((task) => task.status === "waiting_approval");
   // The manager's page shows whose WhatsApp replies the team is waiting for.
@@ -327,7 +345,7 @@ export async function TeammateView({ id, tid, manager = false, embedded = false 
         <Chat
           className="flex-1"
           agent={{ id: t.id, name: t.name, color: t.color }}
-          messages={toMessages(id, tasks, steps, mates, taskImages, children, lang)}
+          messages={toMessages(id, tasks, steps, mates, taskImages, children, lang, pageSuggestions)}
           busy={false}
           sendAction={sendTaskMessage.bind(null, id, t.id)}
           uploadBusinessId={id}

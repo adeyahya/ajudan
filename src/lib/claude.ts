@@ -215,6 +215,12 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return "Looking through the media library";
     case "mcp__biz__search_contacts":
       return `Looking up ${short(input.query, 30) || "people"} in the address book`;
+    case "mcp__biz__search_context":
+      return `Searching the business context for "${short(input.query, 30)}"`;
+    case "mcp__biz__read_page":
+      return `Reading the page "${short(input.page, 40)}"`;
+    case "mcp__biz__suggest_page_edit":
+      return `Suggesting a change to "${short(input.page ?? input.title, 40)}"`;
     case "mcp__biz__inspect_media":
       return `Checking ${baseName(input.file)}`;
     case "mcp__biz__extract_frames":

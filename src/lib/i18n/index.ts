@@ -6,6 +6,7 @@ import * as work from "./messages/work";
 import * as business from "./messages/business";
 import * as office from "./messages/office";
 import * as chat from "./messages/chat";
+import * as context from "./messages/context";
 
 /**
  * UI strings (roadmap 5.1). Dependency-free: server components call t(lang, key), client
@@ -16,8 +17,8 @@ import * as chat from "./messages/chat";
  * so a missing or extra Indonesian key fails typecheck). Keys are namespaced by area.
  */
 export const MESSAGES = {
-  en: { ...common.en, ...home.en, ...schedule.en, ...team.en, ...work.en, ...business.en, ...office.en, ...chat.en },
-  id: { ...common.id, ...home.id, ...schedule.id, ...team.id, ...work.id, ...business.id, ...office.id, ...chat.id },
+  en: { ...common.en, ...home.en, ...schedule.en, ...team.en, ...work.en, ...business.en, ...office.en, ...chat.en, ...context.en },
+  id: { ...common.id, ...home.id, ...schedule.id, ...team.id, ...work.id, ...business.id, ...office.id, ...chat.id, ...context.id },
 } satisfies Record<string, Record<string, string>>;
 
 /** Languages the UI is translated into. Other business languages (ms, es, …) get English chrome. */

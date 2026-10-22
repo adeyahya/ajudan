@@ -5,6 +5,7 @@ import { consolidateMemory } from "./memory";
 import { onboardingFinalize, onboardingTurn } from "./onboarding";
 import { runTask } from "./task";
 import { renderEdit } from "../edits";
+import { contextTestAsk } from "./context";
 
 export const handlers: { [K in JobKind]: (payload: JobPayloads[K]) => Promise<void> } = {
   onboarding_turn: onboardingTurn,
@@ -13,4 +14,5 @@ export const handlers: { [K in JobKind]: (payload: JobPayloads[K]) => Promise<vo
   run_task: runTask,
   consolidate_memory: consolidateMemory,
   render_edit: renderEdit,
+  context_test_ask: contextTestAsk,
 };

@@ -59,7 +59,7 @@ describe("role checklists", () => {
   it("adds the shared checks to every role, and knows the operations role", () => {
     const ops = roleChecklist("operations_assistant");
     expect(ops[0]).toBe(getRole("operations_assistant")!.checklist[0]);
-    expect(ops.some((c) => c.includes("TEAM.md"))).toBe(true);
+    expect(ops.some((c) => c.includes("Context pages"))).toBe(true);
     expect(roleChecklist(null).length).toBeGreaterThan(0);
     expect(roleChecklist("unknown_role")).toEqual(roleChecklist(null));
   });

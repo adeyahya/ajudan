@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const id = () =>
   text("id")
@@ -309,7 +309,7 @@ export const waWatches = sqliteTable("wa_watches", {
   createdAt: createdAt(),
 });
 
-export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit";
+export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit" | "context_test_ask";
 
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -385,6 +385,122 @@ export const edits = sqliteTable("edits", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
 });
 
+/** Sections of the Context workspace, in tree order. Labels are i18n (context.section.*). */
+export type ContextSection = "business" | "product" | "people" | "how_we_work" | "team_written";
+export type ReaderMode = "always" | "when_needed" | "never";
+
+/**
+ * The Context workspace (src/lib/context.ts): Notion-style pages the team reads. The
+ * markdown body is what teammates read; `blocks` is the editor's own JSON, kept only so
+ * the owner's callouts, mentions and galleries round-trip (null after the body changed
+ * elsewhere, e.g. an accepted suggestion: the editor re-reads the markdown).
+ */
+export const contextPages = sqliteTable("context_pages", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  parentId: text("parent_id"),
+  section: text("section").$type<ContextSection>().notNull().default("business"),
+  title: text("title").notNull(),
+  /** "database": a table view over app data (`source`), not free text. */
+  kind: text("kind").$type<"page" | "database">().notNull().default("page"),
+  /** For database pages: what it shows ("contacts"). */
+  source: text("source"),
+  /** Pages Ajudan created and keeps track of: "about", "learned", "products", "policies", "contacts". */
+  key: text("key"),
+  body: text("body").notNull().default(""),
+  blocks: text("blocks", { mode: "json" }).$type<unknown[]>(),
+  sortOrder: real("sort_order").notNull().default(0),
+  /** "owner", "system" or "teammate:<id>". */
+  createdBy: text("created_by").notNull().default("owner"),
+  updatedBy: text("updated_by").notNull().default("owner"),
+  /** When the owner last confirmed the page is still true. */
+  lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
+}, (t) => [index("context_pages_business_idx").on(t.businessId, t.section), uniqueIndex("context_pages_key_idx").on(t.businessId, t.key)]);
+
+/** Per teammate, how a page reaches them. No row: the default (defaultReaderMode in src/lib/context.ts). */
+export const contextReaders = sqliteTable("context_readers", {
+  id: id(),
+  pageId: text("page_id")
+    .notNull()
+    .references(() => contextPages.id, { onDelete: "cascade" }),
+  teammateId: text("teammate_id")
+    .notNull()
+    .references(() => teammates.id, { onDelete: "cascade" }),
+  mode: text("mode").$type<ReaderMode>().notNull(),
+}, (t) => [index("context_readers_page_idx").on(t.pageId, t.teammateId)]);
+
+export type SuggestionStatus = "pending" | "accepted" | "rejected";
+
+/**
+ * A change a teammate (or the manager, from the owner's chat) proposes to a page.
+ * Teammates never write pages; the owner accepts or rejects. "append" adds `body` at
+ * the end, "replace" swaps the whole page for `body`, "new_page" creates `title`.
+ */
+export const contextSuggestions = sqliteTable("context_suggestions", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  pageId: text("page_id").references(() => contextPages.id, { onDelete: "cascade" }),
+  teammateId: text("teammate_id").references(() => teammates.id, { onDelete: "set null" }),
+  taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
+  kind: text("kind").$type<"append" | "replace" | "new_page">().notNull(),
+  body: text("body").notNull(),
+  /** The page as it was when proposed (to show what changed since). */
+  before: text("before"),
+  /** new_page only. */
+  title: text("title"),
+  section: text("section").$type<ContextSection>(),
+  reason: text("reason").notNull().default(""),
+  /** Where it came from: "you told Bu Rina on WhatsApp, 22 Oct: …". */
+  source: text("source").notNull().default(""),
+  status: text("status").$type<SuggestionStatus>().notNull().default("pending"),
+  decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+}, (t) => [index("context_suggestions_business_idx").on(t.businessId, t.status)]);
+
+/**
+ * What a task's run read: always-pages put in its prompt, pages it fetched (read_page),
+ * its memory and the conversation. Feeds the inspector and page usage counts.
+ */
+export const contextLoads = sqliteTable("context_loads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  teammateId: text("teammate_id").notNull(),
+  pageId: text("page_id").references(() => contextPages.id, { onDelete: "set null" }),
+  label: text("label").notNull(),
+  mode: text("mode").$type<"always" | "fetched" | "memory" | "conversation">().notNull(),
+  chars: integer("chars").notNull().default(0),
+  truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
+  createdAt: createdAt(),
+}, (t) => [index("context_loads_task_idx").on(t.taskId), index("context_loads_page_idx").on(t.pageId, t.createdAt)]);
+
+/** A dry run from the inspector: what a teammate would answer from its context alone (no tools, nothing sent). */
+export const contextAsks = sqliteTable("context_asks", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  teammateId: text("teammate_id")
+    .notNull()
+    .references(() => teammates.id, { onDelete: "cascade" }),
+  question: text("question").notNull(),
+  answer: text("answer"),
+  cited: text("cited", { mode: "json" }).$type<string[]>().notNull().default([]),
+  status: text("status").$type<"queued" | "done" | "failed">().notNull().default("queued"),
+  costUsd: real("cost_usd").notNull().default(0),
+  createdAt: createdAt(),
+});
+
 export type Business = typeof businesses.$inferSelect;
 export type OnboardingMessage = typeof onboardingMessages.$inferSelect;
 export type Teammate = typeof teammates.$inferSelect;
@@ -399,3 +515,8 @@ export type WaWatch = typeof waWatches.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type Edit = typeof edits.$inferSelect;
+export type ContextPage = typeof contextPages.$inferSelect;
+export type ContextReader = typeof contextReaders.$inferSelect;
+export type ContextSuggestion = typeof contextSuggestions.$inferSelect;
+export type ContextLoad = typeof contextLoads.$inferSelect;
+export type ContextAsk = typeof contextAsks.$inferSelect;

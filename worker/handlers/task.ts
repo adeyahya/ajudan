@@ -22,6 +22,7 @@ import { isReminderTask, REPLY } from "../replies";
 import { canReview, DECISION, onTaskFinished, REPORT, RESULTS, REVISION } from "@/lib/manager";
 import { delegationDepth, MAX_DELEGATION_DEPTH } from "@/lib/tasks";
 import { initTeammateWorkspace } from "@/lib/workspace";
+import { contextPrompt, ensureContextWorkspace, recordRunContext } from "@/lib/context";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { isInside, resolveReal } from "../fs-guard";
 import { ApprovalWait, CancelledError, isPaused, PausedError, runAbortController, runningTasks } from "../session";
@@ -303,16 +304,15 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         disallowedTools.push(...browserToolNames(browserProvider, browserProvider.blockedTools));
       }
       const files = await describeAttachments(attachments);
+      const context = runContext(business, teammate, task, cwd);
+      const fresh = `${buildPrompt(task, taskHistory(teammate.id, task), files)}${decided ? `\n\n${decisionRecap(decided)}` : ""}`;
+      context.record(fresh.length);
       const attempt = (resume: string | undefined) =>
         runAgent({
           cwd,
           model: quickWork ? MODELS.fast : undefined,
-          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork),
-          prompt: resume
-            ? decided
-              ? decisionPrompt(decided)
-              : buildPrompt(task, "", files, true)
-            : `${buildPrompt(task, taskHistory(teammate.id, task), files)}${decided ? `\n\n${decisionRecap(decided)}` : ""}`,
+          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt),
+          prompt: resume ? (decided ? decisionPrompt(decided) : buildPrompt(task, "", files, true)) : fresh,
           tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
           sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
           plugins: videoWork ? [PLUGIN_DIR] : undefined,
@@ -414,6 +414,36 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
 
 function spent(taskId: string) {
   return db.select({ c: schema.tasks.costUsd }).from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()?.c ?? 0;
+}
+
+/**
+ * The Context pages this run starts with (src/lib/context.ts): always-pages in the system
+ * prompt, the rest by title. `record` notes what went in (and the memory and prompt
+ * sizes) for the inspector; it never fails the task.
+ */
+function runContext(business: Business, teammate: Teammate, task: Task, cwd: string) {
+  ensureContextWorkspace(business.id);
+  const { prompt, items } = contextPrompt(business.id, teammate.id);
+  return {
+    prompt,
+    record(conversationChars: number) {
+      try {
+        let memory = 0;
+        try {
+          memory = fs.statSync(path.join(cwd, "memory.md")).size;
+        } catch {
+          // no memory yet
+        }
+        recordRunContext(business.id, task.id, teammate.id, [
+          ...items.map((i) => ({ pageId: i.id, label: i.title, mode: "always" as const, chars: i.chars, truncated: i.truncated })),
+          { label: "memory.md", mode: "memory", chars: memory },
+          { label: task.title, mode: "conversation", chars: conversationChars },
+        ]);
+      } catch (err) {
+        console.error(`[task] couldn't record the context of ${task.id}`, err);
+      }
+    },
+  };
 }
 
 /** The message that resumes a run after the owner decided. */
@@ -566,7 +596,8 @@ The owner talks to you instead of to each teammate, in a chat. Each message:
 4. Real work (content, images, videos, research, outreach, WhatsApp, website/browser work): delegate with assign_task to the teammate whose role and permissions fit (team_status shows who has browser/WhatsApp). Split bigger requests across teammates. Give each one complete instructions: goal, context, constraints, deadline, and the language. Pass the owner's attached files along with assign_task(files=[…]) to whoever needs them. Don't do specialist work yourself.
 5. Reply to the owner briefly, like a good manager on chat: who is doing what, and that you'll report back. Don't paste long documents into the chat.
 When a "Report back" task arrives, first review the team's actual work as it says (once per request), then summarize the team's results for the owner (what's done, where to see it, decisions or approvals they need to make) in a few lines. If a teammate needs footage or photos, pass on their shot list clearly and ask the owner to drop the files here; then delegate again with the files.
-If nobody on the team can do something (a missing credential, shell, browser or WhatsApp), have the teammate who'd do it ask with request_capability (or ask yourself), and tell the owner to look at the Approvals page.`;
+If nobody on the team can do something (a missing credential, shell, browser or WhatsApp), have the teammate who'd do it ask with request_capability (or ask yourself), and tell the owner to look at the Approvals page.
+When the owner states a durable fact or rule in the chat (a price, shipping or payment policy, a customer preference, "from now on…"), save it for the team: suggest_page_edit with an append to the right page (quote them as the source), and say in one line what you proposed. They confirm it on the card under your reply. One suggestion per fact; don't do this for one-off requests.`;
 }
 
 /** Whose WhatsApp replies this teammate (or, for the manager, the team) is waiting for. */
@@ -631,6 +662,7 @@ function buildSystemPrompt(
   useWhatsapp = false,
   humans: Teammate[] = [],
   videoWork = false,
+  context = "",
 ) {
   const role = getRole(teammate.roleKey);
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none)");
@@ -650,7 +682,7 @@ function buildSystemPrompt(
         : `Only ${channels} really reach the outside world, and you're draft-only there: you never send, post or change anything, only read and prepare.`;
 
   return `You are ${teammate.name}, the ${teammate.title} on the AI team of ${business.name}${business.website ? ` (${business.website})` : ""}.
-You work for the business owner. Your working folder contains BUSINESS.md (everything about the business), TEAM.md (the owner's feedback and preferences for the whole team: follow them) and memory.md (your own long-term notes). Read all three first. TEAM.md is a read-only copy, refreshed every task: don't edit it.
+You work for the business owner. What you know about the business is in the owner's Context pages below${context ? "" : " (none are shared with you yet)"}: follow them. Your folder's BUSINESS.md and TEAM.md are read-only copies of two of those pages, so don't read them again. memory.md is your own long-term notes: read it first.
 
 ## Your role
 ${role?.instructions ?? ""}
@@ -683,7 +715,7 @@ ${list(roleChecklist(teammate.roleKey))}
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.
 - At the end, append any durable learnings (decisions, what worked, owner preferences) to memory.md with Edit. Keep it short.
 - Finish with a concise summary for the owner: what you did, what you saved, and what's next.
-
+${context ? `\n${context}\n` : ""}
 ## Making images
 You can make real images (social posts, carousel slides, posters, banners) with render_image: design each one as a self-contained HTML page (inline CSS, Google Fonts, product photos by URL from the business's website), usually 1080×1350 for Instagram/TikTok portrait or 1080×1080 square. Big readable text, the brand's colors and voice, one idea per slide. Read each PNG afterwards to check it looks right, fix and re-render if needed, then attach the images in order with save_deliverable(images=[…]) so the owner can see them on the Work page.
 
