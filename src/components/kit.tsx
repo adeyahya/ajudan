@@ -465,11 +465,11 @@ export function PageHeader({
         </div>
       )}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[min(100%,16rem)] flex-1">
           <h1 className="text-[28px] leading-[34px] font-bold tracking-tight text-foreground [overflow-wrap:anywhere]">{title}</h1>
           {desc && <p className="mt-1.5 max-w-[60ch] text-sm leading-[22px] text-muted-foreground">{desc}</p>}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2 pt-0.5">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2 pt-0.5">{actions}</div>}
       </div>
       {properties && properties.length > 0 && <PropertyList items={properties} className="mt-4" />}
     </header>
