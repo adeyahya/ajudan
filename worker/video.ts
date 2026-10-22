@@ -16,6 +16,7 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { CHROME_PATH } from "@/lib/browser";
 import { dataDir } from "@/lib/paths";
+import { restrictedWebpackOverride } from "./bundle-guard";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const NODE_MODULES = path.join(ROOT, "node_modules");
@@ -34,6 +35,8 @@ export function renderVideo(opts: Parameters<typeof renderNow>[0]): Promise<Rend
 async function renderNow(opts: {
   /** Absolute path of the teammate's TSX file. */
   source: string;
+  /** The teammate's folder: the only place (besides Ajudan's packages) the bundle may import from. */
+  cwd: string;
   outPath: string;
   /** Scratch folder for the generated entry and bundle. */
   workDir: string;
@@ -70,13 +73,9 @@ registerRoot(Root);
     symlinkPublicDir: true,
     outDir: path.join(opts.workDir, "bundle"),
     onSymlinkDetected: () => {},
-    // The teammate's file lives outside this repo: resolve remotion, react and
-    // @remotion/* from Ajudan's node_modules.
-    webpackOverride: (config) => ({
-      ...config,
-      resolve: { ...config.resolve, modules: [NODE_MODULES, "node_modules"] },
-      resolveLoader: { ...config.resolveLoader, modules: [NODE_MODULES, "node_modules"] },
-    }),
+    // Resolve remotion, react and @remotion/* from Ajudan's node_modules, and refuse
+    // any import that reaches outside the teammate's folder (see bundle-guard.ts).
+    webpackOverride: restrictedWebpackOverride({ cwd: opts.cwd, nodeModules: NODE_MODULES }),
   });
 
   const composition = await selectComposition({ serveUrl, id: "Main", browserExecutable: CHROME_PATH, logLevel: "error" });

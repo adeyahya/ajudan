@@ -27,6 +27,8 @@ import { sendToHuman } from "./humans";
 import { notifyOwner } from "./owner-approvals";
 import { speechAvailable, transcribe } from "@/lib/speech";
 import { renderVideo } from "./video";
+import { fileInside } from "./fs-guard";
+import { isPrivateHost } from "@/lib/net";
 
 export const BIZ_SERVER = "biz";
 
@@ -307,10 +309,9 @@ export function createBizServer(ctx: BizContext) {
         name: z.string().describe('Output name, e.g. "promo-nama-tiktok"'),
       },
       async (a) => {
-        const source = path.resolve(ctx.cwd, a.file);
-        if (!source.startsWith(ctx.cwd + path.sep) || !/\.tsx?$/.test(source) || !fs.existsSync(source)) {
-          return fail(`No .tsx file ${a.file} in your folder.`);
-        }
+        // Real path: a symlink to a .tsx elsewhere would otherwise bundle from outside the folder.
+        const source = /\.tsx?$/.test(a.file) ? fileInside(ctx.cwd, a.file) : null;
+        if (!source) return fail(`No .tsx file ${a.file} in your folder.`);
         const file = `${new Date().toISOString().slice(0, 10)}-${slugify(a.name)}-${taskId.slice(0, 4)}.mp4`;
         const inWorkspace = path.join(ctx.cwd, "work", "videos", file);
         let shown = -1;
@@ -320,6 +321,7 @@ export function createBizServer(ctx: BizContext) {
         try {
           const r = await renderVideo({
             source,
+            cwd: ctx.cwd,
             outPath: inWorkspace,
             workDir: path.join(ctx.cwd, "work", ".render", taskId.slice(0, 8)),
             signal: ctx.signal,
@@ -483,9 +485,9 @@ export function createBizServer(ctx: BizContext) {
         } catch {
           return fail(`Not a valid URL: ${a.url}`);
         }
-        if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) {
-          return fail("Only https:// URLs.");
-        }
+        if (url.protocol !== "https:") return fail("Only https:// URLs.");
+        // This laptop and its networks (the app's own API, Chrome's debugging port, the router) are off limits.
+        if (isPrivateHost(url.hostname)) return fail(`${url.hostname} is a local or private address; http_request only reaches public hosts.`);
         const values = new Map<string, string>();
         for (const name of used) {
           const meta = findSecret(businessId, name);

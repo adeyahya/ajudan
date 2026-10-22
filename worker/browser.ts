@@ -103,13 +103,13 @@ export const playwrightProvider: BrowserProvider = {
 
 export const browserProvider: BrowserProvider = playwrightProvider;
 
-/** May a teammate open this URL? Empty site list = anything. Subdomains of a listed host count. */
+/** May a teammate open this URL? Only listed hosts and their subdomains; an empty list allows nothing. */
 export function isAllowedUrl(url: string, sites: string[]) {
-  if (!sites.length) return true;
   let host: string;
   try {
     const u = new URL(url);
     if (u.protocol === "about:") return true;
+    if (!sites.length) return false;
     host = u.hostname.toLowerCase().replace(/^www\./, "");
   } catch {
     return false;
