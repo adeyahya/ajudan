@@ -1,1 +1,0 @@
-ALTER TABLE `businesses` ADD `daily_budget_usd` real DEFAULT 20 NOT NULL;

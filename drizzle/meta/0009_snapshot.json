@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6d07df5c-b85f-480a-8632-5f76361a5719",
+  "id": "81ff5d50-ad14-4830-9a77-3e344a00e8d5",
   "prevId": "f17f7cf6-8538-44db-b878-eede39a15b2c",
   "tables": {
     "activity_events": {
@@ -65,16 +65,7 @@
           "default": "(unixepoch('subsec') * 1000)"
         }
       },
-      "indexes": {
-        "activity_events_business_id_idx": {
-          "name": "activity_events_business_id_idx",
-          "columns": [
-            "business_id",
-            "id"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "activity_events_business_id_businesses_id_fk": {
           "name": "activity_events_business_id_businesses_id_fk",
@@ -177,16 +168,7 @@
           "default": "(unixepoch('subsec') * 1000)"
         }
       },
-      "indexes": {
-        "approvals_business_status_idx": {
-          "name": "approvals_business_status_idx",
-          "columns": [
-            "business_id",
-            "status"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "approvals_business_id_businesses_id_fk": {
           "name": "approvals_business_id_businesses_id_fk",
@@ -672,15 +654,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "jobs_status_idx": {
-          "name": "jobs_status_idx",
-          "columns": [
-            "status"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -906,6 +880,14 @@
           "autoincrement": false,
           "default": "'[]'"
         },
+        "urgent": {
+          "name": "urgent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -929,16 +911,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "tasks_teammate_status_idx": {
-          "name": "tasks_teammate_status_idx",
-          "columns": [
-            "teammate_id",
-            "status"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "tasks_business_id_businesses_id_fk": {
           "name": "tasks_business_id_businesses_id_fk",
@@ -1272,6 +1245,21 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "last_sent_at": {
+          "name": "last_sent_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pace": {
+          "name": "pace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'normal'"
         },
         "created_at": {
           "name": "created_at",

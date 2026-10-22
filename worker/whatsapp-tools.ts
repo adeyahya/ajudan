@@ -3,6 +3,7 @@
  * allowed WhatsApp chats (reseller groups, community announcements). Chats outside
  * businesses.whatsappChats can't be named, read or written to at all.
  */
+import { contactByName } from "@/lib/contacts";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -52,6 +53,11 @@ export async function resolveTarget(business: Pick<Business, "id" | "language">,
     }
   }
   const n = raw.toLowerCase();
+  const known = contactByName(business.id, raw);
+  if (known?.phone) {
+    const jid = `${known.phone}@s.whatsapp.net`;
+    return { jid, name: `${known.name} (+${known.phone})`, allowed: allowedChats.some((c) => c.jid === jid) || ongoing(jid) };
+  }
   const contacts = await searchContacts(raw, 10).catch(() => []);
   const contact =
     contacts.find((c) => [c.name, c.alias, c.system_name].some((x) => x?.toLowerCase() === n)) ??
@@ -84,6 +90,12 @@ const EXPECT = {
     .describe("Wait for their answer (default: yes for a person, no for a group). Their reply comes back to you as a task."),
   purpose: z.string().optional().describe('What you want back, e.g. "confirm the 50-pc order and the delivery date"'),
   reply_within_hours: z.number().min(1).max(336).optional().describe("Remind you if there's no reply by then (default 24)"),
+  pace: z
+    .enum(["live", "normal", "relaxed"])
+    .optional()
+    .describe(
+      'How fast their reply should be answered. "live": they\'re chatting now and waiting (a customer asking or ordering): answered within a minute. "relaxed": they\'ll answer in their own time (sending info, footage): their messages are collected a bit longer. Default "normal", which turns live by itself when they answer quickly.',
+    ),
 };
 
 export function createWhatsappServer(ctx: {
@@ -92,8 +104,8 @@ export function createWhatsappServer(ctx: {
   taskId: string;
   /** Teammate's working folder: files it may send must be inside. */
   cwd: string;
-  /** People and chats outside the allowed list that the owner approved for this task. */
-  approvedTargets: Set<string>;
+  /** People and chats outside the allowed list that the owner approved for this task (JID → name). */
+  approvedTargets: Map<string, string>;
 }) {
   const { business, teammate, taskId } = ctx;
   // Always the owner's current list: unticking a chat takes effect mid-task.
@@ -110,7 +122,8 @@ export function createWhatsappServer(ctx: {
   const sendTarget = (name: string) => {
     const c = chatOrFail(name);
     if (c) return c;
-    if (ctx.approvedTargets.has(name)) return { jid: name, name };
+    const approved = ctx.approvedTargets.get(name);
+    if (approved) return { jid: name, name: approved };
     const w = activeWatchFor(business.id, name);
     return w ? { jid: w.jid, name: w.name } : undefined;
   };
@@ -118,10 +131,14 @@ export function createWhatsappServer(ctx: {
     fail(`"${name}" is not one of the allowed WhatsApp chats: ${allowedNow().map((c) => c.name).join(", ") || "(none)"}.`);
 
   /** Remember that we're waiting for this chat's answer (default: people yes, groups no). */
-  const expect = (c: { jid: string; name: string }, message: string, a: { expect_reply?: boolean; purpose?: string; reply_within_hours?: number }) => {
+  const expect = (
+    c: { jid: string; name: string },
+    message: string,
+    a: { expect_reply?: boolean; purpose?: string; reply_within_hours?: number; pace?: "live" | "normal" | "relaxed" },
+  ) => {
     const want = a.expect_reply ?? !c.jid.endsWith("@g.us");
     if (!want) return "";
-    watchReply({ businessId: business.id, teammateId: teammate.id, taskId, jid: c.jid, name: c.name, message, purpose: a.purpose, hours: a.reply_within_hours });
+    watchReply({ businessId: business.id, teammateId: teammate.id, taskId, jid: c.jid, name: c.name, message, purpose: a.purpose, hours: a.reply_within_hours, pace: a.pace });
     return ` Waiting for their reply: it will come to you as a new task${a.reply_within_hours ? `, or a reminder after ${a.reply_within_hours} h without one` : ", or a reminder after 24 h without one"}.`;
   };
 
@@ -352,7 +369,8 @@ export function whatsappRules(business: Business, autonomy: Teammate["autonomy"]
   return `## WhatsApp
 You can read and post in ${business.name}'s WhatsApp chats the owner allowed: ${business.whatsappChats.map((c) => c.name).join(", ") || "(none yet; you can create a group with create_group)"}. They are communities of people like resellers who read on their phones.
 - You can also message anyone else (a number with country code, a contact from find_contact, another group) with send_message, send_file or send_to_people (the same message to several people, approved as one list). Those always wait for the owner's approval, whatever your freedom setting. You can't read chats outside the allowed list.
-- Read the recent messages first (read_messages) so your post fits the conversation and doesn't repeat what was already said.
+- Read the recent messages first (read_messages) so your post fits the conversation and doesn't repeat what was already said (a reply handed to you as a live chat already includes them).
+- Pace: when you message someone and expect an answer, say how fast it matters. pace "live" for a customer chatting now (questions, an order): their replies reach you within seconds and should be answered within a minute. "relaxed" when they'll answer in their own time. Otherwise leave it: a chat turns live by itself when they answer quickly.
 - Posts are short, warm and useful (new products, stock, prices, promos, how to order, schedules). One message per update, no spamming, no mass @mentions. Never share private customer data, internal plans or costs.
 - ${
     autonomy === "draft"

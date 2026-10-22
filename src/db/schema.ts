@@ -112,6 +112,7 @@ export const teammates = sqliteTable("teammates", {
  * WhatsApp, open until it's closed. "cancelled": the owner stopped it (Cancel).
  */
 export type TaskStatus = "queued" | "running" | "waiting_approval" | "waiting_human" | "done" | "failed" | "cancelled";
+export type WatchPace = "live" | "normal" | "relaxed";
 
 export const tasks = sqliteTable("tasks", {
   id: id(),
@@ -143,6 +144,8 @@ export const tasks = sqliteTable("tasks", {
   sessionId: text("session_id"),
   /** The deliverable this task revises (the owner's "Needs changes", src/lib/feedback.ts). */
   deliverableId: text("deliverable_id"),
+  /** Someone is waiting on WhatsApp right now (a live chat): runs in its own lane, answers fast. */
+  urgent: integer("urgent", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
@@ -296,10 +299,17 @@ export const waWatches = sqliteTable("wa_watches", {
   /** Messages after this were already handed over. */
   seenUntil: integer("seen_until", { mode: "timestamp_ms" }).notNull(),
   lastReplyAt: integer("last_reply_at", { mode: "timestamp_ms" }),
+  /** When the team last wrote in this chat. */
+  lastSentAt: integer("last_sent_at", { mode: "timestamp_ms" }),
+  /**
+   * How fast to answer: "live" (someone chatting now), "relaxed" (they answer in their
+   * own time), or "normal", which turns live when they answer quickly. See src/lib/watches.ts.
+   */
+  pace: text("pace").$type<WatchPace>().notNull().default("normal"),
   createdAt: createdAt(),
 });
 
-export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory";
+export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit";
 
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -313,6 +323,68 @@ export const jobs = sqliteTable("jobs", {
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
 }, (t) => [index("jobs_status_idx").on(t.status)]);
 
+/**
+ * The owner's organization of the media library (src/lib/assets.ts): one row per file
+ * under media/ that the owner titled, noted, tagged, starred or put in an album.
+ * Files without a row are simply unorganized. Teammates see this in list_media.
+ */
+export const assets = sqliteTable("assets", {
+  /** Folder-relative path, "media/…". */
+  path: text("path").primaryKey(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default(""),
+  /** What it's for / how to use it ("use for the payday promo, not the logo version"). */
+  note: text("note").notNull().default(""),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  album: text("album"),
+  starred: integer("starred", { mode: "boolean" }).notNull().default(false),
+  createdAt: createdAt(),
+});
+
+export type ContactKind = "customer" | "supplier" | "partner" | "team" | "other";
+
+/** The business's address book, kept by the owner (src/lib/contacts.ts); teammates can look people up. */
+export const contacts = sqliteTable("contacts", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Digits with country code, no "+" (like teammates.phone). */
+  phone: text("phone"),
+  email: text("email"),
+  company: text("company"),
+  kind: text("kind").$type<ContactKind>().notNull().default("customer"),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  notes: text("notes").notNull().default(""),
+  createdAt: createdAt(),
+});
+
+export type EditKind = "video" | "audio";
+export type EditStatus = "draft" | "queued" | "rendering" | "done" | "failed";
+
+/**
+ * A video or audio edit made in the Studio editors (src/lib/edits.ts). The spec is the
+ * edit decision list; the worker renders it with ffmpeg (no Claude) into media/.
+ */
+export const edits = sqliteTable("edits", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<EditKind>().notNull(),
+  title: text("title").notNull(),
+  spec: text("spec", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  status: text("status").$type<EditStatus>().notNull().default("draft"),
+  /** The last render, "media/…". */
+  output: text("output"),
+  error: text("error"),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
+});
+
 export type Business = typeof businesses.$inferSelect;
 export type OnboardingMessage = typeof onboardingMessages.$inferSelect;
 export type Teammate = typeof teammates.$inferSelect;
@@ -324,3 +396,6 @@ export type Job = typeof jobs.$inferSelect;
 export type HumanMessage = typeof humanMessages.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type WaWatch = typeof waWatches.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+export type Contact = typeof contacts.$inferSelect;
+export type Edit = typeof edits.$inferSelect;

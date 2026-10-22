@@ -17,6 +17,8 @@ export type JobPayloads = {
   run_task: { taskId: string; approvalId?: string };
   /** Rewrite a teammate's grown memory.md into sections (worker/handlers/memory.ts). */
   consolidate_memory: { teammateId: string };
+  /** A Studio edit rendered with ffmpeg (worker/edits.ts). */
+  render_edit: { editId: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */
@@ -25,35 +27,47 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
 }
 
 /**
- * Two lanes, each with its own slots in the worker: "owner" is everything the owner is
- * waiting on in a chat (the manager, the interview, team design); "team" is the
- * teammates' work. The manager never queues behind long teammate runs.
+ * Four lanes, each with its own slots in the worker: "owner" is everything the owner is
+ * waiting on in a chat (the manager, the interview, team design); "live" is someone
+ * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work; "studio"
+ * is Studio renders (one at a time). Nobody waiting for an answer queues behind long runs.
  */
-export type Lane = "owner" | "team";
+export type Lane = "owner" | "live" | "team" | "studio";
 
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
+  // Studio renders (ffmpeg) are long and need no Claude: their own slot, never in the way of chats.
+  if (job.kind === "render_edit") return "studio";
   if (job.kind === "consolidate_memory") return "team";
   if (job.kind !== "run_task") return "owner";
-  return taskOf(job)?.role === MANAGER_ROLE.key ? "owner" : "team";
+  const row = taskOf(job);
+  if (row?.urgent) return "live";
+  return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 
-/** The task a run_task job runs, with its teammate's role. */
+/** The task a run_task job runs, with its teammate's role and kind. */
 function taskOf(job: Pick<Job, "payload">) {
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
   return db
-    .select({ businessId: schema.tasks.businessId, role: schema.teammates.roleKey })
+    .select({ businessId: schema.tasks.businessId, role: schema.teammates.roleKey, urgent: schema.tasks.urgent, kind: schema.teammates.kind })
     .from(schema.tasks)
     .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
     .where(eq(schema.tasks.id, taskId))
     .get();
 }
 
+/** False for jobs that don't call Claude (Studio renders, requests to human teammates): those run while the team rests. */
+export function needsClaude(job: Pick<Job, "kind" | "payload">) {
+  if (job.kind === "render_edit") return false;
+  if (job.kind !== "run_task") return true;
+  return taskOf(job)?.kind !== "human";
+}
+
 /**
- * Atomically claim the oldest queued job (of a lane, if given). Task jobs of a
- * business that has spent its daily budget stay queued: they're picked up again
- * tomorrow, or as soon as the owner raises the cap on the Business page.
+ * Atomically claim the oldest queued job (of a lane, if given; only ones `allow` accepts,
+ * if given). Task jobs of a business that has spent its daily budget stay queued: they're
+ * picked up again tomorrow, or as soon as the owner raises the cap on the Business page.
  */
-export function claimJob(lane?: Lane) {
+export function claimJob(lane?: Lane, allow?: (job: Job) => boolean) {
   const paused = new Set<string>();
   const job = db.transaction((tx) => {
     const queued = tx.select().from(schema.jobs).where(eq(schema.jobs.status, "queued")).orderBy(asc(schema.jobs.id)).limit(200).all();
@@ -70,7 +84,7 @@ export function claimJob(lane?: Lane) {
       }
       return budgets.get(businessId)!;
     };
-    const job = queued.find((j) => (!lane || laneOf(j) === lane) && withinBudget(j));
+    const job = queued.find((j) => (!lane || laneOf(j) === lane) && (!allow || allow(j)) && withinBudget(j));
     if (!job) return undefined;
     tx.update(schema.jobs)
       .set({ status: "running", startedAt: new Date(), attempts: job.attempts + 1 })

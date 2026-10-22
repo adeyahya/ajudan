@@ -165,6 +165,8 @@ export class OfficeEngine {
   private t = 0;
   private pending = 0;
   private deliverables = 0;
+  /** Out of Claude usage: everyone naps at their desk under dimmed lights. */
+  private resting = false;
   private docsInFlight = 0;
   private papersInFlight = 0;
   private shelfBump = 0;
@@ -201,9 +203,11 @@ export class OfficeEngine {
 
   // ---------- data in ----------
 
-  sync(teammates: OfficeTeammate[], pendingApprovals: number, deliverableCount: number) {
+  sync(teammates: OfficeTeammate[], pendingApprovals: number, deliverableCount: number, resting = false) {
     this.pending = pendingApprovals;
     this.deliverables = deliverableCount;
+    if (resting !== this.resting) this.sky.checkedAt = -999;
+    this.resting = resting;
     if (teammates.length !== this.L.desks.length) {
       this.L = layoutFor(teammates.length);
       this.resizeWorld();
@@ -410,8 +414,12 @@ export class OfficeEngine {
     ];
   }
 
+  private napping(a: Actor) {
+    return this.resting && a.tm.state === "idle" && this.atSeat(a);
+  }
+
   private stepActor(a: Actor, dt: number) {
-    const st = a.tm.state;
+    const st = this.resting && a.tm.state === "idle" ? "resting" : a.tm.state;
     if (st !== "idle" && a.kind === "wander") this.goHome(a);
     if (a.steps.length === 0 && !this.atSeat(a)) this.goHome(a);
     if (st === "idle" && a.kind === "none" && this.atSeat(a) && this.t > a.nextWander) {
@@ -494,6 +502,10 @@ export class OfficeEngine {
     this.stepCat(dt);
     // Error smoke + coffee steam.
     for (const a of this.actors.values()) {
+      if (this.napping(a) && this.t > a.nextSmoke) {
+        a.nextSmoke = this.t + 1.4 + Math.random() * 0.8;
+        this.particles.push({ x: a.x + 3, y: a.y - 18, vx: 3, vy: -6, g: 0, life: 0, max: 1.8, color: "#ffffff", size: 1, kind: "z" });
+      }
       if (a.tm.state === "error" && this.t > a.nextSmoke) {
         a.nextSmoke = this.t + 0.35 + Math.random() * 0.3;
         this.puff(a.slot.dx * TILE + 16 + (Math.random() * 6 - 3), a.slot.dy * TILE - 8, 0);
@@ -817,7 +829,7 @@ export class OfficeEngine {
     if (this.t - this.sky.checkedAt < 30 && this.sky.checkedAt > 0) return;
     this.sky.checkedAt = this.t || 0.001;
     const h = new Date().getHours();
-    this.sky.kind = h >= 7 && h < 17 ? "day" : (h >= 17 && h < 19) || (h >= 6 && h < 7) ? "dusk" : "night";
+    this.sky.kind = this.resting ? "night" : h >= 7 && h < 17 ? "day" : (h >= 17 && h < 19) || (h >= 6 && h < 7) ? "dusk" : "night";
   }
 
   private drawWindows(ctx: CanvasRenderingContext2D) {
@@ -1016,6 +1028,7 @@ export class OfficeEngine {
       const kind = f === 0 ? "walkA" : f === 2 ? "walkB" : "stand";
       return { key: `${kind}_${a.dir}` as FrameKey, seatedChair: null, dy: f % 2 === 1 ? 0 : -1 };
     }
+    if (this.napping(a)) return { key: "sit_up_slump", seatedChair: "back", dy: 0 };
     if (this.atSeat(a)) {
       switch (a.tm.state) {
         case "working": {

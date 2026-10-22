@@ -20,6 +20,8 @@ import { pollWatches } from "./replies";
 import { handleOwnerAnswers, isApprovalAnswer } from "./owner-approvals";
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
+import { QUIET_BY_PACE } from "@/lib/watches";
+import { onIncomingMessage } from "./whatsapp-sync";
 import { downloadMedia, isLinked, isRealMessage, listMessages, messageText, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
 
 const POLL_MS = 10_000;
@@ -99,21 +101,61 @@ export async function runHumanRequest(task: Task, human: Teammate, business: Bus
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let busy = false;
+let again = false;
+const wakes = new Set<ReturnType<typeof setTimeout>>();
+
+/** Poll now (or right after the poll that's running). */
+function poll() {
+  if (busy) {
+    again = true;
+    return;
+  }
+  busy = true;
+  void pollAll()
+    .catch((err) => console.error("[humans] poll failed", err))
+    .finally(() => {
+      busy = false;
+      if (again) {
+        again = false;
+        poll();
+      }
+    });
+}
+
+function wake(ms: number) {
+  const t = setTimeout(() => {
+    wakes.delete(t);
+    poll();
+  }, ms);
+  wakes.add(t);
+}
+
+/**
+ * A message just came in (the sync's webhook): look now, and again when each quiet
+ * window ends, so a live chat is handed over seconds after they stop typing.
+ */
+let lastNudge = 0;
+
+function onMessage() {
+  // A burst (history catch-up, an album) needs one set of checks, not one per message.
+  if (!timer || Date.now() - lastNudge < 500) return;
+  lastNudge = Date.now();
+  for (const ms of new Set([1_000, QUIET_BY_PACE.live, QUIET_BY_PACE.normal, QUIET_MS])) wake(ms + 1_000);
+}
 
 export function startHumanInbox() {
   stopHumanInbox();
   timer = setInterval(() => {
-    if (busy) return;
-    busy = true;
-    void pollAll()
-      .catch((err) => console.error("[humans] poll failed", err))
-      .finally(() => (busy = false));
+    if (!busy) poll();
   }, POLL_MS);
+  onIncomingMessage(onMessage);
 }
 
 export function stopHumanInbox() {
   clearInterval(timer);
   timer = undefined;
+  for (const t of wakes) clearTimeout(t);
+  wakes.clear();
 }
 
 async function pollAll() {

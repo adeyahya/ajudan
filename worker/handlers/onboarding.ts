@@ -4,6 +4,7 @@ import { describeToolUse, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import { enqueueJob, type JobPayloads } from "@/lib/jobs";
 import { PausedError, runAbortController } from "../session";
+import { UsageLimitError } from "@/lib/rest";
 import { getLanguage, languageInstruction } from "@/lib/language";
 import { businessWorkspace } from "@/lib/paths";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
@@ -109,6 +110,7 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     if (updateProfile) enqueueJob("onboarding_finalize", { businessId });
   } catch (err) {
     if (ac.signal.aborted) throw new PausedError(); // stays busy; reruns when reopened
+    if (err instanceof UsageLimitError) throw err; // stays busy; reruns when the team wakes up
     failed(businessId, "turn", err);
     throw err;
   }
@@ -162,6 +164,7 @@ Write the business profile. Use the owner's own facts and numbers; where the own
     }
   } catch (err) {
     if (ac.signal.aborted) throw new PausedError();
+    if (err instanceof UsageLimitError) throw err; // stays busy; reruns when the team wakes up
     failed(businessId, "finalize", err);
     throw err;
   }

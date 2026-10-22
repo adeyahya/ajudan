@@ -20,8 +20,8 @@ export type Heartbeat = {
   /** When the file was last written. */
   at: string;
   /** Jobs in flight per lane (src/lib/jobs.ts). */
-  running: { owner: number; team: number };
-  concurrency: { owner: number; team: number };
+  running: { owner: number; team: number; live?: number; studio?: number };
+  concurrency: { owner: number; team: number; live?: number; studio?: number };
 };
 
 export const heartbeatPath = (dir: string) => path.join(dir, ".worker-heartbeat.json");

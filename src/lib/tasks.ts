@@ -87,6 +87,8 @@ export function createTask(p: {
   sessionId?: string | null;
   /** A revision: the deliverable it reworks (update_deliverable). */
   deliverableId?: string | null;
+  /** Someone is waiting on WhatsApp right now: its own lane, answered fast. */
+  urgent?: boolean;
 }) {
   const instructions = p.instructions.trim();
   if (!instructions) throw new Error("Instructions are required");
@@ -103,6 +105,7 @@ export function createTask(p: {
       attachments: p.attachments ?? [],
       sessionId: p.sessionId ?? null,
       deliverableId: p.deliverableId ?? null,
+      urgent: p.urgent ?? false,
     })
     .returning()
     .get();

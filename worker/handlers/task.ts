@@ -26,6 +26,7 @@ import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBro
 import { isInside, resolveReal } from "../fs-guard";
 import { ApprovalWait, CancelledError, isPaused, PausedError, runAbortController, runningTasks } from "../session";
 import { sessionExists } from "../claude-sessions";
+import { UsageLimitError } from "@/lib/rest";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
 import { notifyOwner } from "../owner-approvals";
@@ -89,8 +90,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
 
   const ac = runAbortController();
   runningTasks.set(task.id, ac);
+  /** What the teammate did this run, for picking up again if the usage limit cuts it short. */
+  const did: string[] = [];
   /** WhatsApp people/chats outside the allowed list the owner approved during this run. */
-  const approvedTargets = new Set<string>();
+  const approvedTargets = new Map<string, string>();
   if (!setTask({ status: "running", startedAt: task.startedAt ?? new Date() }).changes) {
     runningTasks.delete(task.id);
     return; // cancelled since the job was claimed
@@ -215,7 +218,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         const summary = `${teammate.name} wants to WhatsApp ${who.length === 1 ? who[0] : `${who.length} people (${who.slice(0, 4).join(", ")}${who.length > 4 ? ", …" : ""})`}: "${text}"`;
         const decision = await requestApproval(toolName, { ...updated, recipientNames: who }, summary);
         if (decision.behavior !== "allow") return decision;
-        jids.forEach((j) => approvedTargets.add(j));
+        resolved.forEach((t) => approvedTargets.set(t.jid, t.name));
         return { behavior: "allow", updatedInput: updated };
       }
       if (outward.includes(toolName)) {
@@ -267,6 +270,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         if (block.type === "tool_use") {
           const input = (block.input ?? {}) as Record<string, unknown>;
           const activity = describeToolUse(block.name, input);
+          did.push(activity);
           setMate({ currentActivity: activity });
           ev("tool", activity, { tool: block.name });
         } else if (block.type === "text" && block.text.trim()) {
@@ -320,9 +324,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
           onMessage,
           resume,
           // A reviewing report reads each piece before it writes: room for that.
-          maxTurns: useBrowser || videoWork ? 80 : quickWork ? 20 : 40,
-          // Reacting to an approval is a quick note to the owner: answer fast.
-          effort: task.createdBy === DECISION ? "low" : undefined,
+          maxTurns: task.urgent ? 20 : useBrowser || videoWork ? 80 : quickWork ? 20 : 40,
+          // Reacting to an approval is a quick note to the owner, and someone in a live
+          // WhatsApp chat is waiting: answer fast.
+          effort: task.createdBy === DECISION || task.urgent ? "low" : undefined,
           maxBudgetUsd: videoWork ? Math.max(BUDGET_USD, VIDEO_BUDGET_USD) : quickWork ? Math.min(BUDGET_USD, QUICK_BUDGET_USD) : BUDGET_USD,
           abortController: ac,
         });
@@ -376,6 +381,19 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       setTask({ status: "queued", startedAt: null });
       setMate({ state: "idle", currentActivity: null });
       throw new PausedError();
+    }
+    if (err instanceof UsageLimitError) {
+      // Out of usage: back to the queue; it runs again when the team wakes up.
+      db.delete(schema.approvals)
+        .where(and(eq(schema.approvals.taskId, task.id), eq(schema.approvals.status, "pending")))
+        .run();
+      const note = did.length
+        ? `\n\n---\nYou started this before and were interrupted (Claude's usage limit). By then you had already:\n${did.slice(-25).map((d) => `- ${d}`).join("\n")}\nCheck what's already done (sent messages, saved work) and don't repeat it.`
+        : "";
+      setTask({ status: "queued", startedAt: null, instructions: task.instructions + note });
+      setMate({ state: "idle", currentActivity: null });
+      ev("task_paused", `${teammate.name} stopped "${task.title}": the team is out of usage for now. It continues when they're back.`);
+      throw err;
     }
     const e = err as Error & { partial?: string; costUsd?: number };
     const message = e?.message ?? String(err);

@@ -34,3 +34,15 @@ export function syncDeliverableFile(deliverableId: string) {
   const images = d.attachments.map((p, i) => `![${d.title} ${i + 1}](${path.relative("work", p)})`).join("\n\n");
   fs.writeFileSync(file, `---\n${meta.join("\n")}\n---\n\n# ${d.title}\n\n${images ? `${images}\n\n` : ""}${d.content}\n`);
 }
+
+/** Remove a deleted deliverable's work/*.md mirror. */
+export function removeDeliverableFile(deliverableId: string) {
+  const dir = workDir();
+  if (!fs.existsSync(dir)) return;
+  const suffix = `-${deliverableId.slice(0, 6)}.md`;
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(suffix)) continue;
+    const head = fs.readFileSync(path.join(dir, f), "utf8").slice(0, 2000);
+    if (head.includes(`id: ${deliverableId}`)) fs.rmSync(path.join(dir, f));
+  }
+}
