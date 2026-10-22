@@ -108,7 +108,9 @@ export function Chat({
   );
   const [sending, startSending] = useTransition();
   const showThinking = busy || sending;
-  const lastUserId = optimistic.findLast((m) => m.role === "user")?.id;
+  // The scroll anchor: your latest message, or the newest one if you haven't written yet
+  // (with no anchor at all the scroller stays hidden).
+  const lastUserId = optimistic.findLast((m) => m.role === "user")?.id ?? optimistic.at(-1)?.id;
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);

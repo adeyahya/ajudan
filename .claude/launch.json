@@ -16,6 +16,16 @@
         "web"
       ],
       "port": 3000
+    },
+    {
+      "name": "ajudan-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "AJUDAN_DATA_DIR=/private/tmp/claude-501/-Users-adeyahya--claude-spares-spare-DE5gzl/478668e2-c027-4598-aba2-a7e8e2eef84a/scratchpad/Demo Shop",
+        "pnpm",
+        "web"
+      ],
+      "port": 3000
     }
   ]
 }
