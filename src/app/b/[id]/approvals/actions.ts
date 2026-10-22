@@ -16,18 +16,21 @@ function ownerError(businessId: string, error: string) {
  * Approve or reject a pending outward action. The decision queues the waiting task's
  * continuation (the worker resumes its Claude session) and logs approval_granted/rejected.
  * FormData: businessId, approvalId, decision ("approved" | "rejected"), note?.
+ * Returns the error the owner should see (the Inbox puts the card back and toasts it).
  */
-export async function decideApproval(formData: FormData) {
+export async function decideApproval(formData: FormData): Promise<{ error?: string }> {
   const decision = String(formData.get("decision") ?? "");
   if (decision !== "approved" && decision !== "rejected") throw new Error("Invalid decision");
-  await decide({
-    businessId: String(formData.get("businessId") ?? ""),
+  const businessId = String(formData.get("businessId") ?? "");
+  const r = await decide({
+    businessId,
     approvalId: String(formData.get("approvalId") ?? ""),
     decision,
     note: String(formData.get("note") ?? ""),
     via: "app",
   });
   refresh();
+  return r.ok ? {} : { error: ownerError(businessId, r.error) };
 }
 
 /**

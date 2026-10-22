@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/kit";
 import { useT } from "@/components/i18n";
@@ -11,7 +12,7 @@ export function CopyButton({ text }: { text: string }) {
     <Button
       type="button"
       variant="secondary"
-      className="h-7 px-2.5 text-xs"
+      size="sm"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -22,6 +23,7 @@ export function CopyButton({ text }: { text: string }) {
         }
       }}
     >
+      {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
       {copied ? t("common.copied") : t("common.copy")}
     </Button>
   );
