@@ -43,7 +43,7 @@ export function matchesCombo(e: KeyboardEvent, combo: string) {
   if (want.shift && !e.shiftKey) return false;
   if (!want.mod && !want.alt && (IS_MAC() ? e.ctrlKey : e.metaKey)) return false;
   const k = e.key.toLowerCase();
-  return k === key || (key === "escape" && k === "esc");
+  return k === key || (key === "escape" && k === "esc") || (key === "\\" && e.code === "Backslash");
 }
 
 /**

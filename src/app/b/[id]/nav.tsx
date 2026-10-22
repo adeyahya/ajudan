@@ -185,7 +185,8 @@ function ShellInner({ businessId, businessName, teammates, workerRunning, childr
   const [mobileOpen, setMobileOpen] = useState(false);
   const collapsed = useDomFlag(() => html().getAttribute("data-sidebar") === "collapsed");
   const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
-  const toggle = () => (isDesktop() ? setCollapsedDom(!collapsed) : setMobileOpen((o) => !o));
+  // Read the DOM, not state: a click before hydration finishes must still flip the real thing.
+  const toggle = () => (isDesktop() ? setCollapsedDom(html().getAttribute("data-sidebar") !== "collapsed") : setMobileOpen((o) => !o));
   const sidebar: SidebarCtx = { collapsed, toggle, setCollapsed: setCollapsedDom, openMobile: () => setMobileOpen(true) };
 
   useGlobalShortcuts({
@@ -462,7 +463,7 @@ function SpendLine({ base, spend }: { base: string; spend: ShellSpend }) {
         spend.over ? "text-destructive" : "text-tertiary",
       )}
     >
-      <span className="truncate">{text}</span>
+      <span className="line-clamp-2">{text}</span>
     </Link>
   );
 }
