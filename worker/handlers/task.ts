@@ -20,6 +20,7 @@ import { DECISION, managerHistory, onTaskFinished, REPORT } from "@/lib/manager"
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { browserProvider, browserToolNames, ensureBrowser, isAllowedUrl, withBrowserLock } from "../browser";
 import { PausedError, runAbortController } from "../session";
+import { UsageLimitError } from "@/lib/rest";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
 import { notifyOwner } from "../owner-approvals";
@@ -53,6 +54,8 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
     db.update(schema.teammates).set(v).where(eq(schema.teammates.id, teammate.id)).run();
 
   const ac = runAbortController();
+  /** What the teammate did this run, for picking up again if the usage limit cuts it short. */
+  const did: string[] = [];
   /** WhatsApp people/chats outside the allowed list the owner approved during this run. */
   const approvedTargets = new Map<string, string>();
   setTask({ status: "running", startedAt: new Date() });
@@ -214,6 +217,7 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
         if (block.type === "tool_use") {
           const input = (block.input ?? {}) as Record<string, unknown>;
           const activity = describeToolUse(block.name, input);
+          did.push(activity);
           setMate({ currentActivity: activity });
           ev("tool", activity, { tool: block.name });
         } else if (block.type === "text" && block.text.trim()) {
@@ -291,6 +295,19 @@ export async function runTask({ taskId }: JobPayloads["run_task"]) {
       setTask({ status: "queued", startedAt: null });
       setMate({ state: "idle", currentActivity: null });
       throw new PausedError();
+    }
+    if (err instanceof UsageLimitError) {
+      // Out of usage: back to the queue; it runs again when the team wakes up.
+      db.delete(schema.approvals)
+        .where(and(eq(schema.approvals.taskId, task.id), eq(schema.approvals.status, "pending")))
+        .run();
+      const note = did.length
+        ? `\n\n---\nYou started this before and were interrupted (Claude's usage limit). By then you had already:\n${did.slice(-25).map((d) => `- ${d}`).join("\n")}\nCheck what's already done (sent messages, saved work) and don't repeat it.`
+        : "";
+      setTask({ status: "queued", startedAt: null, instructions: task.instructions + note });
+      setMate({ state: "idle", currentActivity: null });
+      ev("task_paused", `${teammate.name} stopped "${task.title}": the team is out of usage for now. It continues when they're back.`);
+      throw err;
     }
     const e = err as Error & { partial?: string; costUsd?: number };
     const message = e?.message ?? String(err);

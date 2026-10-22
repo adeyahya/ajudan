@@ -15,8 +15,10 @@ import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
 import { CAPABILITY } from "@/lib/capabilities";
 import { readConfig } from "@/lib/folders";
-import { claimJob, finishJob, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
+import { logEvent } from "@/lib/events";
+import { claimJob, finishJob, needsClaude, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
+import { readRest, startRest, UsageLimitError } from "@/lib/rest";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
 import { startScheduler, stopScheduler } from "./scheduler";
@@ -30,12 +32,14 @@ const OWNER_CONCURRENCY = Number(process.env.AJUDAN_OWNER_CONCURRENCY ?? 2);
 const LIVE_CONCURRENCY = Number(process.env.AJUDAN_LIVE_CONCURRENCY ?? 2);
 const once = process.argv.includes("--once");
 
-const running: Record<Lane, number> = { owner: 0, live: 0, team: 0 };
+const running: Record<Lane, number> = { owner: 0, live: 0, team: 0, studio: 0 };
 const inflight = new Set<Promise<void>>();
 let folder: string | null = null;
 let switching = false;
 /** A folder another worker (another Ajudan window, or `pnpm dev`) is working on. */
 let blocked: string | null = null;
+/** Out of Claude usage (src/lib/rest.ts): AI jobs wait in the queue until it resets. */
+let resting = false;
 
 /** Which folder the worker should be working on right now. */
 function wantedFolder(): string | null {
@@ -54,6 +58,12 @@ async function runJob(job: Job) {
     if (err instanceof PausedError) {
       requeueJob(job.id);
       console.log(`[worker] job #${job.id} ${job.kind} paused (folder closed)`);
+      return;
+    }
+    if (err instanceof UsageLimitError) {
+      requeueJob(job.id);
+      startRest(err.resetsAt);
+      console.log(`[worker] job #${job.id} ${job.kind} waits: ${err.message}`);
       return;
     }
     console.error(`[worker] job #${job.id} ${job.kind} failed`, err);
@@ -80,6 +90,7 @@ function activate(dir: string | null) {
     return;
   }
   requeueStaleJobs();
+  resting = Boolean(readRest());
   // Approvals left waiting by interrupted tasks: those tasks run again and ask afresh.
   // (Capability requests don't belong to a running task: they stay.)
   db.delete(schema.approvals).where(and(eq(schema.approvals.status, "pending"), ne(schema.approvals.toolName, CAPABILITY))).run();
@@ -126,9 +137,10 @@ function tick() {
     return;
   }
   if (!folder) return;
-  for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY]] as const) {
+  noticeRest();
+  for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY], ["studio", 1]] as const) {
     while (running[lane] < max) {
-      const job = claimJob(lane);
+      const job = claimJob(lane, resting ? (j) => !needsClaude(j) : undefined);
       if (!job) break;
       running[lane]++;
       const p = runJob(job).finally(() => {
@@ -138,6 +150,22 @@ function tick() {
       inflight.add(p);
     }
   }
+}
+
+/** Tell the office when the team starts or stops resting (the rest is shared by every worker). */
+function noticeRest() {
+  const rest = readRest();
+  if (Boolean(rest) === resting) return;
+  resting = Boolean(rest);
+  const until = rest?.known ? new Date(rest.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+  for (const b of db.select({ id: schema.businesses.id }).from(schema.businesses).all()) {
+    logEvent(
+      rest
+        ? { businessId: b.id, type: "team_resting", message: `The team is out of Claude usage and resting${until ? ` until ${until}` : ""}. Their work waits in the queue.`, data: { until: rest.until } }
+        : { businessId: b.id, type: "team_awake", message: "The team is back: queued work starts again." },
+    );
+  }
+  console.log(rest ? `[worker] resting until ${new Date(rest.until).toISOString()}` : "[worker] rest over; back to work");
 }
 
 // Don't leave a wacli sync process holding the WhatsApp store lock behind.

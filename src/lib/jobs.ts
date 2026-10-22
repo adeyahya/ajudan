@@ -9,6 +9,8 @@ export type JobPayloads = {
   onboarding_finalize: { businessId: string };
   design_team: { businessId: string };
   run_task: { taskId: string };
+  /** A Studio edit rendered with ffmpeg (worker/edits.ts). */
+  render_edit: { editId: string };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */
@@ -17,14 +19,16 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
 }
 
 /**
- * Three lanes, each with its own slots in the worker: "owner" is everything the owner is
+ * Four lanes, each with its own slots in the worker: "owner" is everything the owner is
  * waiting on in a chat (the manager, the interview, team design); "live" is someone
- * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work. Nobody
- * waiting for an answer queues behind long teammate runs.
+ * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work; "studio"
+ * is Studio renders (one at a time). Nobody waiting for an answer queues behind long runs.
  */
-export type Lane = "owner" | "live" | "team";
+export type Lane = "owner" | "live" | "team" | "studio";
 
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
+  // Studio renders (ffmpeg) are long and need no Claude: their own slot, never in the way of chats.
+  if (job.kind === "render_edit") return "studio";
   if (job.kind !== "run_task") return "owner";
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
   const row = db
@@ -37,11 +41,25 @@ export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
   return row?.role === MANAGER_ROLE.key ? "owner" : "team";
 }
 
-/** Atomically claim the oldest queued job (of a lane, if given). */
-export function claimJob(lane?: Lane) {
+/** False for jobs that don't call Claude (Studio renders, requests to human teammates): those run while the team rests. */
+export function needsClaude(job: Pick<Job, "kind" | "payload">) {
+  if (job.kind === "render_edit") return false;
+  if (job.kind !== "run_task") return true;
+  const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
+  const row = db
+    .select({ kind: schema.teammates.kind })
+    .from(schema.tasks)
+    .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
+    .where(eq(schema.tasks.id, taskId))
+    .get();
+  return row?.kind !== "human";
+}
+
+/** Atomically claim the oldest queued job (of a lane, if given; only ones `allow` accepts, if given). */
+export function claimJob(lane?: Lane, allow?: (job: Job) => boolean) {
   return db.transaction((tx) => {
     const queued = tx.select().from(schema.jobs).where(eq(schema.jobs.status, "queued")).orderBy(asc(schema.jobs.id)).limit(200).all();
-    const job = lane ? queued.find((j) => laneOf(j) === lane) : queued[0];
+    const job = queued.find((j) => (!lane || laneOf(j) === lane) && (!allow || allow(j)));
     if (!job) return undefined;
     tx.update(schema.jobs)
       .set({ status: "running", startedAt: new Date(), attempts: job.attempts + 1 })

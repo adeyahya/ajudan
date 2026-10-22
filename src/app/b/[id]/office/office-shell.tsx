@@ -102,7 +102,20 @@ export function OfficeShell({
   const approvalsHref = `/b/${businessId}/approvals`;
   const openApprovals = useCallback(() => router.push(approvalsHref), [router, approvalsHref]);
   const room = layoutFor(state.teammates.length);
+  // The rest can end between events; don't keep the team asleep past it.
+  const rest = state.rest && state.rest.until > now ? state.rest : null;
   const toggleSelect = useCallback((id: string | null) => setSelectedId((cur) => (id && cur === id ? null : id)), []);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current && !!stageRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void stageRef.current?.requestFullscreen().catch(() => {});
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -134,26 +147,50 @@ export function OfficeShell({
         </div>
       </div>
 
+      {rest && <RestBanner businessId={businessId} rest={rest} queued={state.queuedTasks} now={now} />}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-4 min-w-0">
           {state.teammates.length > 0 && (
-            <Card
-              className="relative hidden md:block overflow-hidden bg-[#5b4636] p-0"
-              style={{ aspectRatio: `${room.W * TILE} / ${room.H * TILE}` }}
+            <div
+              ref={stageRef}
+              className={cn("relative hidden md:block", fullscreen && "md:flex items-center justify-center bg-[#1b1420]")}
             >
-              {isDesktop && (
-                <OfficeCanvas
-                  businessName={businessName}
-                  teammates={state.teammates}
-                  pendingApprovals={state.pendingApprovals}
-                  deliverableCount={state.deliverableCount}
-                  effects={effects}
-                  selectedId={selectedId}
-                  onSelect={toggleSelect}
-                  onOpenApprovals={openApprovals}
-                />
+              <Card
+                className="relative overflow-hidden bg-[#5b4636] p-0"
+                style={{
+                  aspectRatio: `${room.W * TILE} / ${room.H * TILE}`,
+                  ...(fullscreen ? { width: `min(100vw, 100vh * ${room.W / room.H})` } : null),
+                }}
+              >
+                {isDesktop && (
+                  <OfficeCanvas
+                    businessName={businessName}
+                    teammates={state.teammates}
+                    pendingApprovals={state.pendingApprovals}
+                    deliverableCount={state.deliverableCount}
+                    resting={!!rest}
+                    effects={effects}
+                    selectedId={selectedId}
+                    onSelect={toggleSelect}
+                    onOpenApprovals={openApprovals}
+                  />
+                )}
+              </Card>
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="font-pixel absolute right-2 top-2 z-50 rounded-[4px] border-2 border-[#2a1d22] bg-[#f8f0e3]/90 px-2 py-0.5 text-xs text-[#2a1d22] shadow-[2px_2px_0_rgba(42,29,34,0.25)] hover:bg-white"
+                title={fullscreen ? "Leave full screen (Esc)" : "Play full screen"}
+              >
+                {fullscreen ? "✕ Exit" : "⛶ Full screen"}
+              </button>
+              {fullscreen && rest && (
+                <div className="font-pixel absolute bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-[4px] border-2 border-[#2a1d22] bg-[#241b29]/90 px-3 py-1 text-sm text-[#f8f0e3]">
+                  💤 Team resting · {restUntil(rest)}
+                </div>
               )}
-            </Card>
+            </div>
           )}
           <Roster teammates={state.teammates} selectedId={selectedId} onSelect={toggleSelect} />
         </div>
@@ -164,6 +201,58 @@ export function OfficeShell({
         </aside>
       </div>
     </div>
+  );
+}
+
+function restUntil(rest: NonNullable<OfficeState["rest"]>) {
+  const at = new Date(rest.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return rest.known ? `back at ${at}` : `trying again at ${at}`;
+}
+
+/** Out of Claude usage: the team naps, and the owner gets the things they can do without tokens. */
+function RestBanner({
+  businessId,
+  rest,
+  queued,
+  now,
+}: {
+  businessId: string;
+  rest: NonNullable<OfficeState["rest"]>;
+  queued: number;
+  now: number;
+}) {
+  const mins = Math.max(1, Math.round((rest.until - now) / 60_000));
+  const left = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  const link =
+    "font-pixel inline-flex items-center rounded-[4px] border-2 border-[#2a1d22] px-2.5 py-1 text-sm shadow-[2px_2px_0_rgba(42,29,34,0.25)] hover:translate-y-px";
+  return (
+    <Card className="flex flex-wrap items-center gap-x-4 gap-y-3 border-indigo-400/40 bg-indigo-500/10 p-4">
+      <div className="text-3xl" aria-hidden>
+        💤
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold">The team is resting: out of Claude usage</div>
+        <p className="text-sm text-muted-foreground">
+          {restUntil(rest)} (about {left}).{" "}
+          {queued > 0 ? `${queued} task${queued === 1 ? "" : "s"} wait${queued === 1 ? "s" : ""} in the queue and start then.` : "New tasks wait in the queue until then."}{" "}
+          Meanwhile you can take over, at no cost.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Link href={`/b/${businessId}/desk`} className={cn(link, "bg-amber-400 text-[#2a1d22]")}>
+          🎧 Answer customers yourself
+        </Link>
+        <Link href={`/b/${businessId}/studio`} className={cn(link, "bg-secondary text-foreground")}>
+          ✦ Studio: organize, edit, plan
+        </Link>
+        <Link href={`/b/${businessId}/approvals`} className={cn(link, "bg-secondary text-foreground")}>
+          ✉ Approvals
+        </Link>
+        <Link href={`/b/${businessId}/deliverables`} className={cn(link, "bg-secondary text-foreground")}>
+          ▤ Review work
+        </Link>
+      </div>
+    </Card>
   );
 }
 

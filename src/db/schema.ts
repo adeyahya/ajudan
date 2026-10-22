@@ -269,7 +269,7 @@ export const waWatches = sqliteTable("wa_watches", {
   createdAt: createdAt(),
 });
 
-export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task";
+export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "render_edit";
 
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -283,6 +283,68 @@ export const jobs = sqliteTable("jobs", {
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
 });
 
+/**
+ * The owner's organization of the media library (src/lib/assets.ts): one row per file
+ * under media/ that the owner titled, noted, tagged, starred or put in an album.
+ * Files without a row are simply unorganized. Teammates see this in list_media.
+ */
+export const assets = sqliteTable("assets", {
+  /** Folder-relative path, "media/…". */
+  path: text("path").primaryKey(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default(""),
+  /** What it's for / how to use it ("use for the payday promo, not the logo version"). */
+  note: text("note").notNull().default(""),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  album: text("album"),
+  starred: integer("starred", { mode: "boolean" }).notNull().default(false),
+  createdAt: createdAt(),
+});
+
+export type ContactKind = "customer" | "supplier" | "partner" | "team" | "other";
+
+/** The business's address book, kept by the owner (src/lib/contacts.ts); teammates can look people up. */
+export const contacts = sqliteTable("contacts", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Digits with country code, no "+" (like teammates.phone). */
+  phone: text("phone"),
+  email: text("email"),
+  company: text("company"),
+  kind: text("kind").$type<ContactKind>().notNull().default("customer"),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+  notes: text("notes").notNull().default(""),
+  createdAt: createdAt(),
+});
+
+export type EditKind = "video" | "audio";
+export type EditStatus = "draft" | "queued" | "rendering" | "done" | "failed";
+
+/**
+ * A video or audio edit made in the Studio editors (src/lib/edits.ts). The spec is the
+ * edit decision list; the worker renders it with ffmpeg (no Claude) into media/.
+ */
+export const edits = sqliteTable("edits", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<EditKind>().notNull(),
+  title: text("title").notNull(),
+  spec: text("spec", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  status: text("status").$type<EditStatus>().notNull().default("draft"),
+  /** The last render, "media/…". */
+  output: text("output"),
+  error: text("error"),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
+});
+
 export type Business = typeof businesses.$inferSelect;
 export type OnboardingMessage = typeof onboardingMessages.$inferSelect;
 export type Teammate = typeof teammates.$inferSelect;
@@ -294,3 +356,6 @@ export type Job = typeof jobs.$inferSelect;
 export type HumanMessage = typeof humanMessages.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type WaWatch = typeof waWatches.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+export type Contact = typeof contacts.$inferSelect;
+export type Edit = typeof edits.$inferSelect;

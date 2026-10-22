@@ -12,6 +12,7 @@ type Props = {
   teammates: OfficeTeammate[];
   pendingApprovals: number;
   deliverableCount: number;
+  resting: boolean;
   effects: OfficeEffect[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -34,6 +35,7 @@ export function OfficeCanvas({
   teammates,
   pendingApprovals,
   deliverableCount,
+  resting,
   effects,
   selectedId,
   onSelect,
@@ -50,11 +52,11 @@ export function OfficeCanvas({
   const HH = L.H * TILE;
 
   // Latest props for the engine, read inside the long-lived effect.
-  const latest = useRef({ teammates, pendingApprovals, deliverableCount, selectedId });
+  const latest = useRef({ teammates, pendingApprovals, deliverableCount, resting, selectedId });
   useEffect(() => {
-    latest.current = { teammates, pendingApprovals, deliverableCount, selectedId };
-    engineRef.current?.sync(teammates, pendingApprovals, deliverableCount);
-  }, [teammates, pendingApprovals, deliverableCount, selectedId]);
+    latest.current = { teammates, pendingApprovals, deliverableCount, resting, selectedId };
+    engineRef.current?.sync(teammates, pendingApprovals, deliverableCount, resting);
+  }, [teammates, pendingApprovals, deliverableCount, resting, selectedId]);
 
   useEffect(() => {
     const eng = engineRef.current;
@@ -71,9 +73,9 @@ export function OfficeCanvas({
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    const { teammates: tms, pendingApprovals: pa, deliverableCount: dc } = latest.current;
+    const { teammates: tms, pendingApprovals: pa, deliverableCount: dc, resting: rs } = latest.current;
     const eng = new OfficeEngine(tms.length);
-    eng.sync(tms, pa, dc);
+    eng.sync(tms, pa, dc, rs);
     eng.selectedId = latest.current.selectedId;
     engineRef.current = eng;
     const ctx = canvas.getContext("2d")!;

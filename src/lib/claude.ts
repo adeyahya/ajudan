@@ -7,6 +7,7 @@ import {
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import { toMs, UsageLimitError } from "@/lib/rest";
 
 /**
  * The single entry point for every LLM call in Ajudan. It runs Claude Code headless
@@ -62,6 +63,15 @@ export type RunAgentResult<T = unknown> = {
   error?: string;
 };
 
+/** Assistant errors that mean the usage limit or credits are used up, not a passing hiccup. */
+const LIMIT_ERRORS = new Set(["rate_limit", "billing_error"]);
+/** Claude Code's own wording when a subscription limit is hit ("…limit reached|1760000000"). */
+const LIMIT_TEXT = /usage limit reached|hit your (?:usage )?limit|out of (?:extra )?usage|credit balance is too low/i;
+
+/**
+ * Runs Claude Code and returns its result. Throws UsageLimitError (src/lib/rest.ts) when
+ * the usage limit stopped the run, so the worker can put the job back and let the team rest.
+ */
 export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunAgentResult<T>> {
   fs.mkdirSync(opts.cwd, { recursive: true });
 
@@ -96,13 +106,30 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
 
   let sessionId: string | undefined;
   const textParts: string[] = [];
+  let limited = false;
+  let rejected = false;
+  let resetsAt: number | undefined;
   for await (const m of q) {
     if ("session_id" in m && m.session_id) sessionId = m.session_id;
+    if (m.type === "rate_limit_event") {
+      const info = m.rate_limit_info;
+      rejected = info.status === "rejected" && info.overageStatus !== "allowed" && info.overageStatus !== "allowed_warning";
+      if (info.status === "rejected") resetsAt = toMs(info.resetsAt) ?? resetsAt;
+      continue;
+    }
+    if (m.type === "assistant" && m.error && LIMIT_ERRORS.has(m.error)) {
+      limited = true;
+      continue; // the synthetic "limit reached" message is not the teammate talking
+    }
     opts.onMessage?.(m);
     if (m.type === "assistant") {
       for (const block of m.message.content) if (block.type === "text") textParts.push(block.text);
     }
     if (m.type === "result") {
+      const said = m.subtype === "success" ? m.result : "";
+      if (limited || (rejected && m.subtype !== "success") || (m.subtype === "success" && m.num_turns <= 1 && LIMIT_TEXT.test(said) && said.length < 300)) {
+        throw new UsageLimitError(resetsAt ?? toMs(Number(said.match(/\|(\d{10,13})\b/)?.[1])));
+      }
       if (m.subtype === "success") {
         let structured: T | undefined;
         if (opts.outputSchema) {
@@ -186,6 +213,8 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Studying ${short(input.skill ?? input.command, 40)}`;
     case "mcp__biz__list_media":
       return "Looking through the media library";
+    case "mcp__biz__search_contacts":
+      return `Looking up ${short(input.query, 30) || "people"} in the address book`;
     case "mcp__biz__inspect_media":
       return `Checking ${baseName(input.file)}`;
     case "mcp__biz__extract_frames":

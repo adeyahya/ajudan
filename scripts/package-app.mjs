@@ -33,6 +33,8 @@ const [out] = await packager({
   appCategoryType: "public.app-category.business",
   electronVersion,
   overwrite: true,
+  // macOS asks before the Studio's audio editor records a voice-over.
+  extendInfo: { NSMicrophoneUsageDescription: "Ajudan records voice-overs and voice notes in the Studio." },
   asar: false,
   prune: false,
 });

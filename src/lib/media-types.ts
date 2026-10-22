@@ -18,6 +18,7 @@ export const MEDIA_TYPES: Record<string, string> = {
   ".aac": "audio/aac",
   ".ogg": "audio/ogg",
   ".flac": "audio/flac",
+  ".weba": "audio/webm",
   ".pdf": "application/pdf",
 };
 

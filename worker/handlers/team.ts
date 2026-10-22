@@ -7,6 +7,7 @@ import { getLanguage, languageInstruction } from "@/lib/language";
 import { validCron } from "@/lib/onboarding/schedule";
 import { businessWorkspace } from "@/lib/paths";
 import { PausedError, runAbortController } from "../session";
+import { UsageLimitError } from "@/lib/rest";
 import { getRole, ROLE_TEMPLATES } from "@/lib/roles";
 import { renderProfileMarkdown } from "@/lib/workspace";
 import { TeamProposalSchema, type TeammateProposal, type TeamProposal } from "@/lib/types";
@@ -97,6 +98,7 @@ Requirements:
     });
   } catch (err) {
     if (ac.signal.aborted) throw new PausedError(); // stays busy; reruns when reopened
+    if (err instanceof UsageLimitError) throw err; // stays busy; reruns when the team wakes up
     const message = err instanceof Error ? err.message : String(err);
     db.update(schema.businesses).set({ busy: false }).where(eq(schema.businesses.id, businessId)).run();
     logEvent({ businessId, type: "team_error", message });

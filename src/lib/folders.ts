@@ -18,7 +18,7 @@ import Database from "better-sqlite3";
  */
 
 export const AJUDAN_HOME = path.resolve(process.env.AJUDAN_HOME ?? path.join(os.homedir(), "Ajudan"));
-const CONFIG_DIR = path.join(os.homedir(), ".ajudan");
+export const CONFIG_DIR = path.join(os.homedir(), ".ajudan");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 export type AjudanConfig = { activeFolder: string | null; recent: string[] };
