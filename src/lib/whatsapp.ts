@@ -135,6 +135,16 @@ export async function inviteLink(jid: string) {
   return (await wacli<{ link: string }>(["groups", "invite", "link", "get", "--jid", jid])).link;
 }
 
+/** Whether a number (digits with country code) has WhatsApp; undefined when it can't be checked. */
+export async function isOnWhatsapp(phone: string): Promise<boolean | undefined> {
+  try {
+    const d = await wacli<{ registered?: boolean }[] | { registered?: boolean }>(["contacts", "check", `+${phone}`], { timeoutMs: 30_000 });
+    return (Array.isArray(d) ? d[0] : d)?.registered;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Download a message's photo/video/file to outPath (works while sync --follow runs). */
 export async function downloadMedia(chatJid: string, msgId: string, outPath: string) {
   const d = await wacli<{ path: string; bytes: number; mime_type?: string }>(

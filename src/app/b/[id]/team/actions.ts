@@ -8,6 +8,7 @@ import { enqueueJob } from "@/lib/jobs";
 import { isAutonomy, validCron } from "@/lib/onboarding/schedule";
 import { HUMAN_ROLE_KEY, normalizePhone } from "@/lib/humans";
 import { ensureManager } from "@/lib/manager";
+import { isOnWhatsapp } from "@/lib/whatsapp";
 import { getRole } from "@/lib/roles";
 import { initTeammateWorkspace } from "@/lib/workspace";
 
@@ -124,6 +125,13 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
   return { ok: true };
 }
 
+/** A typo'd number would fail silently later: ask WhatsApp now (skipped if WhatsApp isn't linked). */
+async function checkNumber(phone: string) {
+  return (await isOnWhatsapp(phone)) === false
+    ? `+${phone} isn't on WhatsApp. Check the number (with the country code, without the 0 after it).`
+    : undefined;
+}
+
 function humanFields(formData: FormData, language: string) {
   const name = String(formData.get("name") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
@@ -153,6 +161,8 @@ export async function addHuman(businessId: string, _prev: FormState, formData: F
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.phone, f.phone), eq(schema.teammates.status, "active")))
     .get();
   if (taken) return { error: "Someone on the team already has that number" };
+  const bad = await checkNumber(f.phone);
+  if (bad) return { error: bad };
   const top = db
     .select({ m: max(schema.teammates.deskIndex) })
     .from(schema.teammates)
@@ -182,6 +192,8 @@ export async function updateHuman(businessId: string, teammateId: string, _prev:
   const biz = getBiz(businessId);
   const f = humanFields(formData, biz.language);
   if ("error" in f) return { error: f.error };
+  const bad = await checkNumber(f.phone);
+  if (bad) return { error: bad };
   db.update(schema.teammates)
     .set({ name: f.name, title: f.title, phone: f.phone, responsibilities: f.helps })
     .where(and(ownTeammate(businessId, teammateId), eq(schema.teammates.kind, "human")))
