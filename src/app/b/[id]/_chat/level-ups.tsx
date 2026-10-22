@@ -1,7 +1,7 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import { useT } from "@/components/i18n";
-import { Avatar } from "@/components/kit";
 import { useStored } from "./use-stored";
 
 export type LevelUpCard = { key: string; at: number; level: number; mate?: { id: string; name: string; color: string } };
@@ -10,9 +10,9 @@ export type LevelUpCard = { key: string; at: number; level: number; mate?: { id:
 const FIRST_LOOK_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
- * Level-up moments in the conversation: small system cards for the levels reached since
+ * Level-up moments above the conversation: one centered 13px line per level reached since
  * this viewer last looked (src/lib/progress.ts replays them from real outcomes, so nothing
- * is stored but the viewer's "seen up to" time, in localStorage).
+ * is stored but the viewer's "seen up to" time, in localStorage). Dismiss marks them seen.
  */
 export function LevelUps({ businessId, ups, now }: { businessId: string; ups: LevelUpCard[]; now: number }) {
   const t = useT();
@@ -23,29 +23,27 @@ export function LevelUps({ businessId, ups, now }: { businessId: string; ups: Le
   if (seenRaw === "ssr" || !fresh.length) return null;
   const dismiss = () => setSeen(String(Math.max(...ups.map((u) => u.at), now)));
   return (
-    <div role="status" className="flex shrink-0 flex-col gap-1.5">
-      {fresh.map((u) => (
-        <div
+    <div role="status" className="flex shrink-0 flex-col items-center gap-0.5 px-4 py-1.5">
+      {fresh.map((u, i) => (
+        <p
           key={u.key}
-          className="mx-auto flex w-full max-w-xl animate-in fade-in slide-in-from-top-1 items-center gap-3 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 duration-500"
+          title={t("chathome.levelUpBody")}
+          className="flex max-w-full animate-in items-center gap-1.5 text-[13px] leading-[18px] text-muted-foreground duration-300 fade-in-0 motion-reduce:animate-none"
         >
-          {u.mate ? (
-            <Avatar seed={u.mate.id} name={u.mate.name} color={u.mate.color} size={28} />
-          ) : (
-            <span aria-hidden className="font-game flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm text-primary-foreground tabular-nums">
-              {u.level}
-            </span>
+          <Sparkles aria-hidden className="size-3.5 shrink-0 text-primary" strokeWidth={1.75} />
+          <span className="truncate">
+            {u.mate ? t("chathome.levelUpMate", { name: u.mate.name, level: u.level }) : t("chathome.levelUpTeam", { level: u.level })}
+          </span>
+          {i === fresh.length - 1 && (
+            <button
+              type="button"
+              onClick={dismiss}
+              className="ml-1 shrink-0 rounded-sm px-1 text-xs text-tertiary transition-colors duration-100 hover:bg-hover hover:text-foreground"
+            >
+              {t("chathome.dismiss")}
+            </button>
           )}
-          <div className="min-w-0 flex-1">
-            <p className="font-pixel text-sm text-primary">
-              {u.mate ? t("chathome.levelUpMate", { name: u.mate.name, level: u.level }) : t("chathome.levelUpTeam", { level: u.level })}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">{t("chathome.levelUpBody")}</p>
-          </div>
-          <button type="button" onClick={dismiss} className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-            {t("chathome.dismiss")}
-          </button>
-        </div>
+        </p>
       ))}
     </div>
   );
