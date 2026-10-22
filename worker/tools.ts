@@ -18,6 +18,9 @@ import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspa
 import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
+import { humanThread, openRequest } from "@/lib/humans";
+import { onTaskFinished } from "@/lib/manager";
+import { sendToHuman } from "./humans";
 import { renderVideo } from "./video";
 
 export const BIZ_SERVER = "biz";
@@ -41,6 +44,8 @@ export const SAFE_BIZ_TOOLS = [
 ].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
+/** Talking to the team's human teammates on WhatsApp (not for draft-only teammates). */
+export const HUMAN_TOOLS = ["ask_human", "message_human", "close_human_request", "human_conversation"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
 /** Tools that reach the outside world: gated by the teammate's autonomy. */
 export const OUTWARD_BIZ_TOOLS = ["publish_deliverable", "send_message", "confirm_browser_action"].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
@@ -60,6 +65,8 @@ export type BizContext = {
   isManager?: boolean;
   /** Aborted when the folder closes (stops a render). */
   signal?: AbortSignal;
+  /** Human teammates reachable on WhatsApp (adds ask_human & co). */
+  humans?: Teammate[];
 };
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -471,6 +478,96 @@ export function createBizServer(ctx: BizContext) {
     );
   }
 
+  if (ctx.humans?.length) {
+    const humans = ctx.humans;
+    const find = (name: string) => humans.find((h) => h.name.toLowerCase() === name.trim().toLowerCase());
+    const unknown = (name: string) => fail(`No human teammate named "${name}". Human teammates: ${humans.map((h) => h.name).join(", ")}.`);
+    const business = () => db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()!;
+    const cleanFiles = (files?: string[]) => (files ?? []).map((f) => f.replace(/^\.?\//, ""));
+    const badFiles = (files: string[]) => files.filter((f) => !isServablePath(f) || !fs.existsSync(path.join(dataDir(), f)));
+    tools.push(
+      tool(
+        "ask_human",
+        `Ask a human teammate for something by WhatsApp (footage, photos, a fact, a check, a physical task). Human teammates: ${humans.map((h) => `${h.name} (${h.title}${h.responsibilities.length ? `: ${h.responsibilities.join("; ")}` : ""})`).join(", ")}. The message is sent as is from the business's WhatsApp, with a line saying it's from you (an AI). Their reply comes back to you later as a new task, with any photos and videos attached. Don't wait for it: finish your current work and say what you asked for.`,
+        {
+          name: z.string().describe("The human teammate's name"),
+          message: z
+            .string()
+            .describe("The WhatsApp message to them, in the business's language: friendly, short, specific (a numbered shot list for footage), with a deadline if there is one"),
+          files: z.array(z.string()).optional().describe("Files to send them (media/… or work/…), e.g. a reference image"),
+        },
+        async (a) => {
+          const h = find(a.name);
+          if (!h) return unknown(a.name);
+          const files = cleanFiles(a.files);
+          if (badFiles(files).length) return fail(`Unknown file(s): ${badFiles(files).join(", ")}.`);
+          const task = createTask({
+            businessId,
+            teammateId: h.id,
+            instructions: a.message,
+            createdBy: `teammate:${teammate.id}`,
+            // The reply finds its way back to this task's teammate (worker/humans.ts).
+            parentTaskId: taskId,
+            attachments: files,
+          });
+          ev("delegated", `${teammate.name} asked ${h.name} (WhatsApp): ${task.title}`, { from: teammate.id, to: h.id, delegatedTaskId: task.id });
+          return ok(`Sending to ${h.name} on WhatsApp now. Their reply will come back to you as a new task. Finish what you can without it, and tell the owner you're waiting on ${h.name}.`);
+        },
+      ),
+      tool(
+        "message_human",
+        "Send a WhatsApp message (and optionally files, e.g. a draft video to check) to a human teammate in an ongoing conversation: a thank-you, a follow-up question, feedback on what they sent. Use ask_human for a new request.",
+        {
+          name: z.string(),
+          message: z.string().describe("The WhatsApp message, in the business's language"),
+          files: z.array(z.string()).optional().describe("media/… or work/… files to send"),
+        },
+        async (a) => {
+          const h = find(a.name);
+          if (!h) return unknown(a.name);
+          const files = cleanFiles(a.files);
+          if (badFiles(files).length) return fail(`Unknown file(s): ${badFiles(files).join(", ")}.`);
+          try {
+            await sendToHuman({ business: business(), human: h, from: teammate, text: a.message, files, taskId: openRequest(h.id)?.id ?? null });
+          } catch (err) {
+            return fail(`Couldn't send on WhatsApp: ${(err as Error).message}`);
+          }
+          return ok(`Sent to ${h.name}.`);
+        },
+      ),
+      tool(
+        "close_human_request",
+        "Mark a human teammate's open request as done (you got what you needed), with a short note. Replies after that go to the manager.",
+        { name: z.string(), note: z.string().describe("What you got, e.g. \"3 clips of the printer\"") },
+        async (a) => {
+          const h = find(a.name);
+          if (!h) return unknown(a.name);
+          const req = openRequest(h.id);
+          if (!req) return ok(`${h.name} has no open request.`);
+          db.update(schema.tasks).set({ status: "done", result: a.note, finishedAt: new Date() }).where(eq(schema.tasks.id, req.id)).run();
+          const more = openRequest(h.id);
+          db.update(schema.teammates)
+            .set({ state: more ? "waiting" : "idle", currentActivity: more ? `Asked on WhatsApp: ${more.title}`.slice(0, 140) : null })
+            .where(eq(schema.teammates.id, h.id))
+            .run();
+          ev("human_request_done", `${teammate.name} closed the request to ${h.name}: ${a.note}`, { humanId: h.id });
+          onTaskFinished(req.id);
+          return ok(`Closed "${req.title}".`);
+        },
+      ),
+      tool(
+        "human_conversation",
+        "Read the recent WhatsApp conversation with a human teammate (requests, their replies, file paths).",
+        { name: z.string() },
+        async (a) => {
+          const h = find(a.name);
+          if (!h) return unknown(a.name);
+          return ok(humanThread(h.id, 30) || `No messages with ${h.name} yet.`);
+        },
+      ),
+    );
+  }
+
   if (ctx.isManager) {
     const mates = () =>
       db
@@ -484,10 +581,13 @@ export function createBizServer(ctx: BizContext) {
         const open = db
           .select()
           .from(schema.tasks)
-          .where(and(eq(schema.tasks.businessId, businessId), inArray(schema.tasks.status, ["queued", "running", "waiting_approval"])))
+          .where(and(eq(schema.tasks.businessId, businessId), inArray(schema.tasks.status, ["queued", "running", "waiting_approval", "waiting_human"])))
           .all();
         const lines = mates().map((m) => {
           const mine = open.filter((t) => t.teammateId === m.id).map((t) => `${t.title} (${t.status.replace("_", " ")})`);
+          if (m.kind === "human") {
+            return `- ${m.name}, ${m.title}: HUMAN teammate, reached on WhatsApp with ask_human${mine.length ? `; open requests: ${mine.join("; ")}` : ""}`;
+          }
           const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp"].filter(Boolean).join(", ") || "no browser/WhatsApp";
           return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
         });

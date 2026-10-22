@@ -69,6 +69,7 @@ export type WaMessage = {
   MediaType: string;
   MediaCaption: string;
   Filename: string;
+  MimeType?: string;
 };
 
 export async function isLinked() {
@@ -132,6 +133,15 @@ export async function updateGroup(jid: string, opts: { name?: string; descriptio
 
 export async function inviteLink(jid: string) {
   return (await wacli<{ link: string }>(["groups", "invite", "link", "get", "--jid", jid])).link;
+}
+
+/** Download a message's photo/video/file to outPath (works while sync --follow runs). */
+export async function downloadMedia(chatJid: string, msgId: string, outPath: string) {
+  const d = await wacli<{ path: string; bytes: number; mime_type?: string }>(
+    ["media", "download", "--chat", chatJid, "--id", msgId, "--output", outPath],
+    { timeoutMs: 300_000 },
+  );
+  return d;
 }
 
 export async function unlink() {

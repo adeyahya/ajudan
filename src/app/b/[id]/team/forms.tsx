@@ -128,3 +128,46 @@ export function AddTeammateForm({ action, roles }: { action: Action; roles: { ke
     </form>
   );
 }
+
+/** Add or edit a human teammate: name, what they do, WhatsApp number, what the team can ask them for. */
+export function HumanForm({
+  action,
+  initial,
+  submitLabel = "Add person",
+}: {
+  action: Action;
+  initial?: { name: string; title: string; phone: string | null; helps: string[] };
+  submitLabel?: string;
+}) {
+  const [state, formAction] = useActionState(action, {});
+  return (
+    <form action={formAction} className="grid gap-3 text-sm sm:grid-cols-3">
+      <div className="grid gap-1">
+        <Label>Name</Label>
+        <Input name="name" required defaultValue={initial?.name} placeholder="e.g. Budi" />
+      </div>
+      <div className="grid gap-1">
+        <Label>What they do</Label>
+        <Input name="title" defaultValue={initial?.title} placeholder="e.g. Videographer" />
+      </div>
+      <div className="grid gap-1">
+        <Label>WhatsApp number</Label>
+        <Input name="phone" required inputMode="tel" defaultValue={initial?.phone ? `+${initial.phone}` : ""} placeholder="+62 812 3456 7890" />
+      </div>
+      <div className="grid gap-1 sm:col-span-3">
+        <Label>The team can ask them for (one per line)</Label>
+        <Textarea
+          name="helps"
+          rows={3}
+          defaultValue={initial?.helps.join("\n")}
+          placeholder={"Product footage and B-roll\nProduct photos\nChecking stock in the workshop"}
+        />
+      </div>
+      <div className="flex items-center gap-3 sm:col-span-3">
+        <Submit variant={initial ? "secondary" : "primary"}>{submitLabel}</Submit>
+        {state.error && <span className="text-xs text-red-600 dark:text-red-400">{state.error}</span>}
+        {state.ok && !state.error && <span className="text-xs text-muted-foreground">{initial ? "Saved" : "Added"}</span>}
+      </div>
+    </form>
+  );
+}

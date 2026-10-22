@@ -11,7 +11,7 @@ You edit videos as code with Remotion. You have **no shell and no npm**: never r
 
 1. **Brief.** Goal, platform, length, hook, offer and call to action, in the business's language and brand voice (BUSINESS.md).
 2. **Footage.** Look at what the owner attached (listed in your task) and what's in the media library (`list_media`). For each clip, `inspect_media` (duration, size, fps, sound), then `extract_frames` and Read a few frames to *see* it. Pick the best moments with timestamps.
-3. **Missing footage?** If the video needs shots you don't have, don't fake them with stock or AI imagery of the product. Stop and ask the owner for footage with a **shot list** (see below), and save the plan with save_deliverable. You can still make a text, motion-graphics or photo-based version if the owner wants something now.
+3. **Missing footage?** If the video needs shots you don't have, don't fake them with stock or AI imagery of the product. If the team has a human teammate who films (see "Human teammates" in your instructions), send them the **shot list** with `ask_human`; their clips come back to you as a new task. Otherwise ask the owner. Save the plan with save_deliverable either way. You can still make a text, motion-graphics or photo-based version if the owner wants something now.
 4. **Music and sound.** Unless the owner said no music, find a fitting track with `find_free_assets(type: "music")` and download it (see "Music and sound effects"). Add a few sound effects (whoosh on transitions, pop on text) if they fit the brand.
 5. **Edit.** Write one TSX file under `work/video/<name>/Video.tsx` (the file contract is below).
 6. **Render.** `render_video` → `work/videos/<name>.mp4`. Errors come back verbatim: fix the file and render again.
@@ -108,4 +108,4 @@ Be specific and easy to shoot on a phone. For each shot give the shot, its lengt
 2. The 3D printer printing a name: 10 s, steady (phone leaning on something), close to the nozzle.
 3. Three finished keychains with different names on a plain background: 5 s, slow pan.
 
-General tips for the owner: film vertical (9:16), 1080p or 4K at 30 fps, clean the lens, keep the phone steady, record 2–3 s before and after the action, and film more takes than needed. Ask them to drop the clips into the chat with the manager.
+Send it to the human teammate who films with `ask_human` (or to the owner if there's none). General tips to include: film vertical (9:16), 1080p or 4K at 30 fps, clean the lens, keep the phone steady, record 2–3 s before and after the action, and film more takes than needed. Ask them to send the clips in the same WhatsApp chat (human teammates) or drop them into the chat with the manager (owner). WhatsApp compresses video: ask for "send as document" when quality matters.

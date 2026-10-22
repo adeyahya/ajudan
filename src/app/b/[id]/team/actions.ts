@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { db, schema } from "@/db";
 import { enqueueJob } from "@/lib/jobs";
 import { isAutonomy, validCron } from "@/lib/onboarding/schedule";
+import { HUMAN_ROLE_KEY, normalizePhone } from "@/lib/humans";
 import { ensureManager } from "@/lib/manager";
 import { getRole } from "@/lib/roles";
 import { initTeammateWorkspace } from "@/lib/workspace";
@@ -119,6 +120,72 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
     .get();
   const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
   db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
+  refresh();
+  return { ok: true };
+}
+
+function humanFields(formData: FormData, language: string) {
+  const name = String(formData.get("name") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  const phoneRaw = String(formData.get("phone") ?? "").trim();
+  const helps = String(formData.get("helps") ?? "")
+    .split(/\n|;/)
+    .map((l) => l.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!name) return { error: "Give them a name" };
+  const phone = normalizePhone(phoneRaw, language);
+  if (!phone) return { error: "Enter their WhatsApp number with the country code, e.g. +62 812 3456 7890" };
+  return { name, title: title || "Team member", phone, helps };
+}
+
+/**
+ * Add a real person the AI team can ask for help on WhatsApp (footage, photos,
+ * checks). FormData: name, title, phone, helps (one per line).
+ */
+export async function addHuman(businessId: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const biz = getBiz(businessId);
+  const f = humanFields(formData, biz.language);
+  if ("error" in f) return { error: f.error };
+  const taken = db
+    .select({ id: schema.teammates.id })
+    .from(schema.teammates)
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.phone, f.phone), eq(schema.teammates.status, "active")))
+    .get();
+  if (taken) return { error: "Someone on the team already has that number" };
+  const top = db
+    .select({ m: max(schema.teammates.deskIndex) })
+    .from(schema.teammates)
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
+    .get();
+  db.insert(schema.teammates)
+    .values({
+      businessId,
+      kind: "human",
+      name: f.name,
+      roleKey: HUMAN_ROLE_KEY,
+      title: f.title,
+      color: "#14b8a6",
+      phone: f.phone,
+      responsibilities: f.helps,
+      kpis: [],
+      why: "Added by the owner: a person the team can ask on WhatsApp",
+      status: "active",
+      deskIndex: (top?.m ?? -1) + 1,
+    })
+    .run();
+  refresh();
+  return { ok: true };
+}
+
+export async function updateHuman(businessId: string, teammateId: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const biz = getBiz(businessId);
+  const f = humanFields(formData, biz.language);
+  if ("error" in f) return { error: f.error };
+  db.update(schema.teammates)
+    .set({ name: f.name, title: f.title, phone: f.phone, responsibilities: f.helps })
+    .where(and(ownTeammate(businessId, teammateId), eq(schema.teammates.kind, "human")))
+    .run();
   refresh();
   return { ok: true };
 }

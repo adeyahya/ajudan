@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
-import type { Task, TaskStatus, TeammateState } from "@/db/schema";
+import type { Task, TaskStatus, Teammate, TeammateState } from "@/db/schema";
 import { Chat, type ChatMessage } from "@/components/chat";
 import { ImageStrip } from "@/components/image-strip";
 import { LiveRefresh } from "@/components/live";
@@ -27,6 +27,7 @@ const TASK_TONE: Record<TaskStatus, "neutral" | "green" | "amber" | "red" | "blu
   queued: "neutral",
   running: "blue",
   waiting_approval: "amber",
+  waiting_human: "amber",
   done: "green",
   failed: "red",
   cancelled: "neutral",
@@ -140,6 +141,10 @@ function createdByLabel(createdBy: string, mates: { id: string; name: string }[]
   if (createdBy === "user") return "You";
   if (createdBy === "schedule") return "Scheduled";
   if (createdBy === REPORT) return "Team update";
+  if (createdBy.startsWith("human:")) {
+    const id = createdBy.slice("human:".length);
+    return `From ${mates.find((m) => m.id === id)?.name ?? "a person"} (WhatsApp)`;
+  }
   if (createdBy.startsWith("teammate:")) {
     const id = createdBy.slice("teammate:".length);
     return `From ${mates.find((m) => m.id === id)?.name ?? "a teammate"}`;
@@ -237,6 +242,7 @@ function toMessages(
 export async function TeammateView({ id, tid, manager = false }: { id: string; tid: string; manager?: boolean }) {
   const [biz, data] = await Promise.all([getBusiness(id), loadTeammate(id, tid)]);
   if (!biz || !data) notFound();
+  if (data.teammate.kind === "human") return <HumanView businessId={id} human={data.teammate} mates={data.mates} />;
   const { teammate: t, tasks, steps, deliverableCount, mates, memory, taskImages, children } = data;
   const id_ = biz.language === "id";
   const managerSuggestions = id_
@@ -355,6 +361,123 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
             <p className="text-sm text-muted-foreground">No memory yet.</p>
           )}
         </Card>
+      </aside>
+    </div>
+  );
+}
+
+/**
+ * A human teammate's page: the WhatsApp conversation the AI team had with them, with
+ * their photos and videos. Typing here sends them a request from the business's WhatsApp.
+ */
+async function HumanView({ businessId, human, mates }: { businessId: string; human: Teammate; mates: { id: string; name: string }[] }) {
+  const rows = db
+    .select()
+    .from(schema.humanMessages)
+    .where(eq(schema.humanMessages.humanId, human.id))
+    .orderBy(desc(schema.humanMessages.sentAt))
+    .limit(60)
+    .all()
+    .reverse();
+  const requests = db
+    .select()
+    .from(schema.tasks)
+    .where(eq(schema.tasks.teammateId, human.id))
+    .orderBy(desc(schema.tasks.createdAt))
+    .limit(10)
+    .all();
+  const nameOf = (tid: string | null) => (tid ? (mates.find((m) => m.id === tid)?.name ?? "Teammate") : "You");
+  const messages: ChatMessage[] = rows.map((m) =>
+    m.direction === "out"
+      ? {
+          id: m.id,
+          role: "user",
+          content: m.text,
+          attachments: m.attachments,
+          meta: `${nameOf(m.fromTeammateId)} → ${human.name} · ${time(m.sentAt)}`,
+        }
+      : {
+          id: m.id,
+          role: "assistant",
+          content: m.text,
+          meta: `WhatsApp · ${time(m.sentAt)}`,
+          footer: m.attachments.length ? (
+            <ImageStrip businessId={businessId} images={m.attachments} className="w-full pb-1" />
+          ) : undefined,
+        },
+  );
+  const queued = requests.some((r) => r.status === "queued" || r.status === "running");
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
+      <LiveRefresh businessId={businessId} />
+      <section className="flex h-[calc(100dvh-8.75rem)] min-w-0 flex-col">
+        <div className="flex items-center gap-3 border-b pb-3">
+          <Link href={`/b/${businessId}/team`} className="text-xs text-muted-foreground hover:text-foreground">
+            ← Team
+          </Link>
+          <Avatar seed={human.id} name={human.name} color={human.color} size={36} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="font-semibold tracking-tight">{human.name}</h1>
+              <Badge tone="blue">Person · WhatsApp</Badge>
+            </div>
+            <p className="truncate text-xs text-muted-foreground">
+              {human.title} · +{human.phone}
+            </p>
+          </div>
+        </div>
+        <Chat
+          className="flex-1"
+          agent={{ id: human.id, name: human.name, color: human.color }}
+          messages={messages}
+          busy={queued}
+          busyLabel="Sending on WhatsApp…"
+          sendAction={sendTaskMessage.bind(null, businessId, human.id)}
+          uploadBusinessId={businessId}
+          placeholder={`Send ${human.name} a request on WhatsApp…`}
+          emptyState={
+            <div className="py-12 text-center">
+              <Avatar seed={human.id} name={human.name} color={human.color} size={48} />
+              <p className="mt-3 font-medium">
+                {human.name} · {human.title}
+              </p>
+              <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+                The AI team asks {human.name} for help on WhatsApp, and you&apos;ll see the conversation here. Their replies, photos and
+                videos go back to whoever asked. You can send a request yourself too; replies to yours go to the manager.
+              </p>
+            </div>
+          }
+        />
+      </section>
+      <aside className="space-y-4 lg:pt-1">
+        <Card className="space-y-2 p-4">
+          <h2 className="text-sm font-semibold">Requests</h2>
+          {requests.length ? (
+            <ul className="space-y-2 text-sm">
+              {requests.map((r) => (
+                <li key={r.id} className="flex items-start justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="block truncate">{r.title}</span>
+                    <span className="text-xs text-muted-foreground">{createdByLabel(r.createdBy, mates)} · {time(r.createdAt)}</span>
+                  </span>
+                  <Badge tone={TASK_TONE[r.status]}>{r.status === "waiting_human" ? "waiting" : r.status.replace("_", " ")}</Badge>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No requests yet.</p>
+          )}
+        </Card>
+        {human.responsibilities.length > 0 && (
+          <Card className="space-y-2 p-4">
+            <h2 className="text-sm font-semibold">The team can ask {human.name} for</h2>
+            <ul className="list-disc space-y-1 pl-4 text-sm">
+              {human.responsibilities.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </Card>
+        )}
       </aside>
     </div>
   );

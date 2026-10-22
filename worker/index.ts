@@ -19,6 +19,7 @@ import { pinDataDir } from "@/lib/paths";
 import { handlers } from "./handlers";
 import { startScheduler, stopScheduler } from "./scheduler";
 import { endFolderSession, PausedError } from "./session";
+import { startHumanInbox, stopHumanInbox } from "./humans";
 import { startWhatsappSync, stopWhatsappSync } from "./whatsapp-sync";
 
 const CONCURRENCY = Number(process.env.AJUDAN_CONCURRENCY ?? 2);
@@ -71,6 +72,7 @@ function activate(dir: string | null) {
   if (!once) {
     startScheduler();
     startWhatsappSync();
+    startHumanInbox();
   }
   console.log(`[worker] working on ${dir}`);
 }
@@ -80,6 +82,7 @@ async function switchTo(dir: string | null) {
   console.log(`[worker] switching folder → ${dir ?? "(none)"}`);
   stopScheduler();
   stopWhatsappSync();
+  stopHumanInbox();
   endFolderSession(); // aborts running Claude calls; their jobs go back to the queue
   await Promise.allSettled([...inflight]);
   activate(dir);

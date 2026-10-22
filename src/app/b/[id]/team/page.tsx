@@ -7,9 +7,10 @@ import { Avatar, Badge, Card, PageHeader, PageSkeleton, Prose } from "@/componen
 import { getBusiness, listTeammates } from "@/lib/data";
 import { lastEventOf } from "@/lib/onboarding/data";
 import { AUTONOMY_OPTIONS, describeCron } from "@/lib/onboarding/schedule";
+import { openRequests } from "@/lib/humans";
 import { ROLE_TEMPLATES } from "@/lib/roles";
-import { addTeammate, hireTeam, redesignTeam, removeTeammate, updateTeammate } from "./actions";
-import { AddTeammateForm, PendingSubmit, TeammateEditor } from "./forms";
+import { addHuman, addTeammate, hireTeam, redesignTeam, removeTeammate, updateHuman, updateTeammate } from "./actions";
+import { AddTeammateForm, HumanForm, PendingSubmit, TeammateEditor } from "./forms";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -106,25 +107,92 @@ async function Content({ params }: Params) {
   }
 
   // active
-  const roster = await listTeammates(id, "active");
+  const everyone = await listTeammates(id, "active");
+  const roster = everyone.filter((t) => t.kind !== "human");
+  const humans = everyone.filter((t) => t.kind === "human");
+  const open = openRequests(humans.map((h) => h.id));
   return (
     <div>
-      <LiveRefresh businessId={id} types={LIVE_TYPES} />
-      <PageHeader title="Your team" subtitle={`${roster.length} teammates working for ${biz.name}`} />
+      <LiveRefresh businessId={id} types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done"]} />
+      <PageHeader
+        title="Your team"
+        subtitle={`${roster.length} AI teammates${humans.length ? ` and ${humans.length} ${humans.length === 1 ? "person" : "people"}` : ""} working for ${biz.name}`}
+      />
       <AutonomyLegend />
       <div className="grid gap-4 md:grid-cols-2 mb-8">
         {roster.map((t) => (
           <TeammateCard key={t.id} t={t} businessId={id} active />
         ))}
       </div>
-      <Card className="p-5">
-        <h2 className="font-medium mb-3">Add a teammate</h2>
+      <Card className="p-5 mb-8">
+        <h2 className="font-medium mb-3">Add an AI teammate</h2>
         <AddTeammateForm
           action={addTeammate.bind(null, id)}
           roles={ROLE_TEMPLATES.map(({ key, title, summary }) => ({ key, title, summary }))}
         />
       </Card>
+
+      <h2 className="font-pixel mb-1 text-lg">People on WhatsApp</h2>
+      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">
+        Real people the AI team can ask for help: footage, B-roll and photos, checks in the workshop. The team messages them from the
+        business&apos;s WhatsApp (link it on the Business page), and their replies, with photos and videos, go straight back to whoever asked.
+      </p>
+      {humans.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 mb-6">
+          {humans.map((h) => (
+            <HumanCard key={h.id} t={h} businessId={id} open={open.filter((r) => r.teammateId === h.id).length} />
+          ))}
+        </div>
+      )}
+      <Card className="p-5">
+        <h2 className="font-medium mb-3">Add a person</h2>
+        <HumanForm action={addHuman.bind(null, id)} />
+      </Card>
     </div>
+  );
+}
+
+function HumanCard({ t, businessId, open }: { t: Teammate; businessId: string; open: number }) {
+  return (
+    <Card className="p-5 flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        <Avatar seed={t.id} name={t.name} color={t.color} size={40} />
+        <div className="min-w-0 flex-1">
+          <Link href={`/b/${businessId}/teammates/${t.id}`} className="font-semibold hover:underline">
+            {t.name}
+          </Link>
+          <div className="text-sm text-muted-foreground">{t.title}</div>
+          <div className="text-xs text-muted-foreground">WhatsApp +{t.phone}</div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <Badge tone="blue">Person</Badge>
+          {open > 0 && <Badge tone="amber">{open} open request{open === 1 ? "" : "s"}</Badge>}
+        </div>
+      </div>
+      {t.responsibilities.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-muted-foreground mb-1">The team can ask them for</div>
+          <ul className="list-disc pl-5 text-sm space-y-0.5">
+            {t.responsibilities.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <details className="border-t border-border pt-3">
+        <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">Edit</summary>
+        <div className="pt-3 grid gap-3">
+          <HumanForm
+            action={updateHuman.bind(null, businessId, t.id)}
+            initial={{ name: t.name, title: t.title, phone: t.phone, helps: t.responsibilities }}
+            submitLabel="Save"
+          />
+          <form action={removeTeammate.bind(null, businessId, t.id)}>
+            <PendingSubmit variant="ghost">Remove {t.name} from the team</PendingSubmit>
+          </form>
+        </div>
+      </details>
+    </Card>
   );
 }
 

@@ -70,25 +70,31 @@ const FINISHED = ["done", "failed", "cancelled"] as const;
  */
 export function onTaskFinished(taskId: string) {
   const task = db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-  if (!task?.parentTaskId || task.createdBy.startsWith("system:")) return;
+  if (!task?.parentTaskId || task.createdBy === REPORT) return;
   const parent = db.select().from(schema.tasks).where(eq(schema.tasks.id, task.parentTaskId)).get();
   if (!parent) return;
   const manager = getManager(task.businessId);
   if (!manager || parent.teammateId !== manager.id) return;
 
-  const children = db
-    .select()
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.parentTaskId, parent.id), ne(schema.tasks.createdBy, REPORT)))
-    .all();
-  if (children.some((c) => !(FINISHED as readonly string[]).includes(c.status))) return;
-  const alreadyReported = db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.parentTaskId, parent.id), eq(schema.tasks.createdBy, REPORT)))
-    .all()
-    .some((r) => r);
-  if (alreadyReported) return;
+  // Requests to human teammates stay open until closed; they don't hold up the report.
+  const humanIds = new Set(
+    db
+      .select({ id: schema.teammates.id })
+      .from(schema.teammates)
+      .where(and(eq(schema.teammates.businessId, task.businessId), eq(schema.teammates.kind, "human")))
+      .all()
+      .map((t) => t.id),
+  );
+  const all = db.select().from(schema.tasks).where(eq(schema.tasks.parentTaskId, parent.id)).all();
+  const work = all.filter((c) => c.createdBy !== REPORT && !humanIds.has(c.teammateId));
+  if (work.some((c) => !(FINISHED as readonly string[]).includes(c.status))) return;
+  // Report again when more work finished since the last report (e.g. a teammate
+  // continued after a human teammate sent footage).
+  const lastReport = all
+    .filter((c) => c.createdBy === REPORT)
+    .reduce<number>((m, c) => Math.max(m, c.createdAt.getTime()), 0);
+  const children = work.filter((c) => (c.finishedAt?.getTime() ?? 0) > lastReport);
+  if (!children.length) return;
 
   const names = new Map(
     db
@@ -111,7 +117,7 @@ export function onTaskFinished(taskId: string) {
     title: `Report: ${parent.title}`.slice(0, 80),
     createdBy: REPORT,
     parentTaskId: parent.id,
-    instructions: `Your team has finished the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
+    instructions: `Your team has finished ${lastReport ? "more of " : ""}the work you delegated for the owner's request:\n\n> ${parent.instructions.slice(0, 1500)}\n\nTheir results:\n\n${results}\n\nReport back to the owner now: a short summary of what was done (by whom), where to see it (images and videos show under this message and on the Work page), and anything that needs the owner's decision or approval. If a teammate asked for footage or photos, pass on their shot list and ask the owner to drop the files into this chat. Don't repeat everything; highlight what matters. Don't delegate again unless something clearly failed and is worth one retry.`,
   });
 }
 

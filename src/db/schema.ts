@@ -56,6 +56,8 @@ export const onboardingMessages = sqliteTable("onboarding_messages", {
 export type Autonomy = "draft" | "ask" | "auto";
 export type TeammateStatus = "proposed" | "active" | "archived";
 export type TeammateState = "idle" | "working" | "waiting" | "error";
+/** "ai" teammates run in the worker; "human" ones are real people reached on WhatsApp. */
+export type TeammateKind = "ai" | "human";
 
 export const teammates = sqliteTable("teammates", {
   id: id(),
@@ -90,10 +92,14 @@ export const teammates = sqliteTable("teammates", {
   browserAccess: integer("browser_access", { mode: "boolean" }).notNull().default(false),
   /** May read and post in the business's allowed WhatsApp chats. Off by default. */
   whatsappAccess: integer("whatsapp_access", { mode: "boolean" }).notNull().default(false),
+  kind: text("kind").$type<TeammateKind>().notNull().default("ai"),
+  /** Human teammates: WhatsApp number in international format, digits only ("6281234567890"). */
+  phone: text("phone"),
   createdAt: createdAt(),
 });
 
-export type TaskStatus = "queued" | "running" | "waiting_approval" | "done" | "failed" | "cancelled";
+/** "waiting_human": a request sent to a human teammate on WhatsApp, open until it's closed. */
+export type TaskStatus = "queued" | "running" | "waiting_approval" | "waiting_human" | "done" | "failed" | "cancelled";
 
 export const tasks = sqliteTable("tasks", {
   id: id(),
@@ -175,6 +181,32 @@ export const activityEvents = sqliteTable("activity_events", {
   createdAt: createdAt(),
 });
 
+/**
+ * The WhatsApp conversation with human teammates, as Ajudan saw it: requests and
+ * replies the AI team sent (out) and what the person sent back (in, with media
+ * copied into media/). The UI and the agents read this, never wacli directly.
+ */
+export const humanMessages = sqliteTable("human_messages", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  humanId: text("human_id")
+    .notNull()
+    .references(() => teammates.id, { onDelete: "cascade" }),
+  direction: text("direction").$type<"in" | "out">().notNull(),
+  /** The AI teammate who sent it (out), or null for the owner. */
+  fromTeammateId: text("from_teammate_id"),
+  /** The human request (task) it belongs to, if any. */
+  taskId: text("task_id"),
+  text: text("text").notNull().default(""),
+  attachments: text("attachments", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /** WhatsApp message id (dedupes inbound messages). */
+  waMessageId: text("wa_message_id").unique(),
+  sentAt: integer("sent_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: createdAt(),
+});
+
 export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task";
 
 export const jobs = sqliteTable("jobs", {
@@ -197,3 +229,4 @@ export type Approval = typeof approvals.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type ActivityEvent = typeof activityEvents.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
+export type HumanMessage = typeof humanMessages.$inferSelect;

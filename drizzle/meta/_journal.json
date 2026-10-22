@@ -36,6 +36,13 @@
       "when": 1792620249028,
       "tag": "0004_task_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792637973851,
+      "tag": "0005_human_teammates",
+      "breakpoints": true
     }
   ]
 }
