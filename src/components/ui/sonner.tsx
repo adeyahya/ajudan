@@ -14,6 +14,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme="light"
       position="bottom-left"
+      // Phone: clear the 56px bottom bar (and the home indicator).
+      mobileOffset={{ bottom: "calc(72px + env(safe-area-inset-bottom))" }}
       duration={4000}
       gap={8}
       className="toaster group"

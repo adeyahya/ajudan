@@ -390,6 +390,9 @@ html[data-sidebar="collapsed"] {
 html[data-sidebar="collapsed"] .app-sidebar {
   border-right-color: transparent;
 }
+html[data-sidebar="collapsed"] .sidebar-resize {
+  display: none;
+}
 /* Collapsible sidebar sections (state on <html data-sec-<name>="closed">). */
 html[data-sec-workspace="closed"] [data-sec-body="workspace"],
 html[data-sec-settings="closed"] [data-sec-body="settings"] {

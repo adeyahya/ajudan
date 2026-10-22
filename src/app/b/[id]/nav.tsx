@@ -204,13 +204,17 @@ function ShellInner({ businessId, businessName, teammates, workerRunning, childr
   }
 
   // Tell the owner once per session when nothing will run.
+  // Deferred: the Toaster subscribes in its own effect, and a toast sent before that is lost.
   useEffect(() => {
     if (workerRunning) return;
-    try {
-      if (sessionStorage.getItem("ajudan:worker-toast")) return;
-      sessionStorage.setItem("ajudan:worker-toast", "1");
-    } catch {}
-    toast.error(t("nav.workerDown"), { description: t("workerBanner.toast"), id: "worker-down" });
+    const timer = setTimeout(() => {
+      try {
+        if (sessionStorage.getItem("ajudan:worker-toast")) return;
+        sessionStorage.setItem("ajudan:worker-toast", "1");
+      } catch {}
+      toast.error(t("nav.workerDown"), { description: t("workerBanner.toast"), id: "worker-down" });
+    }, 600);
+    return () => clearTimeout(timer);
   }, [workerRunning, t]);
 
   const newPage = () => {
@@ -229,10 +233,12 @@ function ShellInner({ businessId, businessName, teammates, workerRunning, childr
       <div data-business-shell className="flex min-h-dvh w-full">
         <aside
           aria-label={t("nav.menu")}
-          className="app-sidebar app-sidebar-panel sticky top-0 z-30 hidden h-dvh shrink-0 overflow-hidden border-r border-border bg-sidebar transition-[width,border-color] duration-200 ease-(--ease) md:block"
+          className="app-sidebar app-sidebar-panel sticky top-0 z-30 hidden h-dvh shrink-0 border-r border-border bg-sidebar transition-[width,border-color] duration-200 ease-(--ease) md:block"
         >
-          <div className="h-full w-(--sidebar-w-open)">
-            <SidebarContent {...sidebarProps} onCollapse={() => setCollapsedDom(true)} />
+          <div className="h-full overflow-hidden">
+            <div className="h-full w-(--sidebar-w-open)">
+              <SidebarContent {...sidebarProps} onCollapse={() => setCollapsedDom(true)} />
+            </div>
           </div>
           <ResizeHandle />
         </aside>
@@ -498,9 +504,9 @@ function ResizeHandle() {
         html().style.removeProperty("--sidebar-w-open");
         store(WIDTH_KEY, null);
       }}
-      className="group absolute inset-y-0 -right-0.5 z-10 w-1.5 cursor-col-resize"
+      className="sidebar-resize group absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize"
     >
-      <span className="absolute inset-y-0 right-0.5 w-px bg-transparent transition-colors duration-100 group-hover:bg-border-strong group-active:bg-ring" />
+      <span className="absolute inset-y-0 right-[3.5px] w-px bg-transparent transition-colors duration-100 group-hover:bg-border-strong group-active:bg-ring" />
     </div>
   );
 }
