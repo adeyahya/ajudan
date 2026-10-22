@@ -4,8 +4,7 @@ import { Suspense } from "react";
 import { Card, PageSkeleton } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { t, uiLang } from "@/lib/i18n";
-import { OfficeShell } from "./office/office-shell";
-import { loadOffice } from "./office/state";
+import { ChatHome } from "./_chat/chat-home";
 
 export default function BusinessHomePage(props: PageProps<"/b/[id]">) {
   return (
@@ -43,10 +42,8 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
     );
   }
 
-  const { state, events, now } = await loadOffice(id);
-  return (
-    <OfficeShell businessId={id} businessName={business.name} initialState={state} initialEvents={events} initialNow={now} />
-  );
+  // Hired: home is the conversation with the manager, with the office above it (the full office is /b/[id]/office).
+  return <ChatHome business={business} lang={lang} />;
 }
 
 function StatusCard({ title, body, href, cta }: { title: string; body: string; href: string; cta: string }) {

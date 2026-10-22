@@ -2,33 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLang, useT, useTn } from "@/components/i18n";
-import { useActivity } from "@/components/live";
 import { Avatar, Badge, Card, cn } from "@/components/kit";
-import type { ActivityEvent } from "@/db/schema";
 import { OfficeCanvas } from "./office-canvas";
 import type { OfficeState, OfficeTeammate } from "./state";
 import { TaskForm } from "./task-form";
 import { layoutFor, TILE } from "./room";
-import { EFFECT_TYPES, type FeedEvent, type OfficeEffect, relativeTime, STATE_LABEL, STATE_TONE } from "./types";
-
-const DESKTOP_QUERY = "(min-width: 768px)";
-
-function subscribeDesktop(cb: () => void) {
-  const mq = window.matchMedia(DESKTOP_QUERY);
-  mq.addEventListener("change", cb);
-  return () => mq.removeEventListener("change", cb);
-}
-
-/** True at >=768px. False during SSR, so the office canvas only mounts on wide screens in the browser. */
-function useIsDesktop() {
-  return useSyncExternalStore(
-    subscribeDesktop,
-    () => window.matchMedia(DESKTOP_QUERY).matches,
-    () => false,
-  );
-}
+import { type FeedEvent, relativeTime, STATE_LABEL, STATE_TONE } from "./types";
+import { useIsDesktop, useOfficeLive } from "./use-office-live";
 
 export function OfficeShell({
   businessId,
@@ -47,57 +29,8 @@ export function OfficeShell({
   const tr = useT();
   const tn = useTn();
   const isDesktop = useIsDesktop();
-  const [state, setState] = useState(initialState);
-  const [feed, setFeed] = useState<FeedEvent[]>(() => [...initialEvents].reverse());
-  const [now, setNow] = useState(initialNow);
+  const { state, feed, now, effects } = useOfficeLive(businessId, initialState, initialNow, initialEvents);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [effects, setEffects] = useState<OfficeEffect[]>([]);
-
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const fetchSeq = useRef(0);
-
-  const refetch = useCallback(() => {
-    clearTimeout(refetchTimer.current);
-    refetchTimer.current = setTimeout(async () => {
-      const seq = ++fetchSeq.current;
-      try {
-        const res = await fetch(`/api/b/${businessId}/state`, { cache: "no-store" });
-        if (!res.ok) return;
-        const next = (await res.json()) as OfficeState;
-        if (seq === fetchSeq.current) setState(next);
-      } catch {
-        // Network blip: the next event refetches again.
-      }
-    }, 300);
-  }, [businessId]);
-
-  useActivity(businessId, (e: ActivityEvent) => {
-    setFeed((prev) => (prev.some((p) => p.id === e.id) ? prev : [e, ...prev].slice(0, 100)));
-    setNow(Date.now());
-    if (EFFECT_TYPES.has(e.type)) {
-      const data = (e.data ?? {}) as { from?: unknown; to?: unknown };
-      const fx: OfficeEffect = {
-        key: e.id,
-        type: e.type as OfficeEffect["type"],
-        teammateId: e.teammateId,
-        from: typeof data.from === "string" ? data.from : undefined,
-        to: typeof data.to === "string" ? data.to : undefined,
-      };
-      if (fx.type !== "delegated" || (fx.from && fx.to)) {
-        setEffects((prev) => [...prev, fx].slice(-30));
-        setTimeout(() => setEffects((prev) => prev.filter((x) => x.key !== fx.key)), 8000);
-      }
-    }
-    refetch();
-  });
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000);
-    return () => {
-      clearInterval(t);
-      clearTimeout(refetchTimer.current);
-    };
-  }, []);
 
   const byId = useMemo(() => new Map(state.teammates.map((t) => [t.id, t])), [state.teammates]);
   const selected = selectedId ? byId.get(selectedId) : undefined;

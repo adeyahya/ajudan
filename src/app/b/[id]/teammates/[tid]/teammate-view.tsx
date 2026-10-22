@@ -285,8 +285,9 @@ function toMessages(
 /**
  * A teammate's chat page. With `manager`, it's the owner's main conversation: team
  * updates appear as the manager's messages, and each reply lists what was delegated.
+ * `embedded` (the chat home): only the conversation, filling its parent's height.
  */
-export async function TeammateView({ id, tid, manager = false }: { id: string; tid: string; manager?: boolean }) {
+export async function TeammateView({ id, tid, manager = false, embedded = false }: { id: string; tid: string; manager?: boolean; embedded?: boolean }) {
   const [biz, data] = await Promise.all([getBusiness(id), loadTeammate(id, tid)]);
   if (!biz || !data) notFound();
   const lang = uiLang(biz.language);
@@ -299,12 +300,12 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
   const schedule = scheduleStatuses([t]).get(t.id);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
+    <div className={embedded ? "flex h-full min-h-0 flex-col" : "grid gap-6 lg:grid-cols-[1fr_19rem]"}>
       <LiveRefresh businessId={id} />
 
-      <section className="flex h-[calc(100dvh-8.75rem)] min-w-0 flex-col">
+      <section className={embedded ? "flex min-h-0 min-w-0 flex-1 flex-col" : "flex h-[calc(100dvh-var(--chrome-h,8.75rem))] min-w-0 flex-col"}>
         <div className="flex items-center gap-3 border-b pb-3">
-          <Link href={`/b/${id}`} className="text-xs text-muted-foreground hover:text-foreground">
+          <Link href={`/b/${id}/office`} className="text-xs text-muted-foreground hover:text-foreground">
             {tr(lang, "mate.backToOffice")}
           </Link>
           <Avatar seed={t.id} name={t.name} color={t.color} size={36} />
@@ -346,7 +347,7 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
         />
       </section>
 
-      <aside className="space-y-4 lg:pt-1">
+      <aside className={embedded ? "hidden" : "space-y-4 lg:pt-1"}>
         <Card className="space-y-3 p-4">
           <div className="flex items-center gap-3">
             <Avatar seed={t.id} name={t.name} color={t.color} size={44} />
@@ -510,7 +511,7 @@ async function HumanView({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
       <LiveRefresh businessId={businessId} />
-      <section className="flex h-[calc(100dvh-8.75rem)] min-w-0 flex-col">
+      <section className="flex h-[calc(100dvh-var(--chrome-h,8.75rem))] min-w-0 flex-col">
         <div className="flex items-center gap-3 border-b pb-3">
           <Link href={`/b/${businessId}/team`} className="text-xs text-muted-foreground hover:text-foreground">
             {tr(lang, "mate.backToTeam")}

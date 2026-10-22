@@ -113,7 +113,7 @@ export async function hireTeam(businessId: string) {
   }
   db.update(schema.businesses).set({ status: "active" }).where(eq(schema.businesses.id, businessId)).run();
   ensureManager(businessId);
-  redirect(`/b/${businessId}/manager`);
+  redirect(`/b/${businessId}`);
 }
 
 export async function addTeammate(businessId: string, _prev: FormState, formData: FormData): Promise<FormState> {

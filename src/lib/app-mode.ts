@@ -10,6 +10,6 @@ export const pinnedFolder = () => (IN_APP ? (process.env.AJUDAN_DATA_DIR ?? null
 
 export function routeFor(businessId: string, status: string | null) {
   if (status === "onboarding") return `/b/${businessId}/onboarding`;
-  if (status === "active") return `/b/${businessId}/manager`;
+  if (status === "active") return `/b/${businessId}`;
   return `/b/${businessId}/team`;
 }
