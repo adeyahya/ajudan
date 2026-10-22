@@ -111,6 +111,17 @@ export function onTaskFinished(taskId: string) {
     )
     .join("\n\n");
 
+  // Children that finish together: one report, not two. A report still queued for
+  // this request gets the new results added instead of a second task.
+  const queued = all.find((c) => c.createdBy === REPORT && c.status === "queued");
+  if (queued) {
+    db.update(schema.tasks)
+      .set({ instructions: queued.instructions.replace("\n\nReport back to the owner now:", `\n\n${results}\n\nReport back to the owner now:`) })
+      .where(eq(schema.tasks.id, queued.id))
+      .run();
+    return;
+  }
+
   createTask({
     businessId: task.businessId,
     teammateId: manager.id,

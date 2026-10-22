@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm db:migrate && concurrently -k -n web,worker -c blue,magenta \"next dev\" \"pnpm worker\"",
+    "dev": "pnpm db:migrate && concurrently -k -n web,worker -c blue,magenta \"next dev -H 127.0.0.1\" \"pnpm worker\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "web": "next dev",
+    "web": "next dev -H 127.0.0.1",
     "worker": "NODE_OPTIONS=--disable-warning=CLAUDE_SDK_CAN_USE_TOOL_SHADOWED tsx watch --clear-screen=false worker/index.ts",
     "worker:once": "tsx worker/index.ts --once",
     "typecheck": "next typegen && tsc --noEmit",

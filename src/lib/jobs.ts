@@ -1,7 +1,11 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Job, JobKind } from "@/db/schema";
+import { logEvent } from "@/lib/events";
 import { MANAGER_ROLE } from "@/lib/roles";
+
+/** A job found "running" after this many claims (worker crashes mid-run) fails for good. */
+export const MAX_ATTEMPTS = 3;
 
 /** Payload shape per job kind. */
 export type JobPayloads = {
@@ -60,12 +64,61 @@ export function finishJob(id: number, error?: unknown) {
     .run();
 }
 
-/** Put a job back in the queue (its folder was closed mid-run). */
+/** Put a job back in the queue (its folder was closed mid-run). Doesn't count as a try. */
 export function requeueJob(id: number) {
-  db.update(schema.jobs).set({ status: "queued", startedAt: null }).where(eq(schema.jobs.id, id)).run();
+  db.update(schema.jobs)
+    .set({ status: "queued", startedAt: null, attempts: sql`max(${schema.jobs.attempts} - 1, 0)` })
+    .where(eq(schema.jobs.id, id))
+    .run();
 }
 
-/** Jobs left "running" by a worker that crashed go back to the queue on startup. */
+/**
+ * Jobs left "running" by a worker that crashed go back to the queue on startup.
+ * One that has already been tried MAX_ATTEMPTS times is the likely cause of the
+ * crash: it fails instead (and so does its task), so it can't loop forever.
+ */
 export function requeueStaleJobs() {
-  db.update(schema.jobs).set({ status: "queued" }).where(eq(schema.jobs.status, "running")).run();
+  const stale = db.select().from(schema.jobs).where(eq(schema.jobs.status, "running")).all();
+  for (const job of stale) {
+    if (job.attempts < MAX_ATTEMPTS) {
+      db.update(schema.jobs).set({ status: "queued" }).where(eq(schema.jobs.id, job.id)).run();
+      continue;
+    }
+    const reason = `Gave up after ${job.attempts} tries: the worker stopped while running it`;
+    finishJob(job.id, reason);
+    console.error(`[worker] job #${job.id} ${job.kind} failed: ${reason}`);
+    failJobWork(job, reason);
+  }
+}
+
+/** Mark what a capped job was working on as failed and tell the activity feed. */
+function failJobWork(job: Job, reason: string) {
+  const payload = job.payload as { taskId?: string; businessId?: string };
+  if (job.kind === "run_task") {
+    if (!payload.taskId) return;
+    const task = db
+      .update(schema.tasks)
+      .set({ status: "failed", result: reason, finishedAt: new Date() })
+      .where(and(eq(schema.tasks.id, payload.taskId), inArray(schema.tasks.status, ["queued", "running", "waiting_approval", "waiting_human"])))
+      .returning()
+      .get();
+    if (!task) return;
+    db.update(schema.teammates)
+      .set({ state: "error", currentActivity: `Task failed: ${reason}`.slice(0, 140) })
+      .where(eq(schema.teammates.id, task.teammateId))
+      .run();
+    logEvent({
+      businessId: task.businessId,
+      teammateId: task.teammateId,
+      taskId: task.id,
+      type: "task_failed",
+      message: `"${task.title}" failed: ${reason}`,
+      data: { jobId: job.id },
+    });
+    return;
+  }
+  if (!payload.businessId) return;
+  // Interview and team design: free the chat so the owner can try again.
+  db.update(schema.businesses).set({ busy: false }).where(eq(schema.businesses.id, payload.businessId)).run();
+  logEvent({ businessId: payload.businessId, type: "job_failed", message: `${job.kind} failed: ${reason}`, data: { jobId: job.id } });
 }
