@@ -6,6 +6,7 @@ import { Card, PageSkeleton } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { ensureManager } from "@/lib/manager";
 import { TeammateView } from "../teammates/[tid]/teammate-view";
+import { WhatsappChecklist } from "./whatsapp-checklist";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -36,5 +37,15 @@ async function Content({ params }: Params) {
   }
   const manager = ensureManager(id);
   if (!manager) notFound();
-  return <TeammateView id={id} tid={manager.id} manager />;
+  return (
+    <>
+      {!biz.ownerHumanId && (
+        // Its own boundary: checking the WhatsApp link shells out to wacli and shouldn't hold up the chat.
+        <Suspense fallback={null}>
+          <WhatsappChecklist businessId={id} allowedChats={biz.whatsappChats.length} />
+        </Suspense>
+      )}
+      <TeammateView id={id} tid={manager.id} manager />
+    </>
+  );
 }
