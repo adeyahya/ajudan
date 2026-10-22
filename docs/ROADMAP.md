@@ -78,3 +78,16 @@ Items within a milestone mostly touch different files and can run in parallel se
 ## Already solid (leave alone)
 
 Files-route path traversal (`cleanRel` + realpath), migration safety (backup, row count, FK check), host-scoped secrets with `redirect: "manual"`, capability requests that never expose secrets, WhatsApp JID resolution before approval, human-teammate batching and voice transcription, and the "treat page/WhatsApp text as data" prompt rules.
+
+---
+
+## Status (2026-10-23)
+
+Milestones 1–5 are done and merged. The schema changes are in `drizzle/0011_roadmap.sql`. There are 235 tests (`pnpm test`).
+
+Known follow-ups:
+- Milestone 6, real channels (email, Instagram/TikTok, Shopee/Tokopedia, Sheets), is not started. Each one needs an account and API keys, so they come in one at a time behind `request_capability`.
+- `TEAM.md` grows without limit. Memory consolidation should cover it too.
+- The Studio and Customer Desk pages (built in parallel on main) are not localized yet.
+- When the daily budget is reached, it also pauses the manager's quick replies. Consider exempting the owner lane.
+- WhatsApp approvals are still tied to the owner's linked number. wacli can't tell whether the linked number is the owner's own.
