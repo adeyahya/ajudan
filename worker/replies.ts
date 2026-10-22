@@ -17,6 +17,12 @@ import { isRealMessage, listMessages } from "@/lib/whatsapp";
 import { QUIET_MS, readIncoming } from "./humans";
 
 export const REPLY = "system:reply";
+/** Title prefix of the "no reply in time" reminder tasks (a cheap, quick decision). */
+export const REMINDER_TITLE = "No reply yet from ";
+
+export function isReminderTask(task: { createdBy: string; title: string }) {
+  return task.createdBy === REPLY && task.title.startsWith(REMINDER_TITLE);
+}
 
 export async function pollWatches(business: Business) {
   const watches = activeWatches(business.id);
@@ -102,7 +108,7 @@ function remind(business: Business, w: WaWatch) {
   createTask({
     businessId: business.id,
     teammateId: target.id,
-    title: `No reply yet from ${w.name}`.slice(0, 80),
+    title: `${REMINDER_TITLE}${w.name}`.slice(0, 80),
     createdBy: REPLY,
     parentTaskId: sentBy?.parentTaskId ?? null,
     instructions: `${w.name} hasn't replied on WhatsApp within ${hours} h to the message you sent${w.purpose ? ` (to get: ${w.purpose})` : ""}:

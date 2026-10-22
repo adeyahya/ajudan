@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logEvent } from "@/lib/events";
 import { enqueueJob } from "@/lib/jobs";
@@ -10,6 +11,30 @@ export function deriveTaskTitle(instructions: string) {
   const cut = clean.slice(0, 60);
   const space = cut.lastIndexOf(" ");
   return `${(space > 30 ? cut.slice(0, space) : cut).replace(/[,.;:]$/, "")}…`;
+}
+
+/**
+ * How many delegations deep a task may sit (owner → manager = 0, → teammate = 1,
+ * → another teammate = 2). Beyond this, assign_task refuses.
+ */
+export const MAX_DELEGATION_DEPTH = 2;
+
+/** Number of parentTaskId hops from this task up to the original request. */
+export function delegationDepth(taskId: string) {
+  const seen = new Set<string>();
+  let depth = 0;
+  let id: string | null = taskId;
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const row: { parentTaskId: string | null } | undefined = db
+      .select({ parentTaskId: schema.tasks.parentTaskId })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, id))
+      .get();
+    id = row?.parentTaskId ?? null;
+    if (id) depth++;
+  }
+  return depth;
 }
 
 /**

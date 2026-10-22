@@ -1,13 +1,23 @@
 import { Cron } from "croner";
 import type { Autonomy } from "@/db/schema";
 
-/** Returns the trimmed cron expression if croner accepts it, else null. */
+/** Scheduled runs may not come closer together than this (each run is a paid Claude run). */
+export const MIN_CRON_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * Returns the trimmed cron expression if croner accepts it and it never fires more
+ * than once an hour, else null.
+ */
 export function validCron(expr: string | null | undefined): string | null {
   const e = expr?.trim();
   if (!e) return null;
   try {
     const job = new Cron(e, { paused: true });
+    const runs = job.nextRuns(12);
     job.stop();
+    for (let i = 1; i < runs.length; i++) {
+      if (runs[i].getTime() - runs[i - 1].getTime() < MIN_CRON_INTERVAL_MS) return null;
+    }
     return e;
   } catch {
     return null;

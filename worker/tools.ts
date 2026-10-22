@@ -16,7 +16,7 @@ import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from 
 import { renderHtmlToPng } from "@/lib/images";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
-import { createTask } from "@/lib/tasks";
+import { createTask, delegationDepth, MAX_DELEGATION_DEPTH } from "@/lib/tasks";
 import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
@@ -629,14 +629,19 @@ export function createBizServer(ctx: BizContext) {
           const files = (a.files ?? []).map((f: string) => f.replace(/^\.?\//, ""));
           const unknown = files.filter((f: string) => !isServablePath(f) || !fs.existsSync(path.join(dataDir(), f)));
           if (unknown.length) return fail(`Unknown file(s): ${unknown.join(", ")}. Use media/… or work/… paths.`);
+          // The manager's report-back waits for everything delegated from this task.
+          const parentTaskId = ctx.isManager ? taskId : null;
+          // Chains of hand-offs multiply cost without adding work: stop them early.
+          if (delegationDepth(taskId) + 1 > MAX_DELEGATION_DEPTH) {
+            return fail("This request has already been handed on too many times. Do the work yourself or tell the owner what's missing.");
+          }
           const task = createTask({
             businessId,
             teammateId: target.id,
             instructions: a.instructions,
             attachments: files,
             createdBy: `teammate:${teammate.id}`,
-            // The manager's report-back waits for everything delegated from this task.
-            parentTaskId: ctx.isManager ? taskId : null,
+            parentTaskId,
           });
           ev("delegated", `${teammate.name} asked ${target.name}: ${task.title}`, {
             from: teammate.id,

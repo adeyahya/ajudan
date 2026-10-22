@@ -64,6 +64,53 @@ describe("laneOf", () => {
     expect(laneOf({ kind: "run_task", payload: { taskId: "missing" } })).toBe("team");
     expect(laneOf({ kind: "run_task", payload: {} })).toBe("team");
   });
+
+  it("puts memory consolidation in the team lane", () => {
+    expect(laneOf({ kind: "consolidate_memory", payload: { teammateId: "x" } })).toBe("team");
+  });
+});
+
+describe("daily budget", () => {
+  const spend = (usd: number, finishedAt = new Date()) =>
+    db.update(schema.tasks).set({ status: "done", costUsd: usd, finishedAt }).where(eq(schema.tasks.id, teamTaskId)).run();
+  const budgetEvents = () =>
+    db.select().from(schema.activityEvents).where(eq(schema.activityEvents.type, "budget_reached")).all();
+
+  it("defaults to $20 a day and claims while under it", () => {
+    expect(db.select().from(schema.businesses).get()?.dailyBudgetUsd).toBe(20);
+    spend(19.5);
+    const id = enqueueJob("run_task", { taskId: managerTaskId });
+    expect(claimJob()?.id).toBe(id);
+    expect(budgetEvents()).toHaveLength(0);
+  });
+
+  it("leaves task jobs queued once today's spend reaches the cap, with one event a day", () => {
+    spend(20);
+    const task = enqueueJob("run_task", { taskId: managerTaskId });
+    const other = enqueueJob("design_team", { businessId });
+    expect(claimJob("owner")?.id).toBe(other); // not a task: unaffected
+    expect(claimJob()).toBeUndefined();
+    expect(claimJob("owner")).toBeUndefined();
+    expect(jobRow(task)).toMatchObject({ status: "queued", attempts: 0 });
+    const events = budgetEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].message).toContain("$20.00");
+    expect(events[0].businessId).toBe(businessId);
+  });
+
+  it("claims again when the owner raises the cap", () => {
+    spend(20);
+    const task = enqueueJob("run_task", { taskId: managerTaskId });
+    expect(claimJob()).toBeUndefined();
+    db.update(schema.businesses).set({ dailyBudgetUsd: 50 }).where(eq(schema.businesses.id, businessId)).run();
+    expect(claimJob()?.id).toBe(task);
+  });
+
+  it("only counts tasks finished today", () => {
+    spend(100, new Date(Date.now() - 2 * 24 * 3600 * 1000));
+    const task = enqueueJob("run_task", { taskId: managerTaskId });
+    expect(claimJob()?.id).toBe(task);
+  });
 });
 
 describe("claimJob", () => {

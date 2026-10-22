@@ -5,6 +5,7 @@
 import { Cron } from "croner";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { validCron } from "@/lib/onboarding/schedule";
 import { createTask } from "@/lib/tasks";
 
 const SYNC_MS = 60_000;
@@ -58,6 +59,11 @@ export function syncSchedules() {
     if (existing && existing.pattern === pattern && existing.prompt === prompt) continue;
     existing?.cron.stop();
     jobs.delete(t.id);
+    // A schedule saved before the hourly minimum existed (or edited by hand) doesn't run.
+    if (!validCron(pattern)) {
+      console.error(`[scheduler] schedule "${pattern}" for ${t.name} is invalid or runs more than once an hour; skipped`);
+      continue;
+    }
     try {
       const cron = new Cron(pattern, { protect: true, catch: (e) => console.error("[scheduler]", e) }, () => {
         fire(t.id);

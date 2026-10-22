@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { closeBrowser, ensureBrowser, normalizeSites } from "@/lib/browser";
+import { parseBudget } from "@/lib/budget";
 import { parseLanguage } from "@/lib/language";
 import { cancelLink, startLink, unlinkRequestPath, whatsappDir } from "@/lib/whatsapp";
 import fs from "node:fs";
@@ -149,6 +150,14 @@ export async function saveSecretAction(businessId: string, _prev: { error?: stri
 
 export async function deleteSecretAction(businessId: string, name: string) {
   await deleteSecret(businessId, name);
+  refresh();
+}
+
+/** The most the team may spend per day; queued work waits once it's reached. */
+export async function saveDailyBudget(businessId: string, fd: FormData) {
+  const dailyBudgetUsd = parseBudget(fd.get("budget"));
+  if (dailyBudgetUsd === null) throw new Error("The daily budget must be a positive amount in dollars");
+  db.update(schema.businesses).set({ dailyBudgetUsd }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }
 

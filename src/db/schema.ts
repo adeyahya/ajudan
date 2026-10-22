@@ -44,6 +44,8 @@ export const businesses = sqliteTable("businesses", {
   ownerHumanId: text("owner_human_id"),
   /** Domains teammates' sandboxed shell may reach (e.g. "api.orucraft.com"). */
   networkDomains: text("network_domains", { mode: "json" }).$type<string[]>().notNull().default([]),
+  /** Most the team may spend (sum of tasks.costUsd) per server-local day; see src/lib/budget.ts. */
+  dailyBudgetUsd: real("daily_budget_usd").notNull().default(20),
   createdAt: createdAt(),
 });
 
@@ -264,7 +266,7 @@ export const waWatches = sqliteTable("wa_watches", {
   createdAt: createdAt(),
 });
 
-export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task";
+export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory";
 
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
