@@ -32,7 +32,7 @@ const OWNER_CONCURRENCY = Number(process.env.AJUDAN_OWNER_CONCURRENCY ?? 2);
 const LIVE_CONCURRENCY = Number(process.env.AJUDAN_LIVE_CONCURRENCY ?? 2);
 const once = process.argv.includes("--once");
 
-const running: Record<Lane, number> = { owner: 0, live: 0, team: 0 };
+const running: Record<Lane, number> = { owner: 0, live: 0, team: 0, studio: 0 };
 const inflight = new Set<Promise<void>>();
 let folder: string | null = null;
 let switching = false;
@@ -138,7 +138,7 @@ function tick() {
   }
   if (!folder) return;
   noticeRest();
-  for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY]] as const) {
+  for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY], ["studio", 1]] as const) {
     while (running[lane] < max) {
       const job = claimJob(lane, resting ? (j) => !needsClaude(j) : undefined);
       if (!job) break;

@@ -19,14 +19,16 @@ export function enqueueJob<K extends JobKind>(kind: K, payload: JobPayloads[K]) 
 }
 
 /**
- * Three lanes, each with its own slots in the worker: "owner" is everything the owner is
+ * Four lanes, each with its own slots in the worker: "owner" is everything the owner is
  * waiting on in a chat (the manager, the interview, team design); "live" is someone
- * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work. Nobody
- * waiting for an answer queues behind long teammate runs.
+ * chatting on WhatsApp right now (tasks.urgent); "team" is the teammates' work; "studio"
+ * is Studio renders (one at a time). Nobody waiting for an answer queues behind long runs.
  */
-export type Lane = "owner" | "live" | "team";
+export type Lane = "owner" | "live" | "team" | "studio";
 
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
+  // Studio renders (ffmpeg) are long and need no Claude: their own slot, never in the way of chats.
+  if (job.kind === "render_edit") return "studio";
   if (job.kind !== "run_task") return "owner";
   const taskId = String((job.payload as { taskId?: string }).taskId ?? "");
   const row = db
