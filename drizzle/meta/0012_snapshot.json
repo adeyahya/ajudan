@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bad907f9-f84f-44fc-a714-a5461650b665",
+  "id": "85d438a7-b239-427c-92f6-ea2217e2f390",
   "prevId": "4bad0123-1cff-4a26-adf7-23cf1003662f",
   "tables": {
     "activity_events": {
@@ -912,6 +912,14 @@
             "section"
           ],
           "isUnique": false
+        },
+        "context_pages_key_idx": {
+          "name": "context_pages_key_idx",
+          "columns": [
+            "business_id",
+            "key"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {

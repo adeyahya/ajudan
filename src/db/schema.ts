@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const id = () =>
   text("id")
@@ -419,7 +419,7 @@ export const contextPages = sqliteTable("context_pages", {
   lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
-}, (t) => [index("context_pages_business_idx").on(t.businessId, t.section)]);
+}, (t) => [index("context_pages_business_idx").on(t.businessId, t.section), uniqueIndex("context_pages_key_idx").on(t.businessId, t.key)]);
 
 /** Per teammate, how a page reaches them. No row: the default (defaultReaderMode in src/lib/context.ts). */
 export const contextReaders = sqliteTable("context_readers", {

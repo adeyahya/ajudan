@@ -74,6 +74,12 @@ describe("suggestions", () => {
   });
 });
 
+describe("normalizeMarkdown", () => {
+  it("ignores how the editor writes the same markdown", () => {
+    expect(ctx.normalizeMarkdown("* a\n  + b\nline\\\nnext  \n\n\n\nend\n")).toBe("- a\n  - b\nline\nnext\n\nend");
+  });
+});
+
 describe("search", () => {
   it("ranks title matches first and gives a snippet", () => {
     const pages = [

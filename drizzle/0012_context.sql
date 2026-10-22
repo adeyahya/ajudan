@@ -51,6 +51,7 @@ CREATE TABLE `context_pages` (
 );
 --> statement-breakpoint
 CREATE INDEX `context_pages_business_idx` ON `context_pages` (`business_id`,`section`);--> statement-breakpoint
+CREATE UNIQUE INDEX `context_pages_key_idx` ON `context_pages` (`business_id`,`key`);--> statement-breakpoint
 CREATE TABLE `context_readers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`page_id` text NOT NULL,

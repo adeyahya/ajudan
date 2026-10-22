@@ -73,6 +73,8 @@ export function ensureContextWorkspace(businessId: string) {
     if (have.has(key)) return;
     db.insert(schema.contextPages)
       .values({ businessId, key, section: v.section, title: v.title, body: v.body ?? "", kind: v.kind ?? "page", source: v.source ?? null, sortOrder: v.order, createdBy: "system", updatedBy: "system", updatedAt: now() })
+      // The web app and the worker may both seed at once: one wins (unique business + key).
+      .onConflictDoNothing()
       .run();
     have.add(key);
   };
