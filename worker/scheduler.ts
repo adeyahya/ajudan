@@ -5,7 +5,9 @@
 import { Cron } from "croner";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { logEvent } from "@/lib/events";
 import { validCron } from "@/lib/onboarding/schedule";
+import { scheduledInstructions } from "@/lib/schedule-context";
 import { createTask } from "@/lib/tasks";
 
 const SYNC_MS = 60_000;
@@ -81,29 +83,50 @@ export function syncSchedules() {
   return jobs.size;
 }
 
-/** Create the scheduled task, unless the previous scheduled run is still pending. */
+/**
+ * Create the scheduled task, with what happened since the previous run in its
+ * instructions (src/lib/schedule-context.ts). When the previous scheduled run is
+ * still queued, running or waiting, this slot is skipped: croner calls this once per
+ * slot, so one `schedule_skipped` event marks it in the activity feed and on the card.
+ */
 export function fire(teammateId: string) {
   const t = db.select().from(schema.teammates).where(eq(schema.teammates.id, teammateId)).get();
   if (!t || t.status !== "active" || !t.schedulePrompt) return undefined;
   const pending = db
-    .select({ id: schema.tasks.id })
+    .select({ id: schema.tasks.id, title: schema.tasks.title, status: schema.tasks.status })
     .from(schema.tasks)
     .where(
       and(
         eq(schema.tasks.teammateId, t.id),
         eq(schema.tasks.createdBy, "schedule"),
-        inArray(schema.tasks.status, ["queued", "running", "waiting_approval"]),
+        inArray(schema.tasks.status, ["queued", "running", "waiting_approval", "waiting_human"]),
       ),
     )
     .get();
   if (pending) {
-    console.log(`[scheduler] ${t.name}: previous scheduled task still pending, skipping`);
+    console.log(`[scheduler] ${t.name}: previous scheduled task still ${pending.status}, skipping`);
+    const why =
+      pending.status === "waiting_approval"
+        ? "it's waiting for your approval"
+        : pending.status === "waiting_human"
+          ? "it's waiting for a person's reply"
+          : pending.status === "queued"
+            ? "it hasn't started yet"
+            : "it's still running";
+    logEvent({
+      businessId: t.businessId,
+      teammateId: t.id,
+      taskId: pending.id,
+      type: "schedule_skipped",
+      message: `${t.name}'s scheduled run was skipped: the previous one ("${pending.title}") isn't finished, ${why}.`,
+      data: { pendingTaskId: pending.id, pendingStatus: pending.status },
+    });
     return undefined;
   }
   return createTask({
     businessId: t.businessId,
     teammateId: t.id,
-    instructions: t.schedulePrompt,
+    instructions: scheduledInstructions(t),
     createdBy: "schedule",
   });
 }

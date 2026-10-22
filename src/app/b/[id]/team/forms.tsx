@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import type { Autonomy } from "@/db/schema";
 import { Button, Input, Label, Textarea } from "@/components/kit";
-import { AUTONOMY_OPTIONS } from "@/lib/onboarding/schedule";
+import { AUTONOMY_OPTIONS, buildCron, DAY_NAMES, describeCron, parseCronPreset, type SchedulePreset } from "@/lib/onboarding/schedule";
 import type { FormState } from "./actions";
 
 type Action = (prev: FormState, fd: FormData) => Promise<FormState>;
@@ -113,17 +113,7 @@ export function TeammateEditor({
           </span>
         </span>
       </label>
-      <div className="grid gap-1">
-        <Label>Recurring schedule (cron, blank for none)</Label>
-        <div className="flex gap-2">
-          <Input name="schedule" value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 9 * * 1  (Mondays 09:00)" />
-          {schedule && (
-            <Button type="button" variant="ghost" onClick={() => setSchedule("")}>
-              Clear
-            </Button>
-          )}
-        </div>
-      </div>
+      <SchedulePicker value={schedule} onChange={setSchedule} />
       {schedule && (
         <div className="grid gap-1">
           <Label>On each run</Label>
@@ -136,6 +126,101 @@ export function TeammateEditor({
         {state.ok && !state.error && <span className="text-xs text-muted-foreground">Saved</span>}
       </div>
     </form>
+  );
+}
+
+type PickerMode = "none" | SchedulePreset["mode"];
+const MODES: { value: PickerMode; label: string }[] = [
+  { value: "none", label: "No recurring work" },
+  { value: "daily", label: "Every day" },
+  { value: "weekdays", label: "Weekdays" },
+  { value: "weekly", label: "Chosen days" },
+  { value: "custom", label: "Custom (cron)" },
+];
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * Daily / weekdays / weekly-on-days at a time, or a raw cron for the rare case. The
+ * cron string goes in the hidden "schedule" field, so the server action is unchanged.
+ */
+function SchedulePicker({ value, onChange }: { value: string; onChange: (cron: string) => void }) {
+  const initial = parseCronPreset(value);
+  const [mode, setMode] = useState<PickerMode>(initial?.mode ?? "none");
+  const [time, setTime] = useState(initial && initial.mode !== "custom" ? `${pad(initial.hour)}:${pad(initial.minute)}` : "09:00");
+  const [days, setDays] = useState<number[]>(initial?.mode === "weekly" ? initial.days : [1]);
+  const [custom, setCustom] = useState(initial?.mode === "custom" ? initial.expr : value);
+
+  const emit = (next: { mode?: PickerMode; time?: string; days?: number[]; custom?: string }) => {
+    const m = next.mode ?? mode;
+    const t = next.time ?? time;
+    const d = next.days ?? days;
+    const c = next.custom ?? custom;
+    if (next.mode !== undefined) setMode(next.mode);
+    if (next.time !== undefined) setTime(next.time);
+    if (next.days !== undefined) setDays(next.days);
+    if (next.custom !== undefined) setCustom(next.custom);
+    if (m === "none") return onChange("");
+    if (m === "custom") return onChange(c.trim());
+    const [h, mi] = t.split(":").map(Number);
+    const preset: SchedulePreset =
+      m === "weekly" ? { mode: "weekly", days: d, hour: h, minute: mi } : { mode: m, hour: h, minute: mi };
+    onChange(buildCron(preset) ?? "");
+  };
+
+  return (
+    <div className="grid gap-2">
+      <input type="hidden" name="schedule" value={value} />
+      <Label>Recurring work</Label>
+      <div className="flex flex-wrap gap-1.5">
+        {MODES.map((o) => (
+          <label
+            key={o.value}
+            className={`cursor-pointer rounded-lg border px-2.5 py-1 text-xs ${mode === o.value ? "border-primary bg-primary/10 font-medium" : "border-border"}`}
+          >
+            <input type="radio" name="scheduleMode" value={o.value} checked={mode === o.value} onChange={() => emit({ mode: o.value })} className="sr-only" />
+            {o.label}
+          </label>
+        ))}
+      </div>
+      {mode === "weekly" && (
+        <div className="flex flex-wrap gap-1.5">
+          {DAY_ORDER.map((d) => {
+            const on = days.includes(d);
+            return (
+              <label
+                key={d}
+                className={`cursor-pointer rounded-lg border px-2 py-1 text-xs ${on ? "border-primary bg-primary/10 font-medium" : "border-border"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => emit({ days: on ? days.filter((x) => x !== d) : [...days, d] })}
+                  className="sr-only"
+                />
+                {DAY_NAMES[d].slice(0, 3)}
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {(mode === "daily" || mode === "weekdays" || mode === "weekly") && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">at</span>
+          <Input type="time" value={time} onChange={(e) => emit({ time: e.target.value || "09:00" })} className="w-32" required />
+        </div>
+      )}
+      {mode === "custom" && (
+        <Input value={custom} onChange={(e) => emit({ custom: e.target.value })} placeholder="0 9 * * 1  (Mondays 09:00)" />
+      )}
+      {mode !== "none" && (
+        <p className="text-xs text-muted-foreground">
+          {value ? describeCron(value) : mode === "weekly" ? "Pick at least one day." : "Enter a cron expression."}
+          {mode === "custom" && value ? ` (${value})` : ""}
+          {mode !== "custom" ? " Runs at most once an hour; times are this computer's." : " Runs at most once an hour."}
+        </p>
+      )}
+    </div>
   );
 }
 

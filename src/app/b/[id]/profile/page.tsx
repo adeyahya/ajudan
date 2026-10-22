@@ -140,8 +140,14 @@ async function Content({ params }: Params) {
           </Section>
         </Card>
         <div className="grid gap-6 content-start">
-        <Card className="p-6">
+        <Card className="p-6 grid gap-3">
           <SpendPanel businessId={id} spend={spend} />
+          <p className="text-xs text-muted-foreground">
+            <Link href={`/b/${id}/health`} className="underline">
+              Jobs &amp; health
+            </Link>
+            : is the worker running, what&apos;s queued, what failed, spend per teammate, last backup.
+          </p>
         </Card>
         <Card className="p-6">
           <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} />

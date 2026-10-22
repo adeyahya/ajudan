@@ -10,6 +10,8 @@ import { lastEventOf } from "@/lib/onboarding/data";
 import { AUTONOMY_OPTIONS, describeCron } from "@/lib/onboarding/schedule";
 import { openRequests } from "@/lib/humans";
 import { ROLE_TEMPLATES } from "@/lib/roles";
+import { scheduleStatuses, type ScheduleStatus } from "@/lib/schedule-context";
+import { ScheduleLine } from "./schedule-line";
 import { addHuman, addTeammate, hireTeam, redesignTeam, removeTeammate, setOwnerHuman, updateHuman, updateTeammate } from "./actions";
 import { AddTeammateForm, HumanForm, PendingSubmit, TeammateEditor } from "./forms";
 
@@ -132,9 +134,13 @@ async function Content({ params }: Params) {
   const roster = everyone.filter((t) => t.kind !== "human");
   const humans = everyone.filter((t) => t.kind === "human");
   const open = openRequests(humans.map((h) => h.id));
+  const schedules = scheduleStatuses(roster);
   return (
     <div>
-      <LiveRefresh businessId={id} types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done"]} />
+      <LiveRefresh
+        businessId={id}
+        types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done", "schedule_skipped", "task_queued", "task_done", "task_failed"]}
+      />
       <PageHeader
         title="Your team"
         subtitle={`${roster.length} AI teammates${humans.length ? ` and ${humans.length} ${humans.length === 1 ? "person" : "people"}` : ""} working for ${biz.name}`}
@@ -142,7 +148,7 @@ async function Content({ params }: Params) {
       <AutonomyLegend />
       <div className="grid gap-4 md:grid-cols-2 mb-8">
         {roster.map((t) => (
-          <TeammateCard key={t.id} t={t} businessId={id} active />
+          <TeammateCard key={t.id} t={t} businessId={id} active schedule={schedules.get(t.id)} />
         ))}
       </div>
       <Card className="p-5 mb-8">
@@ -299,7 +305,7 @@ function AutonomyLegend() {
   );
 }
 
-function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: string; active?: boolean }) {
+function TeammateCard({ t, businessId, active, schedule }: { t: Teammate; businessId: string; active?: boolean; schedule?: ScheduleStatus }) {
   const autonomy = AUTONOMY_OPTIONS.find((o) => o.value === t.autonomy);
   return (
     <Card className="p-5 flex flex-col gap-4">
@@ -347,9 +353,12 @@ function TeammateCard({ t, businessId, active }: { t: Teammate; businessId: stri
         </div>
       )}
       {t.schedule && t.schedulePrompt && (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium">{describeCron(t.schedule)}:</span> {t.schedulePrompt}
-        </p>
+        <div className="grid gap-0.5">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium">{describeCron(t.schedule)}:</span> {t.schedulePrompt}
+          </p>
+          {schedule && <ScheduleLine s={schedule} />}
+        </div>
       )}
       <details className="border-t border-border pt-3">
         <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">Edit</summary>

@@ -48,6 +48,24 @@ export function spentSince(businessId: string, since: Date) {
   return row?.total ?? 0;
 }
 
+/** The business's task costs finished since `since`, per teammate (highest first). */
+export function spentByTeammate(businessId: string, since: Date) {
+  return db
+    .select({
+      teammateId: schema.tasks.teammateId,
+      name: schema.teammates.name,
+      color: schema.teammates.color,
+      total: sql<number>`coalesce(sum(${schema.tasks.costUsd}), 0)`,
+      tasks: sql<number>`count(*)`,
+    })
+    .from(schema.tasks)
+    .innerJoin(schema.teammates, eq(schema.teammates.id, schema.tasks.teammateId))
+    .where(and(eq(schema.tasks.businessId, businessId), gte(schema.tasks.finishedAt, since)))
+    .groupBy(schema.tasks.teammateId, schema.teammates.name, schema.teammates.color)
+    .orderBy(sql`sum(${schema.tasks.costUsd}) desc`)
+    .all();
+}
+
 export function spentToday(businessId: string, now = new Date()) {
   return spentSince(businessId, startOfDay(now));
 }

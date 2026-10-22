@@ -11,7 +11,7 @@ export default function BusinessLayout({ children, params }: LayoutProps<"/b/[id
         <Nav params={params} />
       </Suspense>
       <Suspense fallback={null}>
-        <WorkerBanner />
+        <WorkerBanner params={params} />
       </Suspense>
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">{children}</main>
     </div>

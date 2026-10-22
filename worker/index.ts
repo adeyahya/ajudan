@@ -18,6 +18,7 @@ import { logEvent } from "@/lib/events";
 import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
+import { HEARTBEAT_MS, removeHeartbeat, writeHeartbeat } from "@/lib/worker-heartbeat";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
 import { handlers } from "./handlers";
 import { startMaintenance, stopMaintenance } from "./maintenance";
@@ -37,6 +38,33 @@ let folder: string | null = null;
 let switching = false;
 /** A folder another worker (another Ajudan window, or `pnpm dev`) is working on. */
 let blocked: string | null = null;
+
+const startedAt = new Date().toISOString();
+let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+/** Tell the Health page we're alive and how busy (src/lib/worker-heartbeat.ts). */
+function beat() {
+  if (!folder) return;
+  writeHeartbeat(folder, {
+    pid: process.pid,
+    startedAt,
+    running: { ...running },
+    concurrency: { owner: OWNER_CONCURRENCY, team: CONCURRENCY },
+  });
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  beat();
+  heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
+  heartbeatTimer.unref();
+}
+
+function stopHeartbeat() {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = undefined;
+  if (folder) removeHeartbeat(folder);
+}
 
 /** Which folder the worker should be working on right now. */
 function wantedFolder(): string | null {
@@ -102,6 +130,7 @@ function activate(dir: string | null) {
     .where(and(eq(schema.teammates.state, "waiting"), stillWaiting.length ? notInArray(schema.teammates.id, stillWaiting) : sql`1`))
     .run();
   startMaintenance(dir); // daily backup and pruning; the first run is now
+  startHeartbeat();
   if (!once) {
     startScheduler();
     startWhatsappSync();
@@ -111,6 +140,7 @@ function activate(dir: string | null) {
 }
 
 function stopFolderServices() {
+  stopHeartbeat();
   stopScheduler();
   stopWhatsappSync();
   stopHumanInbox();
@@ -256,7 +286,10 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // Don't leave a wacli sync process holding the WhatsApp store lock behind.
 process.on("exit", () => {
   stopWhatsappSync();
-  if (folder) releaseWorkerLock(folder);
+  if (folder) {
+    removeHeartbeat(folder);
+    releaseWorkerLock(folder);
+  }
 });
 // A forgotten promise mustn't take the whole worker down (and with it every job).
 process.on("unhandledRejection", (reason) => {

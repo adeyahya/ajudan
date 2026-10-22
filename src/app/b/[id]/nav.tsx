@@ -46,6 +46,16 @@ export function BusinessNav({ hideInterview = false }: { hideInterview?: boolean
             </Link>
           );
         })}
+        <Link
+          href={`${base}/health`}
+          title="Jobs & health: worker, queue, failures, spend, backups"
+          className={cn(
+            "ml-auto self-center whitespace-nowrap px-2 pb-1 text-xs hover:text-foreground",
+            pathname === `${base}/health` ? "text-foreground underline" : "text-muted-foreground",
+          )}
+        >
+          Health
+        </Link>
       </div>
     </nav>
   );

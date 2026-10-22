@@ -7,6 +7,7 @@ import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { isServablePath } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
+import { scheduledInstructions } from "@/lib/schedule-context";
 import { cancelTask, createTask, retryTask } from "@/lib/tasks";
 
 function findTeammate(businessId: string, teammateId: string) {
@@ -39,7 +40,7 @@ export async function runScheduledNow(formData: FormData) {
   const teammateId = String(formData.get("teammateId") ?? "");
   const t = findTeammate(businessId, teammateId);
   if (!t.schedulePrompt) throw new Error("No scheduled work defined");
-  createTask({ businessId, teammateId, instructions: t.schedulePrompt, createdBy: "schedule" });
+  createTask({ businessId, teammateId, instructions: scheduledInstructions(t), createdBy: "schedule" });
   refresh();
 }
 

@@ -13,6 +13,8 @@ import { Avatar, Badge, Button, Card, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { resolveWorkspace } from "@/lib/paths";
 import { describeCron } from "@/lib/onboarding/schedule";
+import { scheduleStatuses } from "@/lib/schedule-context";
+import { ScheduleLine } from "@/app/b/[id]/team/schedule-line";
 import { DECISION, REPORT } from "@/lib/manager";
 import { activeWatches, watchState } from "@/lib/watches";
 import { cancelTaskAction, retryTaskAction, runScheduledNow, sendTaskMessage } from "./actions";
@@ -281,6 +283,7 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
   const waiting = tasks.some((task) => task.status === "waiting_approval");
   // The manager's page shows whose WhatsApp replies the team is waiting for.
   const watches = manager ? activeWatches(id) : [];
+  const schedule = scheduleStatuses([t]).get(t.id);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_19rem]">
@@ -361,6 +364,7 @@ export async function TeammateView({ id, tid, manager = false }: { id: string; t
                 <span className="font-medium text-foreground">{t.schedule ? describeCron(t.schedule) : "Scheduled"}:</span>{" "}
                 {t.schedulePrompt}
               </p>
+              {schedule && <ScheduleLine s={schedule} />}
               <Button variant="secondary" size="sm" className="w-full">
                 Run scheduled work now
               </Button>
