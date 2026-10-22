@@ -146,7 +146,22 @@ process.on("exit", () => {
   if (folder) releaseWorkerLock(folder);
 });
 
+/** Started by the desktop app: quit if the app is gone (crashed or force-quit). */
+function exitWithParent() {
+  const parent = Number(process.env.AJUDAN_PARENT_PID);
+  if (!parent) return;
+  setInterval(() => {
+    try {
+      process.kill(parent, 0);
+    } catch {
+      console.log("[worker] the Ajudan app is gone; stopping");
+      process.kill(process.pid, "SIGTERM");
+    }
+  }, 5000).unref();
+}
+
 async function main() {
+  exitWithParent();
   activate(wantedFolder());
   if (once) {
     tick();

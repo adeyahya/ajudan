@@ -79,11 +79,14 @@ function logStream(dir, name) {
 }
 
 function run(name, args, { dir, port }) {
-  const env = { ...process.env, AJUDAN_APP: "1", PORT: String(port ?? ""), NODE_ENV: "production" };
+  // AJUDAN_PARENT_PID: the worker and web server quit by themselves if the app dies.
+  const env = { ...process.env, AJUDAN_APP: "1", AJUDAN_PARENT_PID: String(process.pid), PORT: String(port ?? ""), NODE_ENV: "production" };
   if (dir) env.AJUDAN_DATA_DIR = dir;
   else delete env.AJUDAN_DATA_DIR;
   if (name === "worker") env.NODE_OPTIONS = "--disable-warning=CLAUDE_SDK_CAN_USE_TOOL_SHADOWED";
-  const child = spawn("node", args, { cwd: REPO, env, stdio: ["ignore", "pipe", "pipe"] });
+  // Its own process group: `node` may be a version-manager shim (Volta) and the worker
+  // has children (tsx, wacli), so stopping means signalling the whole group.
+  const child = spawn("node", args, { cwd: REPO, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   const log = logStream(dir, name);
   log.write(`\n--- ${new Date().toISOString()} ${name} start ---\n`);
   child.stdout.pipe(log, { end: false });
@@ -184,19 +187,25 @@ async function openSession(key, dir) {
   }
 }
 
-function stopChild(child, ms = 6000) {
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    const t = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve();
-    }, ms);
-    child.once("exit", () => {
-      clearTimeout(t);
-      resolve();
-    });
-    child.kill("SIGTERM");
-  });
+function signalGroup(child, signal) {
+  try {
+    process.kill(-child.pid, signal);
+    return true;
+  } catch {
+    return false; // the group is gone
+  }
+}
+
+/** SIGTERM the child's whole process group, wait for it to be gone, SIGKILL what's left. */
+async function stopChild(child, ms = 6000) {
+  if (!child?.pid) return;
+  if (!signalGroup(child, "SIGTERM")) return;
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (!signalGroup(child, 0)) return;
+  }
+  signalGroup(child, "SIGKILL");
 }
 
 async function stopSession(key) {
@@ -216,7 +225,17 @@ function ensureBuild(win) {
   building ??= new Promise((resolve, reject) => {
     win.loadURL(loadingPage("Building Ajudan…", "First start: building the web app. This takes a minute."));
     const child = run("build", [path.join(REPO, "node_modules/next/dist/bin/next"), "build"], {});
-    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error("The build failed (see ~/.ajudan/logs/build.log)."))));
+    child.on("exit", async (code) => {
+      if (code === 0) return resolve();
+      // Often another build is running (`pnpm app`, `pnpm build`): wait for its result.
+      win.loadURL(loadingPage("Waiting for the build…", "Another build of Ajudan is running. This window opens when it's done."));
+      const until = Date.now() + 5 * 60_000;
+      while (Date.now() < until) {
+        if (fs.existsSync(path.join(REPO, ".next", "BUILD_ID"))) return resolve();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      reject(new Error("The build failed (see ~/.ajudan/logs/build.log)."));
+    });
   }).finally(() => (building = undefined));
   return building;
 }
