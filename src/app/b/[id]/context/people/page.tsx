@@ -1,18 +1,26 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { desc, eq, like, or, and } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { LiveRefresh } from "@/components/live";
-import { PageSkeleton } from "@/components/kit";
+import { PageBody, Skeleton, TableSkeleton } from "@/components/kit";
 import { listContacts } from "@/lib/contacts";
 import { getBusiness } from "@/lib/data";
 import { contextBase } from "../data";
-import { People, type HistoryItem } from "./people";
+import { People } from "./people";
+import { VIEWS, type HistoryItem, type View } from "./shared";
 
-/** K2: the address book as a database page, with saved views and a contact side-peek. */
+/** The address book as a database page: saved views, a table, and a person side peek (?c=). */
 export default function PeoplePage(props: PageProps<"/b/[id]/context/people">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
+    <Suspense
+      fallback={
+        <PageBody width="wide">
+          <Skeleton className="h-[34px] w-40 rounded-md" />
+          <TableSkeleton rows={8} cols={5} className="mt-10" />
+        </PageBody>
+      }
+    >
       <Content params={props.params} searchParams={props.searchParams} />
     </Suspense>
   );
@@ -20,7 +28,7 @@ export default function PeoplePage(props: PageProps<"/b/[id]/context/people">) {
 
 async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/context/people">["params"]; searchParams: PageProps<"/b/[id]/context/people">["searchParams"] }) {
   const { id } = await params;
-  const { c } = await searchParams;
+  const { c, view } = await searchParams;
   const business = await getBusiness(id);
   if (!business) notFound();
   const { mateViews, managerId } = await contextBase(id);
@@ -32,8 +40,8 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
       <People
         businessId={id}
         contacts={contacts.map((x) => ({ ...x, createdAt: x.createdAt.toISOString() }))}
-        openId={open?.id ?? null}
-        history={open ? history(id, open.name, open.phone) : []}
+        view={VIEWS.includes(view as View) ? (view as View) : "all"}
+        history={open ? { contactId: open.id, items: history(id, open.name, open.phone) } : null}
         mates={mateViews}
         managerId={managerId}
       />

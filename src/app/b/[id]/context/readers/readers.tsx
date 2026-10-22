@@ -1,47 +1,60 @@
 "use client";
 
+import { ArrowUp, FileText, Folder, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { useT } from "@/components/i18n";
-import { Badge, Button, Card, cn, Textarea } from "@/components/kit";
+import { DataTable } from "@/components/data-table";
+import { Avatar, Badge, Button, cn } from "@/components/kit";
 import type { ContextSection, ReaderMode } from "@/db/schema";
 import { setReaderAction, testAskAction } from "../actions";
-import { ModeSwitch } from "../workspace";
+import { ModeSwitch } from "../mode-switch";
 
 type Load = { id: string; label: string; mode: "always" | "fetched" | "memory" | "conversation"; chars: number; truncated: boolean; pageId: string | null };
 
+/** The four kinds of context: always blue, fetched green, memory purple, conversation gray. */
 const COLOR: Record<Load["mode"], string> = {
   always: "bg-primary",
-  fetched: "bg-info",
-  memory: "bg-violet-400",
-  conversation: "bg-good",
+  fetched: "bg-success",
+  memory: "bg-tag-purple-fg/55",
+  conversation: "bg-placeholder",
 };
+const MODES: Load["mode"][] = ["always", "fetched", "memory", "conversation"];
 
-/** How much of the run's context each piece took: a proportional bar, then the list. */
+/** How much of the run's context each piece took: a 6px stacked bar with a legend, then the list. */
 export function LoadBar({ loads, businessId }: { loads: Load[]; businessId: string }) {
   const t = useT();
   const total = loads.reduce((n, l) => n + l.chars, 0) || 1;
+  const present = MODES.filter((m) => loads.some((l) => l.mode === m));
   return (
-    <div className="space-y-2">
-      <div className="flex h-4 w-full overflow-hidden border border-border bg-background">
+    <div>
+      <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-secondary" role="img" aria-label={t("context.readers.barLabel")}>
         {loads.map((l) => (
-          <span key={l.id} className={cn(COLOR[l.mode], "h-full border-r border-frame/60 last:border-r-0")} style={{ width: `${(l.chars / total) * 100}%` }} title={`${l.label}: ${l.chars}`} />
+          <span key={l.id} className={cn(COLOR[l.mode], "h-full")} style={{ width: `${(l.chars / total) * 100}%` }} title={`${l.label}: ${l.chars.toLocaleString()}`} />
         ))}
       </div>
-      <ul className="space-y-1 text-sm">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {present.map((m) => (
+          <span key={m} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className={cn("size-2 rounded-full", COLOR[m])} aria-hidden />
+            {t(`context.readers.load.${m}`)}
+          </span>
+        ))}
+      </div>
+      <ul className="mt-4">
         {loads.map((l) => (
-          <li key={l.id} className="flex items-center gap-2">
-            <span className={cn("size-2.5 shrink-0", COLOR[l.mode])} />
+          <li key={l.id} className="flex h-8 items-center gap-2 border-b border-border/70 text-[13px] last:border-b-0">
+            <span className={cn("size-2 shrink-0 rounded-full", COLOR[l.mode])} aria-hidden />
             {l.pageId ? (
-              <Link href={`/b/${businessId}/context?page=${l.pageId}`} className="min-w-0 flex-1 truncate hover:text-primary">
+              <Link href={`/b/${businessId}/context?page=${l.pageId}`} className="min-w-0 flex-1 truncate hover:underline">
                 {l.label}
               </Link>
             ) : (
               <span className="min-w-0 flex-1 truncate">{l.label}</span>
             )}
-            <span className="text-xs text-muted-foreground">{t(`context.readers.load.${l.mode}`)}</span>
-            {l.truncated && <Badge tone="amber">{t("context.readers.truncated")}</Badge>}
-            <span className="w-28 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{t("context.readers.chars", { count: l.chars.toLocaleString() })}</span>
+            <span className="hidden text-xs text-tertiary sm:inline">{t(`context.readers.load.${l.mode}`)}</span>
+            {l.truncated && <Badge tone="yellow">{t("context.readers.truncated")}</Badge>}
+            <span className="w-24 shrink-0 text-right text-xs text-tertiary tabular-nums">{t("context.readers.chars", { count: l.chars.toLocaleString() })}</span>
           </li>
         ))}
       </ul>
@@ -49,77 +62,130 @@ export function LoadBar({ loads, businessId }: { loads: Load[]; businessId: stri
   );
 }
 
-/** Every page with this teammate's Always / When needed / Never (the same setting as the page's panel). */
-export function PageModes({ businessId, teammateId, pages }: { businessId: string; teammateId: string; pages: { id: string; title: string; section: ContextSection; mode: ReaderMode }[] }) {
+type ModeRow = { id: string; title: string; section: ContextSection; mode: ReaderMode };
+
+/** Every page with this teammate's Always / When needed / Never (the same setting as the page's peek). */
+export function PageModes({ businessId, teammateId, pages }: { businessId: string; teammateId: string; pages: ModeRow[] }) {
   const t = useT();
+  const [rows, setRow] = useOptimistic(pages, (list, r: { id: string; mode: ReaderMode }) => list.map((p) => (p.id === r.id ? { ...p, mode: r.mode } : p)));
   const [, start] = useTransition();
   return (
-    <ul className="divide-y divide-border">
-      {pages.map((p) => (
-        <li key={p.id} className="flex items-center gap-2 py-1.5">
-          <Link href={`/b/${businessId}/context?page=${p.id}`} className="min-w-0 flex-1 truncate text-sm hover:text-primary">
-            {p.title}
-          </Link>
-          <span className="hidden text-[11px] text-muted-foreground sm:inline">{t(`context.section.${p.section}`)}</span>
-          <ModeSwitch value={p.mode} onChange={(mode) => start(() => setReaderAction(businessId, p.id, teammateId, mode))} />
-        </li>
-      ))}
-    </ul>
+    <DataTable
+      label={t("context.readers.pages", { name: "" })}
+      rows={rows}
+      getRowId={(p) => p.id}
+      minWidth={560}
+      columns={[
+        {
+          key: "page",
+          header: t("context.col.page"),
+          icon: <FileText />,
+          cell: (p) => (
+            <Link href={`/b/${businessId}/context?page=${p.id}`} className="hover:underline">
+              {p.title}
+            </Link>
+          ),
+          title: (p) => p.title,
+        },
+        { key: "section", header: t("context.prop.section"), icon: <Folder />, width: 150, cell: (p) => <span className="text-muted-foreground">{t(`context.section.${p.section}`)}</span> },
+        {
+          key: "mode",
+          header: t("context.col.mode"),
+          icon: <SlidersHorizontal />,
+          width: 250,
+          cell: (p) => (
+            <ModeSwitch
+              label={p.title}
+              value={p.mode}
+              onChange={(mode) =>
+                start(async () => {
+                  setRow({ id: p.id, mode });
+                  await setReaderAction(businessId, p.id, teammateId, mode);
+                })
+              }
+            />
+          ),
+        },
+      ]}
+    />
   );
 }
 
 type Ask = { id: string; question: string; answer: string | null; cited: string[]; status: "queued" | "done" | "failed" };
 
 /** A dry run: the worker answers on the fast model from this teammate's context only. */
-export function TestAsk({ businessId, mate, asks, pageIds }: { businessId: string; mate: { id: string; name: string }; asks: Ask[]; pageIds: Record<string, string> }) {
+export function TestAsk({ businessId, mate, asks, pageIds }: { businessId: string; mate: { id: string; name: string; color: string }; asks: Ask[]; pageIds: Record<string, string> }) {
   const t = useT();
   const [q, setQ] = useState("");
   const [pending, start] = useTransition();
   return (
-    <Card className="space-y-3 p-4">
-      <h2 className="text-sm font-semibold">{t("context.ask.title", { name: mate.name })}</h2>
-      <p className="text-[11px] text-muted-foreground">{t("context.ask.help", { name: mate.name })}</p>
+    <section>
+      <h2 className="text-base leading-6 font-semibold">{t("context.ask.title", { name: mate.name })}</h2>
+      <p className="mt-0.5 mb-3 text-[13px] leading-[18px] text-muted-foreground">{t("context.ask.help", { name: mate.name })}</p>
       <form
-        className="space-y-2"
+        className="rounded-lg border border-input bg-background transition-[border-color,box-shadow] duration-100 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!q.trim()) return;
           start(async () => {
             await testAskAction(businessId, mate.id, q);
             setQ("");
           });
         }}
       >
-        <Textarea value={q} onChange={(e) => setQ(e.target.value)} rows={2} placeholder={t("context.ask.placeholder")} className="text-sm" />
-        <Button size="sm" type="submit" disabled={pending || !q.trim()}>
-          {t("context.ask.button")}
-        </Button>
-      </form>
-      {asks.map((a) => (
-        <div key={a.id} className="space-y-1 border-t border-border pt-2 text-sm">
-          <p className="font-medium">{a.question}</p>
-          {a.status === "queued" ? (
-            <p className="text-xs italic text-muted-foreground">{t("context.ask.waiting")}</p>
-          ) : a.status === "failed" ? (
-            <p className="text-xs text-red-400">{t("context.ask.failed")}</p>
-          ) : (
-            <>
-              <p className="whitespace-pre-line">{a.answer}</p>
-              <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-                {a.cited.length ? `${t("context.ask.cited")}:` : t("context.ask.noCited")}
-                {a.cited.map((c) =>
-                  pageIds[c.toLowerCase()] ? (
-                    <Link key={c} href={`/b/${businessId}/context?page=${pageIds[c.toLowerCase()]}`} className="underline hover:text-foreground">
-                      {c}
-                    </Link>
-                  ) : (
-                    <span key={c}>{c}</span>
-                  ),
-                )}
-              </p>
-            </>
-          )}
+        <textarea
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          rows={2}
+          placeholder={t("context.ask.placeholder")}
+          aria-label={t("context.ask.title", { name: mate.name })}
+          className="block min-h-[44px] w-full resize-none bg-transparent px-3 pt-2.5 text-sm leading-[22px] outline-none placeholder:text-placeholder"
+        />
+        <div className="flex justify-end px-2 pb-2">
+          <Button type="submit" size="icon-sm" loading={pending} disabled={!q.trim()} aria-label={t("context.ask.button")}>
+            <ArrowUp />
+          </Button>
         </div>
-      ))}
-    </Card>
+      </form>
+      <div className="mt-4 space-y-4">
+        {asks.map((a) => (
+          <div key={a.id} className="space-y-2">
+            <p className="ml-auto w-fit max-w-[90%] rounded-lg bg-secondary px-3 py-2 text-sm leading-[22px]">{a.question}</p>
+            <div className="grid grid-cols-[20px_1fr] gap-2.5">
+              <Avatar seed={mate.id} name={mate.name} color={mate.color} size={20} />
+              <div className="min-w-0 text-sm leading-[22px]">
+                {a.status === "queued" ? (
+                  <p className="text-[13px] text-muted-foreground">{t("context.ask.waiting")}</p>
+                ) : a.status === "failed" ? (
+                  <p className="text-[13px] text-destructive">{t("context.ask.failed")}</p>
+                ) : (
+                  <>
+                    <p className="whitespace-pre-line">{a.answer}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-tertiary">
+                      {a.cited.length ? `${t("context.ask.cited")}:` : t("context.ask.noCited")}
+                      {a.cited.map((c) =>
+                        pageIds[c.toLowerCase()] ? (
+                          <Link key={c} href={`/b/${businessId}/context?page=${pageIds[c.toLowerCase()]}`} className="rounded-sm bg-hover px-1 text-foreground hover:bg-hover-strong">
+                            {c}
+                          </Link>
+                        ) : (
+                          <span key={c}>{c}</span>
+                        ),
+                      )}
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

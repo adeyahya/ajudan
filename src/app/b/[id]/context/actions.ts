@@ -4,8 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import type { ContextSection, ReaderMode } from "@/db/schema";
-import { saveContact, type ContactInput } from "@/lib/contacts";
-import { createPage, decideSuggestion, deletePage, SECTIONS, setReaderMode, updatePage } from "@/lib/context";
+import { deleteContact, saveContact, type ContactInput } from "@/lib/contacts";
+import { createPage, decideSuggestion, deletePage, movePage, SECTIONS, setReaderMode, updatePage } from "@/lib/context";
 import { t } from "@/lib/i18n";
 import { enqueueJob } from "@/lib/jobs";
 import { ensureManager } from "@/lib/manager";
@@ -34,10 +34,30 @@ export async function renamePageAction(businessId: string, pageId: string, title
   refresh();
 }
 
-export async function movePageAction(businessId: string, pageId: string, section: ContextSection) {
+/** The page's icon: an emoji, "lucide:<name>", "" for none, or null for the default. */
+export async function setIconAction(businessId: string, pageId: string, icon: string | null) {
   ownBusiness(businessId);
-  if (SECTIONS.includes(section)) updatePage(businessId, pageId, { section });
+  updatePage(businessId, pageId, { icon });
   refresh();
+}
+
+/** The page's cover: a folder-relative image ("media/…") or null to remove it. */
+export async function setCoverAction(businessId: string, pageId: string, cover: string | null) {
+  ownBusiness(businessId);
+  updatePage(businessId, pageId, { cover });
+  refresh();
+}
+
+/**
+ * Drag and drop in the tree (and "Move to"): under `parentId` (null: the top of
+ * `section`) at `index` among the new siblings. False when the move isn't allowed.
+ */
+export async function movePageAction(businessId: string, pageId: string, to: { parentId: string | null; section?: ContextSection; index?: number }) {
+  ownBusiness(businessId);
+  if (to.section && !SECTIONS.includes(to.section)) throw new Error("Unknown section");
+  const ok = movePage(businessId, pageId, to);
+  refresh();
+  return ok;
 }
 
 export async function markCheckedAction(businessId: string, pageId: string) {
@@ -46,11 +66,16 @@ export async function markCheckedAction(businessId: string, pageId: string) {
   refresh();
 }
 
-/** A new page in a section; returns its id for the URL. */
-export async function createPageAction(businessId: string, section: ContextSection, title: string) {
+/**
+ * A new page in a section, or under `parentId` (it then takes the parent's section);
+ * returns its id for the URL. The sidebar and the ⌘K palette call it with three arguments.
+ */
+export async function createPageAction(businessId: string, section: ContextSection, title: string, parentId?: string | null) {
   ownBusiness(businessId);
   if (!SECTIONS.includes(section)) throw new Error("Unknown section");
-  return createPage(businessId, { title, section }).id;
+  const id = createPage(businessId, { title, section, parentId: parentId ?? null }).id;
+  refresh();
+  return id;
 }
 
 export async function deletePageAction(businessId: string, pageId: string) {
@@ -75,12 +100,18 @@ export async function decideSuggestionAction(businessId: string, suggestionId: s
   return r;
 }
 
-/** The contact side-peek: summary (notes), kind, tags. */
-export async function saveContactAction(businessId: string, input: ContactInput & { id: string }) {
+/** The person peek: a new person (no id) or an edit. Returns the id. */
+export async function saveContactAction(businessId: string, input: ContactInput & { id?: string }) {
   ownBusiness(businessId);
   const r = saveContact(businessId, input);
   refresh();
-  return "error" in r ? { error: r.error } : { ok: true as const };
+  return "error" in r ? { error: r.error } : { ok: true as const, id: r.contact.id };
+}
+
+export async function deleteContactAction(businessId: string, contactId: string) {
+  ownBusiness(businessId);
+  deleteContact(businessId, contactId);
+  refresh();
 }
 
 /** "Ask <teammate> to follow up": a request to the manager, who hands it on. */
@@ -97,7 +128,7 @@ export async function followUpAction(businessId: string, contactId: string, team
   const instructions = `${ask}${note.trim() ? `\n\n${note.trim()}` : ""}`;
   createTask({ businessId, teammateId: manager.id, instructions, createdBy: "user" });
   refresh();
-  return { ok: true as const, manager: manager.name };
+  return { ok: true as const, manager: manager.name, managerId: manager.id };
 }
 
 /** The inspector's dry run: queued for the worker (all Claude calls happen there). */

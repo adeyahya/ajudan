@@ -1,32 +1,18 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { connection } from "next/server";
-import { PageSkeleton } from "@/components/kit";
-import { listContacts } from "@/lib/contacts";
-import { getBusiness } from "@/lib/data";
-import { t } from "@/lib/i18n";
-import { Contacts } from "./contacts";
+import { TableSkeleton } from "@/components/kit";
 
+/** The address book lives in Konteks → People now (with import and export in its "…" menu). */
 export default function ContactsPage(props: PageProps<"/b/[id]/studio/contacts">) {
   return (
-    <Suspense fallback={<PageSkeleton />}>
-      <Content params={props.params} />
+    <Suspense fallback={<TableSkeleton />}>
+      <Redirect params={props.params} />
     </Suspense>
   );
 }
 
-async function Content({ params }: { params: PageProps<"/b/[id]/studio/contacts">["params"] }) {
+async function Redirect({ params }: { params: PageProps<"/b/[id]/studio/contacts">["params"] }) {
   const { id } = await params;
-  const business = await getBusiness(id);
-  if (!business) notFound();
-  await connection();
-  return (
-    <div className="space-y-3">
-      <Link href={`/b/${id}/context/people`} className="text-xs text-muted-foreground underline hover:text-foreground">
-        {t(business.language, "context.people.inContext")}
-      </Link>
-      <Contacts businessId={id} contacts={listContacts(id)} />
-    </div>
-  );
+  redirect(`/b/${id}/context/people`);
+  return null;
 }

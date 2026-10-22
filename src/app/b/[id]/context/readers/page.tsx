@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import Link from "next/link";
+import { Eye } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { SetBreadcrumb } from "@/components/breadcrumb";
 import { LiveRefresh } from "@/components/live";
-import { Avatar, Card, PageSkeleton, Prose, cn } from "@/components/kit";
+import { Avatar, EmptyState, LineTabs, PageBody, PageSkeleton, Prose, Section } from "@/components/kit";
 import { SECTIONS } from "@/lib/context";
 import { getBusiness } from "@/lib/data";
 import { t, uiLang } from "@/lib/i18n";
@@ -14,7 +15,7 @@ import { resolveWorkspace } from "@/lib/paths";
 import { contextBase, readersFor } from "../data";
 import { LoadBar, PageModes, TestAsk } from "./readers";
 
-/** K3: what a teammate reads (its latest task), how each page reaches it, and a dry-run question. */
+/** What a teammate reads: its latest task's context, how each page reaches it, its memory, and a dry-run question. */
 export default function ReadersPage(props: PageProps<"/b/[id]/context/readers">) {
   return (
     <Suspense fallback={<PageSkeleton />}>
@@ -31,7 +32,13 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
   const lang = uiLang(business.language);
   const { pages, rows, mates } = await contextBase(id);
   const mate = mates.find((m) => m.id === wanted) ?? mates[0];
-  if (!mate) return <Card className="p-6 text-sm text-muted-foreground">{t(lang, "context.notActive")}</Card>;
+  if (!mate) {
+    return (
+      <PageBody>
+        <EmptyState icon={<Eye />} title={t(lang, "context.tab.readers")} body={t(lang, "context.notActive")} />
+      </PageBody>
+    );
+  }
 
   const last = db
     .select({ taskId: schema.contextLoads.taskId })
@@ -59,63 +66,59 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
   const modes = new Map(sorted.map((p) => [p.id, readersFor(p, [mate], rows)[0].mode]));
 
   return (
-    <div className="space-y-4">
+    <PageBody width="wide">
       <LiveRefresh businessId={id} types={["context_ask_done", "task_started", "task_done"]} />
-      <div className="flex flex-wrap gap-1.5">
-        {mates.map((m) => (
-          <Link
-            key={m.id}
-            href={`/b/${id}/context/readers?t=${m.id}`}
-            className={cn(
-              "font-pixel flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-sm",
-              m.id === mate.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Avatar seed={m.id} name={m.name} color={m.color} size={18} />
-            {m.name}
-          </Link>
-        ))}
-      </div>
+      <SetBreadcrumb items={[{ label: t(lang, "context.tab.readers"), href: `/b/${id}/context/readers` }, { label: mate.name }]} />
+      <header className="mb-6">
+        <Eye aria-hidden className="mb-3 size-8 text-foreground" strokeWidth={1.5} />
+        <h1 className="text-[28px] leading-[34px] font-bold tracking-tight">{t(lang, "context.tab.readers")}</h1>
+        <p className="mt-1.5 max-w-[60ch] text-sm leading-[22px] text-muted-foreground">{t(lang, "context.readers.help")}</p>
+      </header>
+      <LineTabs
+        label={t(lang, "context.tab.readers")}
+        className="mb-8"
+        items={mates.map((m) => ({
+          href: `/b/${id}/context/readers?t=${m.id}`,
+          label: m.name,
+          active: m.id === mate.id,
+          icon: <Avatar seed={m.id} name={m.name} color={m.color} size={20} />,
+        }))}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 space-y-4">
-          <Card className="space-y-3 p-4">
-            <h2 className="font-pixel text-lg text-foreground">{t(lang, "context.readers.title", { name: mate.name })}</h2>
-            <p className="text-xs text-muted-foreground">{t(lang, "context.readers.help")}</p>
+      <div className="grid gap-x-12 gap-y-8 2xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0">
+          <Section title={t(lang, "context.readers.title", { name: mate.name })} description={task ? t(lang, "context.readers.latest", { title: task.title }) : undefined}>
             {task ? (
-              <>
-                <p className="text-sm">{t(lang, "context.readers.latest", { title: task.title })}</p>
-                <LoadBar loads={loads.map((l) => ({ id: String(l.id), label: l.label, mode: l.mode, chars: l.chars, truncated: l.truncated, pageId: l.pageId }))} businessId={id} />
-              </>
+              <LoadBar loads={loads.map((l) => ({ id: String(l.id), label: l.label, mode: l.mode, chars: l.chars, truncated: l.truncated, pageId: l.pageId }))} businessId={id} />
             ) : (
-              <p className="text-sm text-muted-foreground">{t(lang, "context.readers.noTask", { name: mate.name })}</p>
+              <p className="text-[13px] text-muted-foreground">{t(lang, "context.readers.noTask", { name: mate.name })}</p>
             )}
-          </Card>
+          </Section>
 
-          <Card className="space-y-2 p-4">
-            <h2 className="text-sm font-semibold">{t(lang, "context.readers.pages", { name: mate.name })}</h2>
+          <Section title={t(lang, "context.readers.pages", { name: mate.name })}>
             <PageModes businessId={id} teammateId={mate.id} pages={sorted.map((p) => ({ id: p.id, title: p.title, section: p.section, mode: modes.get(p.id)! }))} />
-          </Card>
+          </Section>
 
-          <Card className="space-y-2 p-4">
-            <h2 className="text-sm font-semibold">{t(lang, "context.readers.memory", { name: mate.name })}</h2>
-            {memory.trim() ? <Prose className="max-h-72 overflow-y-auto text-xs">{memory}</Prose> : <p className="text-xs text-muted-foreground">{t(lang, "context.readers.noMemory")}</p>}
-          </Card>
+          <Section title={t(lang, "context.readers.memory", { name: mate.name })}>
+            {memory.trim() ? (
+              <div className="max-h-96 overflow-y-auto rounded-lg bg-muted p-4">
+                <Prose className="text-[13px]">{memory}</Prose>
+              </div>
+            ) : (
+              <p className="text-[13px] text-muted-foreground">{t(lang, "context.readers.noMemory")}</p>
+            )}
+          </Section>
         </div>
 
-        <div className="space-y-4">
+        <aside className="min-w-0">
           <TestAsk
             businessId={id}
-            mate={{ id: mate.id, name: mate.name }}
+            mate={{ id: mate.id, name: mate.name, color: mate.color }}
             asks={asks.map((a) => ({ id: a.id, question: a.question, answer: a.answer, cited: a.cited, status: a.status }))}
             pageIds={Object.fromEntries(pages.map((p) => [p.title.toLowerCase(), p.id]))}
           />
-          <Card className="space-y-1 p-4">
-            <h2 className="text-sm font-semibold">{t(lang, "context.readers.conflicts")}</h2>
-            <p className="text-xs text-muted-foreground">{t(lang, "context.readers.conflictsNone")}</p>
-          </Card>
-        </div>
+        </aside>
       </div>
-    </div>
+    </PageBody>
   );
 }

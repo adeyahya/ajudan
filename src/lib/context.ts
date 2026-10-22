@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { ContextPage, ContextSection, ReaderMode, Teammate } from "@/db/schema";
-import { applySuggestion, budgetPages, defaultReaderMode, forAgents, readerMode, SECTIONS } from "@/lib/context-text";
+import { applySuggestion, budgetPages, DEFAULT_ICONS, defaultReaderMode, forAgents, readerMode, SECTIONS } from "@/lib/context-text";
 import { logEvent } from "@/lib/events";
 import { t } from "@/lib/i18n";
 import { teammatesRoot } from "@/lib/paths";
@@ -72,7 +72,7 @@ export function ensureContextWorkspace(businessId: string) {
   const seed = (key: string, v: { section: ContextSection; title: string; body?: string; kind?: "page" | "database"; source?: string; order: number }) => {
     if (have.has(key)) return;
     db.insert(schema.contextPages)
-      .values({ businessId, key, section: v.section, title: v.title, body: v.body ?? "", kind: v.kind ?? "page", source: v.source ?? null, sortOrder: v.order, createdBy: "system", updatedBy: "system", updatedAt: now() })
+      .values({ businessId, key, section: v.section, title: v.title, body: v.body ?? "", kind: v.kind ?? "page", source: v.source ?? null, icon: DEFAULT_ICONS[key] ?? null, sortOrder: v.order, createdBy: "system", updatedBy: "system", updatedAt: now() })
       // The web app and the worker may both seed at once: one wins (unique business + key).
       .onConflictDoNothing()
       .run();
@@ -154,22 +154,33 @@ export function appendLearned(businessId: string, line: string) {
   writeTeamNotesFile(businessId);
 }
 
-export function createPage(businessId: string, v: { title: string; section: ContextSection; parentId?: string | null; body?: string; createdBy?: string }) {
-  const last = db
-    .select({ o: schema.contextPages.sortOrder })
-    .from(schema.contextPages)
-    .where(and(eq(schema.contextPages.businessId, businessId), eq(schema.contextPages.section, v.section)))
-    .orderBy(desc(schema.contextPages.sortOrder))
-    .get();
+/** Pages under the same parent (or at the top of a section), in tree order. */
+function siblings(businessId: string, parentId: string | null, section: ContextSection) {
+  const where = parentId
+    ? and(eq(schema.contextPages.businessId, businessId), eq(schema.contextPages.parentId, parentId))
+    : and(eq(schema.contextPages.businessId, businessId), isNull(schema.contextPages.parentId), eq(schema.contextPages.section, section));
+  return db.select().from(schema.contextPages).where(where).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
+}
+
+export function createPage(
+  businessId: string,
+  v: { title: string; section: ContextSection; parentId?: string | null; body?: string; icon?: string | null; createdBy?: string },
+) {
+  // A sub-page lives in its parent's section (the tree shows it under the parent).
+  const parent = v.parentId ? getPage(businessId, v.parentId) : undefined;
+  const parentId = parent && parent.kind === "page" ? parent.id : null;
+  const section = parent && parentId ? parent.section : v.section;
+  const last = siblings(businessId, parentId, section).at(-1);
   return db
     .insert(schema.contextPages)
     .values({
       businessId,
-      section: v.section,
-      parentId: v.parentId ?? null,
+      section,
+      parentId,
       title: v.title.trim().slice(0, 120) || "Untitled",
       body: v.body ?? "",
-      sortOrder: (last?.o ?? 0) + 1,
+      icon: v.icon ?? null,
+      sortOrder: (last?.sortOrder ?? 0) + 1,
       createdBy: v.createdBy ?? "owner",
       updatedBy: v.createdBy ?? "owner",
       updatedAt: now(),
@@ -178,19 +189,71 @@ export function createPage(businessId: string, v: { title: string; section: Cont
     .get();
 }
 
-/** The owner's edit from the editor (autosave), or a rename / move. */
-export function updatePage(businessId: string, id: string, patch: { title?: string; body?: string; blocks?: unknown[] | null; section?: ContextSection; checked?: boolean }) {
+/** A cover must be a file in the business folder's media/ or work/. */
+const coverPath = (c: string | null) => (c && /^(media|work)\//.test(c) && !c.split("/").includes("..") ? c : null);
+
+/** The owner's edit from the editor (autosave), a rename, an icon or cover, "still true". */
+export function updatePage(
+  businessId: string,
+  id: string,
+  patch: { title?: string; body?: string; blocks?: unknown[] | null; section?: ContextSection; checked?: boolean; icon?: string | null; cover?: string | null },
+) {
   const page = getPage(businessId, id);
   if (!page) return undefined;
+  // A section change is a move: to the top of that section, sub-pages included.
+  if (patch.section && patch.section !== page.section && SECTIONS.includes(patch.section)) {
+    movePage(businessId, id, { parentId: null, section: patch.section });
+  }
   const set: Partial<ContextPage> = { updatedAt: now(), updatedBy: "owner" };
   if (patch.title !== undefined) set.title = patch.title.trim().slice(0, 120) || page.title;
   if (patch.body !== undefined) set.body = patch.body.slice(0, 200_000);
   if (patch.blocks !== undefined) set.blocks = patch.blocks;
-  if (patch.section && SECTIONS.includes(patch.section)) set.section = patch.section;
   if (patch.checked) set.lastCheckedAt = now();
+  if (patch.icon !== undefined) set.icon = patch.icon === null ? null : patch.icon.trim().slice(0, 64);
+  if (patch.cover !== undefined) set.cover = coverPath(patch.cover);
   const row = db.update(schema.contextPages).set(set).where(eq(schema.contextPages.id, id)).returning().get();
   if (page.key === "learned") writeTeamNotesFile(businessId);
   return row;
+}
+
+/** A page and every page under it (ids, the page first). */
+function subtreeIds(businessId: string, id: string) {
+  const pages = listPages(businessId);
+  const out = [id];
+  for (let i = 0; i < out.length; i++) for (const p of pages) if (p.parentId === out[i] && !out.includes(p.id)) out.push(p.id);
+  return out;
+}
+
+/**
+ * Move a page in the tree (drag and drop): under `parentId` (null: the top of `section`),
+ * at `index` among its new siblings (default: last). Sub-pages come along and take the
+ * new section. Refused: a page into itself or one of its sub-pages, and pages under a
+ * database. Returns false when nothing moved.
+ */
+export function movePage(businessId: string, id: string, to: { parentId: string | null; section?: ContextSection; index?: number }) {
+  const page = getPage(businessId, id);
+  if (!page) return false;
+  let section = to.section && SECTIONS.includes(to.section) ? to.section : page.section;
+  let parentId: string | null = null;
+  if (to.parentId) {
+    const parent = getPage(businessId, to.parentId);
+    if (!parent || parent.kind !== "page") return false;
+    if (subtreeIds(businessId, id).includes(parent.id)) return false;
+    parentId = parent.id;
+    section = parent.section;
+  }
+  const list = siblings(businessId, parentId, section).filter((p) => p.id !== id);
+  const at = Math.max(0, Math.min(to.index ?? list.length, list.length));
+  list.splice(at, 0, page);
+  const under = section !== page.section ? subtreeIds(businessId, id).slice(1) : [];
+  db.transaction((tx) => {
+    list.forEach((p, i) => {
+      if (p.id === id) tx.update(schema.contextPages).set({ sortOrder: i + 1, parentId, section }).where(eq(schema.contextPages.id, id)).run();
+      else if (p.sortOrder !== i + 1) tx.update(schema.contextPages).set({ sortOrder: i + 1 }).where(eq(schema.contextPages.id, p.id)).run();
+    });
+    if (under.length) tx.update(schema.contextPages).set({ section }).where(inArray(schema.contextPages.id, under)).run();
+  });
+  return true;
 }
 
 /** Delete a page the owner made (Ajudan's own pages stay; their sub-pages move up). */

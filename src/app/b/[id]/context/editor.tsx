@@ -1,9 +1,9 @@
 "use client";
 
 import "@blocknote/shadcn/style.css";
+import "./editor.css";
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
-import { en as bnEn } from "@blocknote/core/locales";
 import {
   createReactBlockSpec,
   createReactInlineContentSpec,
@@ -15,7 +15,8 @@ import {
 import { BlockNoteView } from "@blocknote/shadcn";
 import { FileTextIcon, ImagesIcon, LightbulbIcon, UserIcon } from "lucide-react";
 import { useLang, useT, useTn } from "@/components/i18n";
-import type { UiLang } from "@/lib/i18n";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { editorDictionary } from "./bn-id";
 
 /**
  * The page editor (BlockNote, MPL-2.0): slash menu, headings, lists, tables, quotes,
@@ -57,9 +58,10 @@ function MentionChip({ kind, id, label }: { kind: string; id: string; label: str
       type="button"
       contentEditable={false}
       onClick={() => (kind === "contact" ? data?.openContact(id) : data?.openPage(id))}
-      className="inline rounded-sm bg-amber-200/70 px-1 font-medium text-[#6e452c] hover:bg-amber-300/80"
+      className="inline-flex items-baseline gap-1 rounded-sm bg-hover px-1 align-baseline font-medium text-foreground transition-colors duration-100 hover:bg-hover-strong"
     >
-      @{label}
+      {kind === "contact" ? <UserIcon aria-hidden className="size-3.5 shrink-0 self-center text-muted-foreground" /> : <FileTextIcon aria-hidden className="size-3.5 shrink-0 self-center text-muted-foreground" />}
+      {label}
     </button>
   );
 }
@@ -68,11 +70,11 @@ const Callout = createReactBlockSpec(
   { type: "callout", propSchema: { emoji: { default: "💡" } }, content: "inline" },
   {
     render: ({ block, contentRef }) => (
-      <div className="flex w-full gap-2 rounded-sm border-l-4 border-amber-500 bg-amber-100/80 px-3 py-2">
-        <span contentEditable={false} aria-hidden>
+      <div className="flex w-full gap-3 rounded-lg bg-muted p-3">
+        <span contentEditable={false} aria-hidden className="flex size-6 shrink-0 items-center justify-center text-xl leading-none">
           {block.props.emoji}
         </span>
-        <div ref={contentRef} className="min-w-0 flex-1" />
+        <div ref={contentRef} className="min-w-0 flex-1 self-center" />
       </div>
     ),
     toExternalHTML: ({ block, contentRef }) => (
@@ -100,36 +102,41 @@ function GalleryView({ tag, editable, onTag }: { tag: string; editable: boolean;
   const tags = useMemo(() => [...new Set((data?.assets ?? []).flatMap((a) => a.tags))].sort(), [data]);
   const shown = (data?.assets ?? []).filter((a) => tag && a.tags.includes(tag));
   return (
-    <div contentEditable={false} className="w-full rounded-sm border border-[#e6d6bd] bg-white/60 p-2">
-      <div className="mb-2 flex items-center gap-2 text-xs text-[#6e452c]">
-        <ImagesIcon className="size-4" />
+    <div contentEditable={false} className="w-full rounded-lg border border-border p-3">
+      <div className="mb-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+        <ImagesIcon className="size-4 text-tertiary" aria-hidden />
         <span>{t("context.gallery.pickTag")}</span>
-        <select value={tag} disabled={!editable} onChange={(e) => onTag(e.target.value)} className="rounded-sm border border-[#e6d6bd] bg-white px-1 py-0.5 text-xs">
-          <option value="">{t("context.gallery.noTag")}</option>
-          {tags.map((x) => (
-            <option key={x} value={x}>
-              #{x}
-            </option>
-          ))}
-        </select>
+        <Select value={tag || NO_TAG} disabled={!editable} onValueChange={(v) => onTag(v === NO_TAG ? "" : v)}>
+          <SelectTrigger size="sm" aria-label={t("context.gallery.pickTag")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_TAG}>{t("context.gallery.noTag")}</SelectItem>
+            {tags.map((x) => (
+              <SelectItem key={x} value={x}>
+                #{x}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       {tag && !shown.length ? (
-        <p className="text-xs text-[#8a6f5a]">{t("context.gallery.empty", { tag })}</p>
+        <p className="text-[13px] text-muted-foreground">{t("context.gallery.empty", { tag })}</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-3">
           {shown.map((a) => (
-            <figure key={a.path} className="space-y-1">
+            <figure key={a.path} className="min-w-0">
               {a.kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element -- files from the business folder
-                <img src={`/api/b/${data?.businessId}/files/${a.path}`} alt={a.title || a.path} className="aspect-square w-full rounded-sm object-cover" />
+                <img src={`/api/b/${data?.businessId}/files/${a.path}`} alt={a.title || a.path} className="aspect-square w-full rounded-lg bg-muted object-cover ring-1 ring-black/5" />
               ) : a.kind === "video" ? (
-                <video src={`/api/b/${data?.businessId}/files/${a.path}`} className="aspect-square w-full rounded-sm bg-black object-cover" muted />
+                <video src={`/api/b/${data?.businessId}/files/${a.path}`} className="aspect-square w-full rounded-lg bg-stage object-cover" muted />
               ) : (
-                <div className="flex aspect-square w-full items-center justify-center rounded-sm bg-[#efe3cf] text-xs">{a.kind}</div>
+                <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-muted text-xs text-muted-foreground">{a.kind}</div>
               )}
-              <figcaption className="truncate text-[11px] text-[#6e452c]" title={a.title || a.path}>
+              <figcaption className="mt-1.5 truncate text-xs text-foreground" title={a.title || a.path}>
                 {a.title || a.path.replace(/^media\//, "")}
-                {a.usedIn > 0 && <span className="block text-[#8a6f5a]">{tn("context.gallery.usedIn", a.usedIn)}</span>}
+                {a.usedIn > 0 && <span className="block text-tertiary">{tn("context.gallery.usedIn", a.usedIn)}</span>}
               </figcaption>
             </figure>
           ))}
@@ -139,6 +146,9 @@ function GalleryView({ tag, editable, onTag }: { tag: string; editable: boolean;
   );
 }
 
+/** Radix Select can't hold an empty value: the "no tag" choice. */
+const NO_TAG = "__none__";
+
 const schema = BlockNoteSchema.create({
   blockSpecs: { ...defaultBlockSpecs, callout: Callout(), gallery: Gallery() },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: Mention },
@@ -147,34 +157,7 @@ type Editor = typeof schema.BlockNoteEditor;
 type Blocks = typeof schema.PartialBlock;
 
 /** Blocks the owner doesn't need here (uploads aren't wired to the library). */
-const HIDDEN = new Set(["image", "video", "audio", "file", "toggle_heading", "toggle_list"]);
-
-/** BlockNote has no Indonesian: the slash menu and placeholders the owner sees most. */
-const ID_SLASH: Record<string, [string, string]> = {
-  heading: ["Judul 1", "Judul"],
-  heading_2: ["Judul 2", "Judul"],
-  heading_3: ["Judul 3", "Judul"],
-  quote: ["Kutipan", "Blok dasar"],
-  numbered_list: ["Daftar bernomor", "Blok dasar"],
-  bullet_list: ["Daftar poin", "Blok dasar"],
-  check_list: ["Daftar centang", "Blok dasar"],
-  paragraph: ["Paragraf", "Blok dasar"],
-  code_block: ["Blok kode", "Blok dasar"],
-  table: ["Tabel", "Lanjutan"],
-  divider: ["Pemisah", "Blok dasar"],
-};
-
-function dictionary(lang: UiLang, placeholder: string) {
-  if (lang !== "id") return { ...bnEn, placeholders: { ...bnEn.placeholders, default: placeholder, emptyDocument: placeholder } };
-  const slash = Object.fromEntries(
-    Object.entries(bnEn.slash_menu).map(([k, v]) => [k, ID_SLASH[k] ? { ...v, title: ID_SLASH[k][0], group: ID_SLASH[k][1] } : v]),
-  ) as typeof bnEn.slash_menu;
-  return {
-    ...bnEn,
-    slash_menu: slash,
-    placeholders: { ...bnEn.placeholders, default: placeholder, emptyDocument: placeholder, heading: "Judul", bulletListItem: "Daftar", numberedListItem: "Daftar", checkListItem: "Daftar" },
-  };
-}
+const HIDDEN = new Set(["image", "video", "audio", "file", "toggle_heading", "toggle_heading_2", "toggle_heading_3", "toggle_list", "heading_4", "heading_5", "heading_6"]);
 
 type Loose = { type?: string; props?: Record<string, unknown>; content?: unknown; children?: Loose[]; text?: string; href?: string };
 
@@ -230,7 +213,7 @@ export default function PageEditor({
     {
       schema,
       initialContent: blocks?.length ? (blocks as Blocks[]) : undefined,
-      dictionary: dictionary(lang, t("context.editor.placeholder")),
+      dictionary: editorDictionary(lang, t("context.editor.placeholder")),
     },
     [],
   ) as Editor;
