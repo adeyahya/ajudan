@@ -31,7 +31,7 @@ export function InterviewChat({
 
   return (
     <>
-      <LiveRefresh businessId={businessId} types={["onboarding_reply", "onboarding_error", "profile_ready", "team_proposed"]} />
+      <LiveRefresh businessId={businessId} types={["onboarding_reply", "onboarding_error", "profile_ready", "profile_updated", "team_proposed"]} />
       <Chat
         className="flex-1"
         agent={{ id: "interviewer", name: "Interviewer", color: "#3f7d74" }}

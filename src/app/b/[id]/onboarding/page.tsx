@@ -27,7 +27,7 @@ async function Content({ params }: Params) {
   const [rows, steps, last] = await Promise.all([
     listOnboardingMessages(id),
     listOnboardingSteps(id),
-    lastEventOf(id, ["onboarding_reply", "onboarding_error", "profile_ready"]),
+    lastEventOf(id, ["onboarding_reply", "onboarding_error", "profile_ready", "profile_updated"]),
   ]);
   const userAnswers = rows.filter((m) => m.role === "user").length;
   const failedJob = !biz.busy && last?.type === "onboarding_error" ? ((last.data?.job as "turn" | "finalize") ?? "turn") : null;
@@ -51,13 +51,13 @@ async function Content({ params }: Params) {
           <p className="text-xs text-muted-foreground">Language: {getLanguage(biz.language).nativeLabel}</p>
           <p className="text-xs text-muted-foreground">
             {done
-              ? "Interview complete. Your answers were turned into a business profile."
+              ? "Interview complete. Keep adding details here any time: each message updates your business profile."
               : `Your interviewer uses these answers to design your AI team.${userAnswers < 2 ? " Answer a couple of questions to finish any time." : ""}`}
           </p>
         </div>
         {done ? (
-          <Link href={`/b/${id}/team`} className="text-sm font-medium text-primary hover:underline">
-            See your team →
+          <Link href={`/b/${id}/${biz.status === "active" ? "profile" : "team"}`} className="text-sm font-medium text-primary hover:underline">
+            {biz.status === "active" ? "See your business profile →" : "See your team →"}
           </Link>
         ) : (
           userAnswers >= 2 &&
@@ -74,9 +74,9 @@ async function Content({ params }: Params) {
         messages={messages}
         busy={biz.busy}
         busyLabel={
-          finalizing ? "Writing your business profile…" : rows.length === 0 ? "Researching your business…" : "Thinking…"
+          finalizing ? (done ? "Updating your business profile…" : "Writing your business profile…") : rows.length === 0 ? "Researching your business…" : "Thinking…"
         }
-        canSend={!done && !failedJob}
+        canSend={!failedJob}
         sendAction={sendInterviewMessage.bind(null, id)}
       />
 

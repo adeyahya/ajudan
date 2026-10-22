@@ -1,7 +1,7 @@
 "use server";
 
 import { deleteSecret, normalizeHost, setSecret } from "@/lib/secrets";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { closeBrowser, ensureBrowser, normalizeSites } from "@/lib/browser";
@@ -9,8 +9,8 @@ import { parseLanguage } from "@/lib/language";
 import { cancelLink, startLink, unlinkRequestPath, whatsappDir } from "@/lib/whatsapp";
 import fs from "node:fs";
 import { lines, textToGoals } from "@/lib/onboarding/profile-form";
-import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
-import { initTeammateWorkspace } from "@/lib/workspace";
+import { BusinessProfileSchema } from "@/lib/types";
+import { refreshWorkspaces } from "@/lib/workspace";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -54,20 +54,6 @@ export async function saveLanguage(businessId: string, fd: FormData) {
   refresh();
 }
 
-/** Rewrite BUSINESS.md for every active teammate. */
-function refreshWorkspaces(businessId: string, profile: BusinessProfile, language: string) {
-  const active = db
-    .select()
-    .from(schema.teammates)
-    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
-    .all();
-  for (const t of active) {
-    const workspaceDir = initTeammateWorkspace(t, profile, language);
-    if (workspaceDir !== t.workspaceDir) {
-      db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
-    }
-  }
-}
 
 /** Show the business's Chrome so the owner can log in to their seller accounts or watch. */
 export async function openBusinessBrowser(businessId: string, fd: FormData) {

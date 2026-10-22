@@ -9,6 +9,7 @@ import { ImageStrip } from "@/components/image-strip";
 import { Avatar, Badge, Button, Card, Input, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
 import { CAPABILITY, type CapabilityRequest } from "@/lib/capabilities";
+import { describeHttpRequest } from "@/lib/http-approval";
 import { isServablePath } from "@/lib/media";
 import { approveCapability, decideApproval, rejectCapability } from "./actions";
 import { CapabilityForm } from "./capability-form";
@@ -218,6 +219,50 @@ function ApprovalInput({ a, businessId, deliverables }: { a: Approval; businessI
         </div>
         <div className="font-medium">{str(i.action)}</div>
         <Prose>{str(i.details)}</Prose>
+      </div>
+    );
+  }
+  if (a.toolName.endsWith("__http_request")) {
+    const r = describeHttpRequest(i);
+    return (
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-2 text-sm">
+        <div className="text-xs text-muted-foreground">
+          API call to <span className="text-foreground">{r.host || "(invalid URL)"}</span>
+          {r.secrets.length > 0 && (
+            <>
+              {" "}
+              · uses {r.secrets.map((s) => (
+                <Badge key={s} tone="amber">
+                  {s}
+                </Badge>
+              ))}
+            </>
+          )}
+        </div>
+        <div className="flex items-start gap-2">
+          <Badge tone="blue">{r.method}</Badge>
+          <code className="min-w-0 break-all text-xs">{r.url}</code>
+        </div>
+        {r.headers.length > 0 && (
+          <div className="text-xs text-muted-foreground">
+            {r.headers.map(([k, v]) => (
+              <div key={k} className="break-all">
+                <span className="text-foreground">{k}:</span> {v}
+              </div>
+            ))}
+          </div>
+        )}
+        {r.bodyPreview && (
+          <pre className="max-h-60 overflow-auto rounded-md border border-border p-2 text-xs">
+            {r.bodyPreview}
+            {r.bodyTruncated ? "\n…" : ""}
+          </pre>
+        )}
+        {r.saveAs && <div className="text-xs text-muted-foreground">Response saved as work/api/{r.saveAs}</div>}
+        <p className="text-xs text-muted-foreground">
+          {r.method === "GET" || r.method === "HEAD" ? "Reads data." : "Changes something on that service."} Secrets are filled in by Ajudan
+          only for the hosts they&apos;re allowed for; the teammate never sees their values.
+        </p>
       </div>
     );
   }

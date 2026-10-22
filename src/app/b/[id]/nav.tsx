@@ -15,8 +15,8 @@ const TABS = [
   { href: "/profile", label: "Business", icon: "⌂" },
 ];
 
-/** Game-menu tabs: the active one is a raised gold tab. */
-export function BusinessNav() {
+/** Game-menu tabs: the active one is a raised gold tab. With hideInterview, that tab only shows while you're on it. */
+export function BusinessNav({ hideInterview = false }: { hideInterview?: boolean }) {
   const { id } = useParams<{ id: string }>();
   const pathname = usePathname();
   const base = `/b/${id}`;
@@ -27,6 +27,7 @@ export function BusinessNav() {
           const href = base + t.href;
           const active =
             t.href === "" ? pathname === base || pathname.startsWith(`${base}/teammates`) : pathname === href || pathname.startsWith(`${href}/`);
+          if (hideInterview && t.href === "/onboarding" && !active) return null;
           return (
             <Link
               key={t.href}

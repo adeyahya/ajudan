@@ -2,15 +2,19 @@
 
 import { useActionState } from "react";
 import { Button, Textarea } from "@/components/kit";
-import { assignTask } from "@/app/b/[id]/teammates/[tid]/actions";
+import { giveTask } from "./actions";
 
-type Result = { ok: true; at: number } | { ok: false; error: string } | null;
+type Result = { ok: true; via: string | null } | { ok: false; error: string } | null;
 
-export function TaskForm({ businessId, teammateId, name }: { businessId: string; teammateId: string; name: string }) {
+/**
+ * "Give a task" from the office. It goes to the manager with the picked teammate as a
+ * hint (the owner's single point of contact), unless the picked teammate is the manager.
+ */
+export function TaskForm({ businessId, teammateId, name, viaManager }: { businessId: string; teammateId: string; name: string; viaManager: boolean }) {
   const [result, action, pending] = useActionState<Result, FormData>(async (_prev, formData) => {
     try {
-      await assignTask(formData);
-      return { ok: true, at: Date.now() };
+      const via = await giveTask(formData);
+      return { ok: true, via };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "Could not assign the task" };
     }
@@ -23,10 +27,16 @@ export function TaskForm({ businessId, teammateId, name }: { businessId: string;
       <Textarea name="instructions" rows={3} required placeholder={`What should ${name} do next?`} />
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground" aria-live="polite">
-          {result?.ok ? "Task queued." : result?.ok === false ? <span className="text-red-600">{result.error}</span> : null}
+          {result?.ok ? (
+            result.via ? `Sent to ${result.via}, who will brief ${name}.` : "Task queued."
+          ) : result?.ok === false ? (
+            <span className="text-red-600">{result.error}</span>
+          ) : viaManager ? (
+            "Goes through your manager"
+          ) : null}
         </span>
         <Button type="submit" disabled={pending}>
-          {pending ? "Assigning…" : "Give a task"}
+          {pending ? "Sending…" : "Give a task"}
         </Button>
       </div>
     </form>

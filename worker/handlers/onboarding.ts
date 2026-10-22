@@ -7,6 +7,7 @@ import { PausedError, runAbortController } from "../session";
 import { getLanguage, languageInstruction } from "@/lib/language";
 import { businessWorkspace } from "@/lib/paths";
 import { BusinessProfileSchema, type BusinessProfile } from "@/lib/types";
+import { refreshWorkspaces } from "@/lib/workspace";
 
 const INTERVIEW_TOOLS = ["WebSearch", "WebFetch"];
 
@@ -66,9 +67,11 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     } else {
       if (!last || last.role !== "user") throw new Error("No new owner message to answer");
       const exchange = userMessages.length;
-      prompt = `${last.content}\n\n[Interview note: this is owner answer #${exchange}. Reply in ${lang}.${
-        exchange >= 5 ? " You are near the end; if you have enough, recap and invite them to press \"Finish interview\"." : ""
-      }]`;
+      prompt = biz.profile
+        ? `${last.content}\n\n[Interview note: the interview is finished and the business profile is written; the owner is adding details. Acknowledge what changed in a line or two, ask at most one question if something is unclear, and don't restart the interview. Reply in ${lang}.]`
+        : `${last.content}\n\n[Interview note: this is owner answer #${exchange}. Reply in ${lang}.${
+            exchange >= 5 ? " You are near the end; if you have enough, recap and invite them to press \"Finish interview\"." : ""
+          }]`;
     }
 
     const res = await runAgent({
@@ -96,11 +99,14 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     if (!reply) throw new Error("Interviewer returned an empty reply");
 
     db.insert(schema.onboardingMessages).values({ businessId, role: "assistant", content: reply }).run();
+    // After "Finish interview" every new detail also updates the profile (stays busy until it's rewritten).
+    const updateProfile = !!biz.profile;
     db.update(schema.businesses)
-      .set({ busy: false, onboardingSessionId: res.sessionId ?? biz.onboardingSessionId })
+      .set({ busy: updateProfile, onboardingSessionId: res.sessionId ?? biz.onboardingSessionId })
       .where(eq(schema.businesses.id, businessId))
       .run();
     logEvent({ businessId, type: "onboarding_reply", message: reply.slice(0, 200), data: { costUsd: res.costUsd } });
+    if (updateProfile) enqueueJob("onboarding_finalize", { businessId });
   } catch (err) {
     if (ac.signal.aborted) throw new PausedError(); // stays busy; reruns when reopened
     failed(businessId, "turn", err);
@@ -143,9 +149,17 @@ Write the business profile. Use the owner's own facts and numbers; where the own
     if (!res.ok || !res.structured) throw new Error(res.error ?? "No profile returned");
     const profile: BusinessProfile = { ...res.structured, name: biz.name, website: biz.website };
 
-    db.update(schema.businesses).set({ profile, status: "designing" }).where(eq(schema.businesses.id, businessId)).run();
-    logEvent({ businessId, type: "profile_ready", message: `Business profile ready: ${profile.oneLiner}` });
-    enqueueJob("design_team", { businessId });
+    if (biz.status === "onboarding") {
+      // First time: the owner checks the profile on the Team page, then asks for the team
+      // design ("Looks right — design my team" runs design_team).
+      db.update(schema.businesses).set({ profile, status: "designing", busy: false }).where(eq(schema.businesses.id, businessId)).run();
+      logEvent({ businessId, type: "profile_ready", message: `Business profile ready: ${profile.oneLiner}` });
+    } else {
+      // The owner added details after finishing: rewrite the profile, keep the team and status.
+      db.update(schema.businesses).set({ profile, busy: false }).where(eq(schema.businesses.id, businessId)).run();
+      refreshWorkspaces(businessId, profile, biz.language);
+      logEvent({ businessId, type: "profile_updated", message: `Business profile updated: ${profile.oneLiner}` });
+    }
   } catch (err) {
     if (ac.signal.aborted) throw new PausedError();
     failed(businessId, "finalize", err);

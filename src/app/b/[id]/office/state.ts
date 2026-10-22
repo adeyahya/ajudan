@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ActivityEvent, TeammateState } from "@/db/schema";
+import { MANAGER_ROLE } from "@/lib/roles";
 
 /** What the office needs to render. Shared by the page (initial props) and GET /api/b/[id]/state. */
 export type OfficeTeammate = {
@@ -16,7 +17,10 @@ export type OfficeTeammate = {
 };
 
 export type OfficeState = {
+  /** AI teammates only: people on WhatsApp have no desk. */
   teammates: OfficeTeammate[];
+  /** The manager's id; "Give a task" goes through it. */
+  managerId: string | null;
   pendingApprovals: number;
   runningTasks: number;
   queuedTasks: number;
@@ -38,9 +42,10 @@ export function queryOfficeState(businessId: string): OfficeState {
       roleKey: schema.teammates.roleKey,
     })
     .from(schema.teammates)
-    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active"), eq(schema.teammates.kind, "ai")))
     .orderBy(asc(schema.teammates.deskIndex))
     .all();
+  const managerId = teammates.find((t) => t.roleKey === MANAGER_ROLE.key)?.id ?? null;
 
   const pendingApprovals = db
     .select({ id: schema.approvals.id })
@@ -62,6 +67,7 @@ export function queryOfficeState(businessId: string): OfficeState {
 
   return {
     teammates,
+    managerId,
     deliverableCount,
     pendingApprovals,
     runningTasks: taskRows.filter((t) => t.status === "running").length,

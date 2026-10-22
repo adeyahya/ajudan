@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { and, eq } from "drizzle-orm";
+import { db, schema } from "@/db";
 import type { Teammate } from "@/db/schema";
 import type { BusinessProfile } from "@/lib/types";
 import { languageName } from "@/lib/language";
@@ -66,6 +68,21 @@ export function initTeammateWorkspace(
     );
   }
   return stored;
+}
+
+/** Rewrite BUSINESS.md for every active teammate (after the profile or language changed). */
+export function refreshWorkspaces(businessId: string, profile: BusinessProfile, language: string) {
+  const active = db
+    .select()
+    .from(schema.teammates)
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
+    .all();
+  for (const t of active) {
+    const workspaceDir = initTeammateWorkspace(t, profile, language);
+    if (workspaceDir !== t.workspaceDir) {
+      db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
+    }
+  }
 }
 
 /** A readable, unused folder for a new teammate: teammates/raka, teammates/raka-2… (relative). */

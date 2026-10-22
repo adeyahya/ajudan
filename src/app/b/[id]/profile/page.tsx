@@ -151,7 +151,13 @@ async function Content({ params }: Params) {
           <LanguageForm id={id} language={biz.language} />
           <details>
             <summary className="cursor-pointer font-medium">Edit profile</summary>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">Your teammates read this profile before every task.</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Your teammates read this profile before every task. You can also{" "}
+              <Link href={`/b/${id}/onboarding`} className="underline">
+                tell the interviewer
+              </Link>{" "}
+              what changed.
+            </p>
             <ProfileForm
               action={saveProfile.bind(null, id)}
               initial={{

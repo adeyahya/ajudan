@@ -32,14 +32,22 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
   if (business.status === "designing" || business.status === "team_proposed") {
     return (
       <StatusCard
-        title={business.status === "designing" ? "Your team is being designed" : "Your team proposal is ready"}
+        title={
+          business.status === "designing"
+            ? business.busy
+              ? "Your team is being designed"
+              : "Check your business profile"
+            : "Your team proposal is ready"
+        }
         body={
           business.status === "designing"
-            ? "Ajudan is putting together a team of AI teammates for your goals. Follow along on the team page."
+            ? business.busy
+              ? "Ajudan is putting together a team of AI teammates for your goals. Follow along on the team page."
+              : "Your interview became a business profile. Check it, then let Ajudan design the team from it."
             : "Review the proposed teammates, adjust them, and hire the team to open the office."
         }
         href={`/b/${id}/team`}
-        cta={business.status === "designing" ? "View progress" : "Review the team"}
+        cta={business.status === "designing" ? (business.busy ? "View progress" : "Check the profile") : "Review the team"}
       />
     );
   }

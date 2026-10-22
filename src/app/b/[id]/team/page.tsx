@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { Teammate } from "@/db/schema";
+import type { BusinessProfile } from "@/lib/types";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Card, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness, listTeammates } from "@/lib/data";
@@ -48,6 +49,15 @@ async function Content({ params }: Params) {
   if (biz.status === "designing") {
     const last = await lastEventOf(id, ["team_error", "team_proposed", "profile_ready"]);
     const failed = !biz.busy && last?.type === "team_error";
+    // The profile is written and nothing is running: the owner checks it before the design starts.
+    if (!biz.busy && !failed && biz.profile) {
+      return (
+        <div>
+          <LiveRefresh businessId={id} types={[...LIVE_TYPES, "profile_updated"]} />
+          <ProfileCheck businessId={id} profile={biz.profile} />
+        </div>
+      );
+    }
     return (
       <Card className="p-6 max-w-xl">
         <LiveRefresh businessId={id} types={LIVE_TYPES} />
@@ -102,6 +112,17 @@ async function Content({ params }: Params) {
           ))}
         </div>
         {!proposed.length && <p className="text-sm text-muted-foreground">Everyone was removed. Redesign the team to start over.</p>}
+        <p className="mt-6 text-xs text-muted-foreground">
+          Not what you expected? The team is designed from your{" "}
+          <Link href={`/b/${id}/profile`} className="underline">
+            business profile
+          </Link>
+          : edit it (or add details in the{" "}
+          <Link href={`/b/${id}/onboarding`} className="underline">
+            interview
+          </Link>
+          ), then press Redesign team. Your edits to the teammates above are kept.
+        </p>
       </div>
     );
   }
@@ -203,6 +224,66 @@ function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: 
         </div>
       </details>
     </Card>
+  );
+}
+
+/** Between the interview and the team design: the owner confirms the profile the whole team will work from. */
+function ProfileCheck({ businessId, profile: p }: { businessId: string; profile: BusinessProfile }) {
+  return (
+    <div className="max-w-2xl">
+      <PageHeader
+        title="Check your profile"
+        subtitle="Every teammate reads this before every task, and the team is designed from it. Fix anything that's off, then let Ajudan design your team."
+        actions={
+          <form action={redesignTeam.bind(null, businessId)}>
+            <PendingSubmit>Looks right — design my team</PendingSubmit>
+          </form>
+        }
+      />
+      <Card className="p-6 grid gap-4">
+        <div>
+          <div className="font-semibold">{p.name}</div>
+          <p className="text-sm">{p.oneLiner}</p>
+        </div>
+        <Prose>{p.description}</Prose>
+        <div className="grid gap-4 sm:grid-cols-2 text-sm">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Goals (next ~90 days)</div>
+            {p.goals.length ? (
+              <ul className="list-disc pl-5 space-y-0.5">
+                {p.goals.map((g, i) => (
+                  <li key={i}>
+                    {g.goal} <span className="text-muted-foreground">({g.metric} → {g.target})</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">None yet</p>
+            )}
+          </div>
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">What the team should do</div>
+            {p.teamNeeds.length ? (
+              <ul className="list-disc pl-5 space-y-0.5">
+                {p.teamNeeds.map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">None yet</p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-sm">
+          <Link href={`/b/${businessId}/profile`} className="text-primary underline">
+            Edit the full profile
+          </Link>
+          <Link href={`/b/${businessId}/onboarding`} className="text-primary underline">
+            Add details in the interview
+          </Link>
+        </div>
+      </Card>
+    </div>
   );
 }
 

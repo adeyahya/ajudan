@@ -159,7 +159,9 @@ export function OfficeShell({
         </div>
 
         <aside className="space-y-4 min-w-0">
-          {selected && <TeammatePanel businessId={businessId} teammate={selected} onClose={() => setSelectedId(null)} />}
+          {selected && (
+            <TeammatePanel businessId={businessId} teammate={selected} managerId={state.managerId} onClose={() => setSelectedId(null)} />
+          )}
           <ActivityFeed feed={feed} byId={byId} now={now} />
         </aside>
       </div>
@@ -209,10 +211,12 @@ function Roster({
 function TeammatePanel({
   businessId,
   teammate: t,
+  managerId,
   onClose,
 }: {
   businessId: string;
   teammate: OfficeTeammate;
+  managerId: string | null;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -241,7 +245,7 @@ function TeammatePanel({
           Review the pending approval →
         </Link>
       )}
-      <TaskForm key={t.id} businessId={businessId} teammateId={t.id} name={t.name} />
+      <TaskForm key={t.id} businessId={businessId} teammateId={t.id} name={t.name} viaManager={!!managerId && managerId !== t.id} />
       <Link href={`/b/${businessId}/teammates/${t.id}`} className="block text-sm text-primary hover:underline">
         Open {t.name}&apos;s page →
       </Link>
