@@ -10,6 +10,7 @@ import { getDb, schema } from "@/db";
 import { folderInfo, forgetFolder, isBusinessFolder, rememberFolder, setActiveFolder, suggestFolder } from "@/lib/folders";
 import { IN_APP, routeFor } from "@/lib/app-mode";
 import { parseLanguage } from "@/lib/language";
+import { t, uiLang } from "@/lib/i18n";
 
 /** openDir: in the desktop app, the folder to open in a new window. */
 export type FolderFormState = { error?: string; openDir?: string };
@@ -31,12 +32,13 @@ function expandPath(raw: string) {
 /** New business = new folder. Opens it, then starts the interview. */
 export async function createBusiness(_prev: FolderFormState, formData: FormData): Promise<FolderFormState> {
   const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { error: "Give the business a name" };
-  const website = normalizeWebsite(String(formData.get("website") ?? ""));
   const language = parseLanguage(formData.get("language"));
+  const lang = uiLang(String(formData.get("lang") ?? "")); // the UI language the form was shown in
+  if (!name) return { error: t(lang, "home.err.name") };
+  const website = normalizeWebsite(String(formData.get("website") ?? ""));
   const dir = expandPath(String(formData.get("folder") ?? "")) || suggestFolder(name);
-  if (isBusinessFolder(dir)) return { error: `${dir} already holds a business. Open it instead.` };
-  if (fs.existsSync(dir) && !fs.statSync(dir).isDirectory()) return { error: `${dir} is a file, not a folder` };
+  if (isBusinessFolder(dir)) return { error: t(lang, "home.err.exists", { dir }) };
+  if (fs.existsSync(dir) && !fs.statSync(dir).isDirectory()) return { error: t(lang, "home.err.isFile", { dir }) };
 
   fs.mkdirSync(dir, { recursive: true });
   const db = getDb(dir); // creates ajudan.db with the current schema
@@ -74,9 +76,10 @@ export async function openFolder(dir: string) {
 /** Open a business folder by typing its path (e.g. a copy from another laptop). */
 export async function openFolderByPath(_prev: FolderFormState, formData: FormData): Promise<FolderFormState> {
   const dir = expandPath(String(formData.get("path") ?? ""));
-  if (!dir) return { error: "Type the folder's path" };
-  if (!fs.existsSync(dir)) return { error: `${dir} doesn't exist` };
-  if (!isBusinessFolder(dir)) return { error: `${dir} has no ajudan.db, so it isn't a business folder` };
+  const lang = uiLang(String(formData.get("lang") ?? "")); // the UI language the form was shown in
+  if (!dir) return { error: t(lang, "home.err.path") };
+  if (!fs.existsSync(dir)) return { error: t(lang, "home.err.missing", { dir }) };
+  if (!isBusinessFolder(dir)) return { error: t(lang, "home.err.notBusiness", { dir }) };
   getDb(dir); // upgrade its schema if it came from an older version
   if (IN_APP) {
     rememberFolder(dir);

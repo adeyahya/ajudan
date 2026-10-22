@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { Button, Card, Label, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness, getSpend, listTeammates } from "@/lib/data";
+import { t, uiLang, type UiLang } from "@/lib/i18n";
 import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { LanguageSelect } from "@/app/language-select";
@@ -32,8 +33,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function List({ items }: { items: string[] }) {
-  if (!items.length) return <p className="text-sm text-muted-foreground">None yet</p>;
+function List({ items, lang }: { items: string[]; lang: UiLang }) {
+  if (!items.length) return <p className="text-sm text-muted-foreground">{t(lang, "profile.none")}</p>;
   return (
     <ul className="list-disc pl-5 text-sm space-y-0.5">
       {items.map((i, n) => (
@@ -44,16 +45,17 @@ function List({ items }: { items: string[] }) {
 }
 
 function LanguageForm({ id, language }: { id: string; language: string }) {
+  const lang = uiLang(language);
   return (
     <form action={saveLanguage.bind(null, id)} className="grid gap-2">
-      <Label htmlFor="language">Language</Label>
+      <Label htmlFor="language">{t(lang, "profile.language.label")}</Label>
       <p className="text-xs text-muted-foreground">
-        Current: {languageName(language)}. Your interviewer and teammates write everything in this language.
+        {t(lang, "profile.language.current", { language: languageName(language) })} {t(lang, "profile.language.help")}
       </p>
       <div className="flex items-center gap-2">
-        <LanguageSelect id="language" defaultValue={language} />
+        <LanguageSelect key={language} id="language" defaultValue={language} />
         <Button type="submit" variant="secondary">
-          Save
+          {t(lang, "common.save")}
         </Button>
       </div>
     </form>
@@ -64,6 +66,7 @@ async function Content({ params }: Params) {
   const { id } = await params;
   const biz = await getBusiness(id);
   if (!biz) notFound();
+  const lang = uiLang(biz.language);
   const p = biz.profile;
   const mates = await listTeammates(id);
   const spend = await getSpend(id);
@@ -73,11 +76,11 @@ async function Content({ params }: Params) {
   if (!p) {
     return (
       <Card className="p-6 max-w-xl">
-        <h1 className="font-semibold mb-1">No business profile yet</h1>
+        <h1 className="font-semibold mb-1">{t(lang, "profile.noProfileTitle")}</h1>
         <p className="text-sm text-muted-foreground">
-          It&apos;s written when you finish the{" "}
+          {t(lang, "profile.noProfileBefore")}{" "}
           <Link href={`/b/${id}/onboarding`} className="text-primary underline">
-            interview
+            {t(lang, "profile.noProfileLink")}
           </Link>
           .
         </p>
@@ -99,7 +102,7 @@ async function Content({ params }: Params) {
             </a>
           )}
           <Prose>{p.description}</Prose>
-          <Section title="Goals (next ~90 days)">
+          <Section title={t(lang, "profile.goals")}>
             {p.goals.length ? (
               <div className="grid gap-2">
                 {p.goals.map((g, i) => (
@@ -112,62 +115,62 @@ async function Content({ params }: Params) {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">None yet</p>
+              <p className="text-sm text-muted-foreground">{t(lang, "profile.none")}</p>
             )}
           </Section>
           <div className="grid gap-5 sm:grid-cols-2">
-            <Section title="Products">
-              <List items={p.products} />
+            <Section title={t(lang, "profile.products")}>
+              <List items={p.products} lang={lang} />
             </Section>
-            <Section title="Target customers">
-              <List items={p.targetCustomers} />
+            <Section title={t(lang, "profile.targetCustomers")}>
+              <List items={p.targetCustomers} lang={lang} />
             </Section>
-            <Section title="Channels">
-              <List items={p.channels} />
+            <Section title={t(lang, "profile.channels")}>
+              <List items={p.channels} lang={lang} />
             </Section>
-            <Section title="Competitors">
-              <List items={p.competitors} />
+            <Section title={t(lang, "profile.competitors")}>
+              <List items={p.competitors} lang={lang} />
             </Section>
-            <Section title="Constraints">
-              <List items={p.constraints} />
+            <Section title={t(lang, "profile.constraints")}>
+              <List items={p.constraints} lang={lang} />
             </Section>
-            <Section title="What the team should do">
-              <List items={p.teamNeeds} />
+            <Section title={t(lang, "profile.teamNeeds")}>
+              <List items={p.teamNeeds} lang={lang} />
             </Section>
           </div>
-          <Section title="Brand voice">
+          <Section title={t(lang, "profile.brandVoice")}>
             <Prose>{p.brandVoice}</Prose>
           </Section>
         </Card>
         <div className="grid gap-6 content-start">
         <Card className="p-6 grid gap-3">
-          <SpendPanel businessId={id} spend={spend} />
+          <SpendPanel businessId={id} spend={spend} lang={lang} />
           <p className="text-xs text-muted-foreground">
             <Link href={`/b/${id}/health`} className="underline">
-              Jobs &amp; health
+              {t(lang, "profile.healthLink")}
             </Link>
-            : is the worker running, what&apos;s queued, what failed, spend per teammate, last backup.
+            {t(lang, "profile.healthHint")}
           </p>
         </Card>
         <Card className="p-6">
-          <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} />
+          <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={waMates} lang={lang} />
         </Card>
         <Card className="p-6">
-          <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} />
+          <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={browserMates} lang={lang} />
         </Card>
         <Card className="p-6">
-          <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={shellMates} />
+          <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={shellMates} lang={lang} />
         </Card>
         <Card className="p-6 grid gap-6 content-start">
           <LanguageForm id={id} language={biz.language} />
           <details>
-            <summary className="cursor-pointer font-medium">Edit profile</summary>
+            <summary className="cursor-pointer font-medium">{t(lang, "profile.editProfile")}</summary>
             <p className="text-xs text-muted-foreground mt-1 mb-4">
-              Your teammates read this profile before every task. You can also{" "}
+              {t(lang, "profile.editHintBefore")}{" "}
               <Link href={`/b/${id}/onboarding`} className="underline">
-                tell the interviewer
+                {t(lang, "profile.editHintLink")}
               </Link>{" "}
-              what changed.
+              {t(lang, "profile.editHintAfter")}
             </p>
             <ProfileForm
               action={saveProfile.bind(null, id)}

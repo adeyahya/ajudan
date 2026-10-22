@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Card, PageSkeleton } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
+import { t, uiLang } from "@/lib/i18n";
 import { OfficeShell } from "./office/office-shell";
 import { loadOffice } from "./office/state";
 
@@ -18,36 +19,26 @@ async function Content({ params }: { params: PageProps<"/b/[id]">["params"] }) {
   const { id } = await params;
   const business = await getBusiness(id);
   if (!business) notFound();
+  const lang = uiLang(business.language);
 
   if (business.status === "onboarding") {
     return (
       <StatusCard
-        title={`Let's get to know ${business.name}`}
-        body="Your team is not hired yet. Finish the onboarding interview so Ajudan can understand the business and design the right teammates."
+        title={t(lang, "bizhome.onboardingTitle", { name: business.name })}
+        body={t(lang, "bizhome.onboardingBody")}
         href={`/b/${id}/onboarding`}
-        cta="Continue the interview"
+        cta={t(lang, "bizhome.onboardingCta")}
       />
     );
   }
   if (business.status === "designing" || business.status === "team_proposed") {
+    const step = business.status === "designing" ? (business.busy ? "designing" : "check") : "proposed";
     return (
       <StatusCard
-        title={
-          business.status === "designing"
-            ? business.busy
-              ? "Your team is being designed"
-              : "Check your business profile"
-            : "Your team proposal is ready"
-        }
-        body={
-          business.status === "designing"
-            ? business.busy
-              ? "Ajudan is putting together a team of AI teammates for your goals. Follow along on the team page."
-              : "Your interview became a business profile. Check it, then let Ajudan design the team from it."
-            : "Review the proposed teammates, adjust them, and hire the team to open the office."
-        }
+        title={t(lang, `bizhome.${step}Title`)}
+        body={t(lang, `bizhome.${step}Body`)}
         href={`/b/${id}/team`}
-        cta={business.status === "designing" ? (business.busy ? "View progress" : "Check the profile") : "Review the team"}
+        cta={t(lang, `bizhome.${step}Cta`)}
       />
     );
   }

@@ -8,7 +8,8 @@ import type { DeliverableStatus } from "@/db/schema";
 import { LiveRefresh } from "@/components/live";
 import { PageHeader, PageSkeleton, cn } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
-import { DELIVERABLE_LABEL, DeliverableCard, kindLabel } from "./deliverable-card";
+import { t, uiLang } from "@/lib/i18n";
+import { DeliverableCard, deliverableLabel, kindLabel } from "./deliverable-card";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -62,7 +63,7 @@ async function loadDeliverables(businessId: string, f: Filters) {
         ),
       )
       .all()
-      .map((t) => [t.deliverableId!, mates.find((m) => m.id === t.teammateId)?.name ?? "A teammate"]),
+      .map((t) => [t.deliverableId!, mates.find((m) => m.id === t.teammateId)?.name ?? null] as const),
   );
   return { rows, kinds, mates, revising };
 }
@@ -74,6 +75,7 @@ async function Content({ params, searchParams }: Props) {
   const f: Filters = { status: one(sp.status), kind: one(sp.kind), teammate: one(sp.teammate) };
   const [biz, data] = await Promise.all([getBusiness(id), loadDeliverables(id, f)]);
   if (!biz) notFound();
+  const lang = uiLang(biz.language);
 
   const href = (patch: Partial<Filters>) => {
     const next = { ...f, ...patch };
@@ -90,25 +92,25 @@ async function Content({ params, searchParams }: Props) {
         types={["deliverable_saved", "deliverable_ready", "message_drafted", "deliverable_status", "deliverable_revised", "task_done"]}
       />
       <PageHeader
-        title="Work"
-        subtitle="Everything your teammates produced. Ajudan doesn't post it anywhere: copy what's ready, post it yourself, then mark it posted. Tell the team what looks good and what needs changes: they remember it."
+        title={t(lang, "work.title")}
+        subtitle={t(lang, "work.subtitle")}
       />
 
       <div className="space-y-2">
-        <FilterRow label="Status">
+        <FilterRow label={t(lang, "work.filter.status")}>
           <Chip href={href({ status: undefined })} active={!f.status}>
             All
           </Chip>
           {STATUSES.map((s) => (
             <Chip key={s} href={href({ status: s })} active={f.status === s}>
-              {DELIVERABLE_LABEL[s]}
+              {deliverableLabel(s, lang)}
             </Chip>
           ))}
         </FilterRow>
         {data.kinds.length > 0 && (
-          <FilterRow label="Kind">
+          <FilterRow label={t(lang, "work.filter.kind")}>
             <Chip href={href({ kind: undefined })} active={!f.kind}>
-              All
+              {t(lang, "work.all")}
             </Chip>
             {data.kinds.map((k) => (
               <Chip key={k} href={href({ kind: k })} active={f.kind === k}>
@@ -118,9 +120,9 @@ async function Content({ params, searchParams }: Props) {
           </FilterRow>
         )}
         {data.mates.length > 0 && (
-          <FilterRow label="Teammate">
+          <FilterRow label={t(lang, "work.filter.teammate")}>
             <Chip href={href({ teammate: undefined })} active={!f.teammate}>
-              All
+              {t(lang, "work.all")}
             </Chip>
             {data.mates.map((m) => (
               <Chip key={m.id} href={href({ teammate: m.id })} active={f.teammate === m.id}>
@@ -132,7 +134,7 @@ async function Content({ params, searchParams }: Props) {
       </div>
 
       <div className="space-y-2">
-        {data.rows.length === 0 && <p className="text-sm text-muted-foreground">No work matches these filters yet.</p>}
+        {data.rows.length === 0 && <p className="text-sm text-muted-foreground">{t(lang, "work.empty")}</p>}
         {data.rows.map((d) => {
           const m = data.mates.find((x) => x.id === d.teammateId);
           return (
@@ -140,7 +142,8 @@ async function Content({ params, searchParams }: Props) {
               key={d.id}
               d={d}
               teammate={m ? { id: m.id, name: m.name, color: m.color } : null}
-              revisingBy={data.revising.get(d.id) ?? null}
+              revisingBy={data.revising.has(d.id) ? (data.revising.get(d.id) ?? t(lang, "work.aTeammate")) : null}
+              lang={lang}
             />
           );
         })}

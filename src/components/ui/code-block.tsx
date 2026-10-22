@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+
+import { useT } from "@/components/i18n"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
@@ -93,6 +95,7 @@ function CodeBlockCopyButton({
   ...props
 }: React.ComponentProps<typeof Button> & { value: string }) {
   const [copied, setCopied] = React.useState(false)
+  const t = useT()
 
   React.useEffect(() => {
     if (!copied) {
@@ -110,7 +113,7 @@ function CodeBlockCopyButton({
         data-copied={copied || undefined}
         variant={variant}
         size={size}
-        aria-label={copied ? "Copied" : "Copy"}
+        aria-label={copied ? t("ui.copied") : t("ui.copy")}
         className={cn(className)}
         onClick={(event) => {
           onClick?.(event)
@@ -130,7 +133,7 @@ function CodeBlockCopyButton({
         )}
       </Button>
       <span aria-live="polite" className="sr-only">
-        {copied ? "Copied" : ""}
+        {copied ? t("ui.copied") : ""}
       </span>
     </>
   )

@@ -7,7 +7,8 @@ import { LiveRefresh } from "@/components/live";
 import { Avatar, Badge, Card, PageHeader, PageSkeleton, Prose } from "@/components/kit";
 import { getBusiness, listTeammates } from "@/lib/data";
 import { lastEventOf } from "@/lib/onboarding/data";
-import { AUTONOMY_OPTIONS, describeCron } from "@/lib/onboarding/schedule";
+import { autonomyOptions, describeCron } from "@/lib/onboarding/schedule";
+import { t as tr, tn, uiLang, type UiLang } from "@/lib/i18n";
 import { openRequests } from "@/lib/humans";
 import { ROLE_TEMPLATES } from "@/lib/roles";
 import { scheduleStatuses, type ScheduleStatus } from "@/lib/schedule-context";
@@ -31,18 +32,19 @@ async function Content({ params }: Params) {
   const { id } = await params;
   const biz = await getBusiness(id);
   if (!biz) notFound();
+  const lang = uiLang(biz.language);
 
   if (biz.status === "onboarding") {
     return (
       <Card className="p-6 max-w-xl">
         <LiveRefresh businessId={id} types={LIVE_TYPES} />
-        <h1 className="font-semibold mb-1">Your team isn&apos;t designed yet</h1>
-        <p className="text-sm text-muted-foreground mb-4">Finish the interview first so we know what your business needs.</p>
+        <h1 className="font-semibold mb-1">{tr(lang, "team.notDesignedTitle")}</h1>
+        <p className="text-sm text-muted-foreground mb-4">{tr(lang, "team.notDesignedBody")}</p>
         <Link
           href={`/b/${id}/onboarding`}
           className="inline-flex items-center rounded-lg px-3.5 h-9 text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
         >
-          Continue the interview
+          {tr(lang, "team.continueInterview")}
         </Link>
       </Card>
     );
@@ -56,7 +58,7 @@ async function Content({ params }: Params) {
       return (
         <div>
           <LiveRefresh businessId={id} types={[...LIVE_TYPES, "profile_updated"]} />
-          <ProfileCheck businessId={id} profile={biz.profile} />
+          <ProfileCheck businessId={id} profile={biz.profile} lang={lang} />
         </div>
       );
     }
@@ -65,18 +67,16 @@ async function Content({ params }: Params) {
         <LiveRefresh businessId={id} types={LIVE_TYPES} />
         {failed ? (
           <>
-            <h1 className="font-semibold mb-1">Team design failed</h1>
+            <h1 className="font-semibold mb-1">{tr(lang, "team.designFailed")}</h1>
             <p className="text-sm text-red-600 dark:text-red-400 mb-4">{last.message.slice(0, 300)}</p>
             <form action={redesignTeam.bind(null, id)}>
-              <PendingSubmit>Try again</PendingSubmit>
+              <PendingSubmit>{tr(lang, "team.tryAgain")}</PendingSubmit>
             </form>
           </>
         ) : (
           <>
-            <h1 className="font-semibold mb-1 animate-pulse">Designing your team…</h1>
-            <p className="text-sm text-muted-foreground">
-              We&apos;re picking the right teammates for {biz.name}&apos;s goals. This takes a minute.
-            </p>
+            <h1 className="font-semibold mb-1 animate-pulse">{tr(lang, "team.designing")}</h1>
+            <p className="text-sm text-muted-foreground">{tr(lang, "team.designingBody", { name: biz.name })}</p>
           </>
         )}
       </Card>
@@ -89,15 +89,15 @@ async function Content({ params }: Params) {
       <div>
         <LiveRefresh businessId={id} types={LIVE_TYPES} />
         <PageHeader
-          title="Meet your proposed team"
-          subtitle="Read each brief, rename anyone, adjust how much freedom they get, then hire the team."
+          title={tr(lang, "team.proposedTitle")}
+          subtitle={tr(lang, "team.proposedSubtitle")}
           actions={
             <div className="flex gap-2">
               <form action={redesignTeam.bind(null, id)}>
-                <PendingSubmit variant="secondary">Redesign team</PendingSubmit>
+                <PendingSubmit variant="secondary">{tr(lang, "team.redesign")}</PendingSubmit>
               </form>
               <form action={hireTeam.bind(null, id)}>
-                <PendingSubmit>Hire team</PendingSubmit>
+                <PendingSubmit>{tr(lang, "team.hire")}</PendingSubmit>
               </form>
             </div>
           }
@@ -107,23 +107,23 @@ async function Content({ params }: Params) {
             <Prose>{biz.teamSummary}</Prose>
           </Card>
         )}
-        <AutonomyLegend />
+        <AutonomyLegend lang={lang} />
         <div className="grid gap-4 md:grid-cols-2">
           {proposed.map((t) => (
-            <TeammateCard key={t.id} t={t} businessId={id} />
+            <TeammateCard key={t.id} t={t} businessId={id} lang={lang} />
           ))}
         </div>
-        {!proposed.length && <p className="text-sm text-muted-foreground">Everyone was removed. Redesign the team to start over.</p>}
+        {!proposed.length && <p className="text-sm text-muted-foreground">{tr(lang, "team.everyoneRemoved")}</p>}
         <p className="mt-6 text-xs text-muted-foreground">
-          Not what you expected? The team is designed from your{" "}
+          {tr(lang, "team.notExpected1")}{" "}
           <Link href={`/b/${id}/profile`} className="underline">
-            business profile
+            {tr(lang, "team.notExpectedProfile")}
           </Link>
-          : edit it (or add details in the{" "}
+          {tr(lang, "team.notExpected2")}{" "}
           <Link href={`/b/${id}/onboarding`} className="underline">
-            interview
+            {tr(lang, "team.notExpectedInterview")}
           </Link>
-          ), then press Redesign team. Your edits to the teammates above are kept.
+          {tr(lang, "team.notExpected3")}
         </p>
       </div>
     );
@@ -142,44 +142,45 @@ async function Content({ params }: Params) {
         types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done", "schedule_skipped", "task_queued", "task_done", "task_failed"]}
       />
       <PageHeader
-        title="Your team"
-        subtitle={`${roster.length} AI teammates${humans.length ? ` and ${humans.length} ${humans.length === 1 ? "person" : "people"}` : ""} working for ${biz.name}`}
+        title={tr(lang, "team.title")}
+        subtitle={
+          humans.length
+            ? tr(lang, "team.subtitleWithPeople", { ai: tn(lang, "team.aiTeammates", roster.length), people: tn(lang, "team.people", humans.length), name: biz.name })
+            : tr(lang, "team.subtitle", { ai: tn(lang, "team.aiTeammates", roster.length), name: biz.name })
+        }
       />
-      <AutonomyLegend />
+      <AutonomyLegend lang={lang} />
       <div className="grid gap-4 md:grid-cols-2 mb-8">
         {roster.map((t) => (
-          <TeammateCard key={t.id} t={t} businessId={id} active schedule={schedules.get(t.id)} />
+          <TeammateCard key={t.id} t={t} businessId={id} active schedule={schedules.get(t.id)} lang={lang} />
         ))}
       </div>
       <Card className="p-5 mb-8">
-        <h2 className="font-medium mb-3">Add an AI teammate</h2>
+        <h2 className="font-medium mb-3">{tr(lang, "team.addAiTitle")}</h2>
         <AddTeammateForm
           action={addTeammate.bind(null, id)}
           roles={ROLE_TEMPLATES.map(({ key, title, summary }) => ({ key, title, summary }))}
         />
       </Card>
 
-      <h2 className="font-pixel mb-1 text-lg">People on WhatsApp</h2>
-      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">
-        Real people the AI team can ask for help: footage, B-roll and photos, checks in the workshop. The team messages them from the
-        business&apos;s WhatsApp (link it on the Business page), and their replies, with photos and videos, go straight back to whoever asked.
-      </p>
+      <h2 className="font-pixel mb-1 text-lg">{tr(lang, "team.peopleTitle")}</h2>
+      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">{tr(lang, "team.peopleBody")}</p>
       {humans.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 mb-6">
           {humans.map((h) => (
-            <HumanCard key={h.id} t={h} businessId={id} open={open.filter((r) => r.teammateId === h.id).length} isOwner={biz.ownerHumanId === h.id} />
+            <HumanCard key={h.id} t={h} businessId={id} open={open.filter((r) => r.teammateId === h.id).length} isOwner={biz.ownerHumanId === h.id} lang={lang} />
           ))}
         </div>
       )}
       <Card className="p-5">
-        <h2 className="font-medium mb-3">Add a person</h2>
+        <h2 className="font-medium mb-3">{tr(lang, "team.addPersonTitle")}</h2>
         <HumanForm action={addHuman.bind(null, id)} />
       </Card>
     </div>
   );
 }
 
-function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: string; open: number; isOwner: boolean }) {
+function HumanCard({ t, businessId, open, isOwner, lang }: { t: Teammate; businessId: string; open: number; isOwner: boolean; lang: UiLang }) {
   return (
     <Card className="p-5 flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -192,23 +193,23 @@ function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: 
           <div className="text-xs text-muted-foreground">WhatsApp +{t.phone}</div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Badge tone={isOwner ? "green" : "blue"}>{isOwner ? "Owner" : "Person"}</Badge>
-          {open > 0 && <Badge tone="amber">{open} open request{open === 1 ? "" : "s"}</Badge>}
+          <Badge tone={isOwner ? "green" : "blue"}>{isOwner ? tr(lang, "team.owner") : tr(lang, "team.person")}</Badge>
+          {open > 0 && <Badge tone="amber">{tn(lang, "team.openRequests", open)}</Badge>}
         </div>
       </div>
       <form action={setOwnerHuman.bind(null, businessId, isOwner ? null : t.id)} className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {isOwner ? (
           <>
-            <span>Approval requests also go to this WhatsApp. Answer &ldquo;ya &lt;code&gt;&rdquo; or &ldquo;tidak &lt;code&gt;&rdquo;.</span>
-            <PendingSubmit variant="ghost">Stop</PendingSubmit>
+            <span>{tr(lang, "team.ownerApprovals")}</span>
+            <PendingSubmit variant="ghost">{tr(lang, "team.stop")}</PendingSubmit>
           </>
         ) : (
-          <PendingSubmit variant="secondary">This is me: send me approvals on WhatsApp</PendingSubmit>
+          <PendingSubmit variant="secondary">{tr(lang, "team.thisIsMe")}</PendingSubmit>
         )}
       </form>
       {t.responsibilities.length > 0 && (
         <div>
-          <div className="text-xs font-medium text-muted-foreground mb-1">The team can ask them for</div>
+          <div className="text-xs font-medium text-muted-foreground mb-1">{tr(lang, "team.canAskThemFor")}</div>
           <ul className="list-disc pl-5 text-sm space-y-0.5">
             {t.responsibilities.map((r, i) => (
               <li key={i}>{r}</li>
@@ -217,15 +218,15 @@ function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: 
         </div>
       )}
       <details className="border-t border-border pt-3">
-        <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">Edit</summary>
+        <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">{tr(lang, "team.edit")}</summary>
         <div className="pt-3 grid gap-3">
           <HumanForm
             action={updateHuman.bind(null, businessId, t.id)}
             initial={{ name: t.name, title: t.title, phone: t.phone, helps: t.responsibilities }}
-            submitLabel="Save"
+            submitLabel={tr(lang, "team.form.save")}
           />
           <form action={removeTeammate.bind(null, businessId, t.id)}>
-            <PendingSubmit variant="ghost">Remove {t.name} from the team</PendingSubmit>
+            <PendingSubmit variant="ghost">{tr(lang, "team.removePerson", { name: t.name })}</PendingSubmit>
           </form>
         </div>
       </details>
@@ -234,15 +235,15 @@ function HumanCard({ t, businessId, open, isOwner }: { t: Teammate; businessId: 
 }
 
 /** Between the interview and the team design: the owner confirms the profile the whole team will work from. */
-function ProfileCheck({ businessId, profile: p }: { businessId: string; profile: BusinessProfile }) {
+function ProfileCheck({ businessId, profile: p, lang }: { businessId: string; profile: BusinessProfile; lang: UiLang }) {
   return (
     <div className="max-w-2xl">
       <PageHeader
-        title="Check your profile"
-        subtitle="Every teammate reads this before every task, and the team is designed from it. Fix anything that's off, then let Ajudan design your team."
+        title={tr(lang, "team.checkTitle")}
+        subtitle={tr(lang, "team.checkSubtitle")}
         actions={
           <form action={redesignTeam.bind(null, businessId)}>
-            <PendingSubmit>Looks right — design my team</PendingSubmit>
+            <PendingSubmit>{tr(lang, "team.checkConfirm")}</PendingSubmit>
           </form>
         }
       />
@@ -254,7 +255,7 @@ function ProfileCheck({ businessId, profile: p }: { businessId: string; profile:
         <Prose>{p.description}</Prose>
         <div className="grid gap-4 sm:grid-cols-2 text-sm">
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Goals (next ~90 days)</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">{tr(lang, "team.goals")}</div>
             {p.goals.length ? (
               <ul className="list-disc pl-5 space-y-0.5">
                 {p.goals.map((g, i) => (
@@ -264,11 +265,11 @@ function ProfileCheck({ businessId, profile: p }: { businessId: string; profile:
                 ))}
               </ul>
             ) : (
-              <p className="text-muted-foreground">None yet</p>
+              <p className="text-muted-foreground">{tr(lang, "team.noneYet")}</p>
             )}
           </div>
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">What the team should do</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">{tr(lang, "team.teamNeeds")}</div>
             {p.teamNeeds.length ? (
               <ul className="list-disc pl-5 space-y-0.5">
                 {p.teamNeeds.map((n, i) => (
@@ -276,16 +277,16 @@ function ProfileCheck({ businessId, profile: p }: { businessId: string; profile:
                 ))}
               </ul>
             ) : (
-              <p className="text-muted-foreground">None yet</p>
+              <p className="text-muted-foreground">{tr(lang, "team.noneYet")}</p>
             )}
           </div>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-sm">
           <Link href={`/b/${businessId}/profile`} className="text-primary underline">
-            Edit the full profile
+            {tr(lang, "team.editProfile")}
           </Link>
           <Link href={`/b/${businessId}/onboarding`} className="text-primary underline">
-            Add details in the interview
+            {tr(lang, "team.addInterviewDetails")}
           </Link>
         </div>
       </Card>
@@ -293,10 +294,10 @@ function ProfileCheck({ businessId, profile: p }: { businessId: string; profile:
   );
 }
 
-function AutonomyLegend() {
+function AutonomyLegend({ lang }: { lang: UiLang }) {
   return (
     <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-      {AUTONOMY_OPTIONS.map((o) => (
+      {autonomyOptions(lang).map((o) => (
         <span key={o.value}>
           <span className="font-medium text-foreground">{o.label}:</span> {o.help}
         </span>
@@ -305,8 +306,20 @@ function AutonomyLegend() {
   );
 }
 
-function TeammateCard({ t, businessId, active, schedule }: { t: Teammate; businessId: string; active?: boolean; schedule?: ScheduleStatus }) {
-  const autonomy = AUTONOMY_OPTIONS.find((o) => o.value === t.autonomy);
+function TeammateCard({
+  t,
+  businessId,
+  active,
+  schedule,
+  lang,
+}: {
+  t: Teammate;
+  businessId: string;
+  active?: boolean;
+  schedule?: ScheduleStatus;
+  lang: UiLang;
+}) {
+  const autonomy = autonomyOptions(lang).find((o) => o.value === t.autonomy);
   return (
     <Card className="p-5 flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -323,21 +336,21 @@ function TeammateCard({ t, businessId, active, schedule }: { t: Teammate; busine
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge tone="violet">{autonomy?.label ?? t.autonomy}</Badge>
-          <span className="text-[11px] text-muted-foreground">{describeCron(t.schedule)}</span>
+          <span className="text-[11px] text-muted-foreground">{describeCron(t.schedule, lang)}</span>
         </div>
       </div>
       {t.why && <p className="text-sm">{t.why}</p>}
       <div>
-        <div className="text-xs font-medium text-muted-foreground mb-1">Brief</div>
+        <div className="text-xs font-medium text-muted-foreground mb-1">{tr(lang, "team.brief")}</div>
         {t.persona ? (
           <p className="text-sm whitespace-pre-line">{t.persona}</p>
         ) : (
-          <p className="text-sm text-muted-foreground">No brief yet: {t.name} only gets the business profile and the role&apos;s standard instructions. Add one under Edit.</p>
+          <p className="text-sm text-muted-foreground">{tr(lang, "team.noBrief", { name: t.name })}</p>
         )}
       </div>
       {t.responsibilities.length > 0 && (
         <div>
-          <div className="text-xs font-medium text-muted-foreground mb-1">Responsibilities</div>
+          <div className="text-xs font-medium text-muted-foreground mb-1">{tr(lang, "team.responsibilities")}</div>
           <ul className="list-disc pl-5 text-sm space-y-0.5">
             {t.responsibilities.map((r, i) => (
               <li key={i}>{r}</li>
@@ -355,13 +368,13 @@ function TeammateCard({ t, businessId, active, schedule }: { t: Teammate; busine
       {t.schedule && t.schedulePrompt && (
         <div className="grid gap-0.5">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium">{describeCron(t.schedule)}:</span> {t.schedulePrompt}
+            <span className="font-medium">{describeCron(t.schedule, lang)}:</span> {t.schedulePrompt}
           </p>
-          {schedule && <ScheduleLine s={schedule} />}
+          {schedule && <ScheduleLine s={schedule} lang={lang} />}
         </div>
       )}
       <details className="border-t border-border pt-3">
-        <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">Edit</summary>
+        <summary className="text-sm cursor-pointer text-muted-foreground hover:text-foreground">{tr(lang, "team.edit")}</summary>
         <div className="pt-3 grid gap-3">
           <TeammateEditor
             action={updateTeammate.bind(null, businessId, t.id)}
@@ -378,7 +391,7 @@ function TeammateCard({ t, businessId, active, schedule }: { t: Teammate; busine
             }}
           />
           <form action={removeTeammate.bind(null, businessId, t.id)}>
-            <PendingSubmit variant="ghost">{active ? "Archive teammate" : "Remove from team"}</PendingSubmit>
+            <PendingSubmit variant="ghost">{active ? tr(lang, "team.archive") : tr(lang, "team.removeFromTeam")}</PendingSubmit>
           </form>
         </div>
       </details>

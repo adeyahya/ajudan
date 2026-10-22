@@ -12,6 +12,7 @@ import { isOnWhatsapp } from "@/lib/whatsapp";
 import { getRole } from "@/lib/roles";
 import { defaultPersona, parseLines } from "@/lib/team";
 import { initTeammateWorkspace } from "@/lib/workspace";
+import { t } from "@/lib/i18n";
 
 export type FormState = { error?: string; ok?: boolean };
 
@@ -19,6 +20,11 @@ function getBiz(businessId: string) {
   const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
   if (!biz) throw new Error("Business not found");
   return biz;
+}
+
+/** The business's language, for messages shown back to the owner. */
+function langOf(businessId: string) {
+  return db.select({ language: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.language;
 }
 
 const ownTeammate = (businessId: string, teammateId: string) =>
@@ -39,12 +45,13 @@ export async function updateTeammate(
   const shellAccess = formData.get("shellAccess") === "on";
   const persona = String(formData.get("persona") ?? "").trim();
   const responsibilities = parseLines(String(formData.get("responsibilities") ?? ""));
-  if (!name) return { error: "Name can't be empty" };
-  if (!isAutonomy(autonomy)) return { error: "Pick an autonomy level" };
+  const lang = langOf(businessId);
+  if (!name) return { error: t(lang, "team.err.name") };
+  if (!isAutonomy(autonomy)) return { error: t(lang, "team.err.autonomy") };
   const schedule = rawSchedule ? validCron(rawSchedule) : null;
-  if (rawSchedule && !schedule) return { error: `"${rawSchedule}" isn't a valid cron expression (e.g. 0 9 * * 1), or runs more than once an hour` };
-  if (schedule && !schedulePrompt) return { error: "Describe what to do on each scheduled run" };
-  if (!responsibilities.length) return { error: "List at least one responsibility" };
+  if (rawSchedule && !schedule) return { error: t(lang, "team.err.cron", { expr: rawSchedule }) };
+  if (schedule && !schedulePrompt) return { error: t(lang, "team.err.schedulePrompt") };
+  if (!responsibilities.length) return { error: t(lang, "team.err.responsibilities") };
 
   db.update(schema.teammates)
     .set({
@@ -78,7 +85,7 @@ export async function removeTeammate(businessId: string, teammateId: string) {
 export async function redesignTeam(businessId: string) {
   const biz = getBiz(businessId);
   if (biz.busy) return;
-  if (!biz.profile) throw new Error("Finish the interview first");
+  if (!biz.profile) throw new Error(t(biz.language, "team.err.finishInterview"));
   db.update(schema.businesses).set({ status: "designing", busy: true }).where(eq(schema.businesses.id, businessId)).run();
   enqueueJob("design_team", { businessId });
   refresh();
@@ -86,7 +93,7 @@ export async function redesignTeam(businessId: string) {
 
 export async function hireTeam(businessId: string) {
   const biz = getBiz(businessId);
-  if (!biz.profile) throw new Error("The business profile is missing; finish the interview first");
+  if (!biz.profile) throw new Error(t(biz.language, "team.err.noProfile"));
   const proposed = db
     .select()
     .from(schema.teammates)
@@ -98,7 +105,7 @@ export async function hireTeam(businessId: string) {
     .from(schema.teammates)
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
     .all().length;
-  if (!proposed.length && !activeCount) throw new Error("There is no one to hire");
+  if (!proposed.length && !activeCount) throw new Error(t(biz.language, "team.err.noOne"));
 
   for (const t of proposed) {
     const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
@@ -111,11 +118,11 @@ export async function hireTeam(businessId: string) {
 
 export async function addTeammate(businessId: string, _prev: FormState, formData: FormData): Promise<FormState> {
   const biz = getBiz(businessId);
-  if (!biz.profile) return { error: "Finish the interview first" };
+  if (!biz.profile) return { error: t(biz.language, "team.err.finishInterview") };
   const role = getRole(String(formData.get("roleKey") ?? ""));
-  if (!role) return { error: "Pick a role" };
+  if (!role) return { error: t(biz.language, "team.err.role") };
   const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { error: "Give your teammate a name" };
+  if (!name) return { error: t(biz.language, "team.err.teammateName") };
   // The brief the teammate works from: the owner's words, or a default built from the profile.
   const persona = String(formData.get("persona") ?? "").trim() || defaultPersona(role, biz.profile);
 
@@ -124,7 +131,7 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
     .from(schema.teammates)
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active")))
     .get();
-  const t = db
+  const mate = db
     .insert(schema.teammates)
     .values({
       businessId,
@@ -142,17 +149,15 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
     })
     .returning()
     .get();
-  const workspaceDir = initTeammateWorkspace(t, biz.profile, biz.language);
-  db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, t.id)).run();
+  const workspaceDir = initTeammateWorkspace(mate, biz.profile, biz.language);
+  db.update(schema.teammates).set({ workspaceDir }).where(eq(schema.teammates.id, mate.id)).run();
   refresh();
   return { ok: true };
 }
 
 /** A typo'd number would fail silently later: ask WhatsApp now (skipped if WhatsApp isn't linked). */
-async function checkNumber(phone: string) {
-  return (await isOnWhatsapp(phone)) === false
-    ? `+${phone} isn't on WhatsApp. Check the number (with the country code, without the 0 after it).`
-    : undefined;
+async function checkNumber(phone: string, language: string) {
+  return (await isOnWhatsapp(phone)) === false ? t(language, "team.err.notOnWhatsapp", { phone }) : undefined;
 }
 
 function humanFields(formData: FormData, language: string) {
@@ -160,10 +165,10 @@ function humanFields(formData: FormData, language: string) {
   const title = String(formData.get("title") ?? "").trim();
   const phoneRaw = String(formData.get("phone") ?? "").trim();
   const helps = parseLines(String(formData.get("helps") ?? ""));
-  if (!name) return { error: "Give them a name" };
+  if (!name) return { error: t(language, "team.err.personName") };
   const phone = normalizePhone(phoneRaw, language);
-  if (!phone) return { error: "Enter their WhatsApp number with the country code, e.g. +62 812 3456 7890" };
-  return { name, title: title || "Team member", phone, helps };
+  if (!phone) return { error: t(language, "team.err.phone") };
+  return { name, title: title || t(language, "team.defaultHumanTitle"), phone, helps };
 }
 
 /**
@@ -179,8 +184,8 @@ export async function addHuman(businessId: string, _prev: FormState, formData: F
     .from(schema.teammates)
     .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.phone, f.phone), eq(schema.teammates.status, "active")))
     .get();
-  if (taken) return { error: "Someone on the team already has that number" };
-  const bad = await checkNumber(f.phone);
+  if (taken) return { error: t(biz.language, "team.err.phoneTaken") };
+  const bad = await checkNumber(f.phone, biz.language);
   if (bad) return { error: bad };
   const top = db
     .select({ m: max(schema.teammates.deskIndex) })
@@ -211,7 +216,7 @@ export async function updateHuman(businessId: string, teammateId: string, _prev:
   const biz = getBiz(businessId);
   const f = humanFields(formData, biz.language);
   if ("error" in f) return { error: f.error };
-  const bad = await checkNumber(f.phone);
+  const bad = await checkNumber(f.phone, biz.language);
   if (bad) return { error: bad };
   db.update(schema.teammates)
     .set({ name: f.name, title: f.title, phone: f.phone, responsibilities: f.helps })

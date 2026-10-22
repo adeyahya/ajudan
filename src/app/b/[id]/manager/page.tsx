@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { Card, PageSkeleton } from "@/components/kit";
 import { formatUsd } from "@/lib/budget";
 import { getBusiness, getSpend } from "@/lib/data";
+import { t, uiLang } from "@/lib/i18n";
 import { ensureManager } from "@/lib/manager";
 import { TeammateView } from "../teammates/[tid]/teammate-view";
 import { WhatsappChecklist } from "./whatsapp-checklist";
@@ -25,13 +26,14 @@ async function Content({ params }: Params) {
   await connection();
   const biz = await getBusiness(id);
   if (!biz) notFound();
+  const lang = uiLang(biz.language);
   if (biz.status !== "active") {
     return (
       <Card className="mx-auto max-w-lg p-6">
-        <h1 className="mb-1 text-lg text-primary">Your manager arrives with the team</h1>
-        <p className="text-sm text-muted-foreground">Finish the interview and hire your team first.</p>
+        <h1 className="mb-1 text-lg text-primary">{t(lang, "manager.notYetTitle")}</h1>
+        <p className="text-sm text-muted-foreground">{t(lang, "manager.notYetBody")}</p>
         <Link href={`/b/${id}/${biz.status === "onboarding" ? "onboarding" : "team"}`} className="font-pixel mt-4 inline-block text-primary underline">
-          Continue →
+          {t(lang, "manager.continue")}
         </Link>
       </Card>
     );
@@ -44,14 +46,14 @@ async function Content({ params }: Params) {
       {!biz.ownerHumanId && (
         // Its own boundary: checking the WhatsApp link shells out to wacli and shouldn't hold up the chat.
         <Suspense fallback={null}>
-          <WhatsappChecklist businessId={id} allowedChats={biz.whatsappChats.length} />
+          <WhatsappChecklist businessId={id} allowedChats={biz.whatsappChats.length} lang={lang} />
         </Suspense>
       )}
       <p className={`text-xs ${spend.over ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>
-        Team spend today {formatUsd(spend.today)} of {formatUsd(spend.cap)} · this week {formatUsd(spend.week)}
-        {spend.over && " · budget reached: queued tasks wait"}{" "}
+        {t(lang, "manager.spend", { today: formatUsd(spend.today), cap: formatUsd(spend.cap), week: formatUsd(spend.week) })}
+        {spend.over && t(lang, "manager.spendOver")}{" "}
         <Link href={`/b/${id}/profile`} className="underline">
-          budget
+          {t(lang, "manager.budgetLink")}
         </Link>
       </p>
       <TeammateView id={id} tid={manager.id} manager />

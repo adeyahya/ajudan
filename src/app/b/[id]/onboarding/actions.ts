@@ -3,6 +3,7 @@
 import { eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
+import { t } from "@/lib/i18n";
 import { enqueueJob } from "@/lib/jobs";
 
 function getBiz(businessId: string) {
@@ -19,7 +20,7 @@ export async function sendAnswer(businessId: string, formData: FormData) {
   const content = String(formData.get("content") ?? "").trim();
   if (!content) return;
   const biz = getBiz(businessId);
-  if (biz.busy) throw new Error("The interviewer is still thinking");
+  if (biz.busy) throw new Error(t(biz.language, "onboarding.err.busy"));
   db.insert(schema.onboardingMessages).values({ businessId, role: "user", content }).run();
   setBusy(businessId, true);
   enqueueJob("onboarding_turn", { businessId });
@@ -28,7 +29,7 @@ export async function sendAnswer(businessId: string, formData: FormData) {
 
 export async function finishInterview(businessId: string) {
   const biz = getBiz(businessId);
-  if (biz.busy) throw new Error("The interviewer is still thinking");
+  if (biz.busy) throw new Error(t(biz.language, "onboarding.err.busy"));
   setBusy(businessId, true);
   enqueueJob("onboarding_finalize", { businessId });
   refresh();

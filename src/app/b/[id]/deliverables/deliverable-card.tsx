@@ -4,6 +4,7 @@ import { markPosted } from "./actions";
 import { CopyButton } from "./copy-button";
 import { FeedbackForm } from "./feedback-form";
 import { ImageStrip } from "@/components/image-strip";
+import { dateLocale, t, type UiLang } from "@/lib/i18n";
 
 export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "blue" | "amber" | "red"> = {
   draft: "neutral",
@@ -13,14 +14,10 @@ export const DELIVERABLE_TONE: Record<DeliverableStatus, "neutral" | "green" | "
   rejected: "red",
 };
 
-/** "published" stays the stored value for work the owner posted (and old simulated publishes). */
-export const DELIVERABLE_LABEL: Record<DeliverableStatus, string> = {
-  draft: "Draft",
-  ready_to_post: "Ready to post",
-  approved: "Approved",
-  published: "Posted",
-  rejected: "Needs changes",
-};
+/** "published" stays the stored value for work the owner posted (and old simulated publishes): "Posted". */
+export function deliverableLabel(status: DeliverableStatus, lang?: string | null) {
+  return t(lang, `deliverableStatus.${status}`);
+}
 
 export function kindLabel(kind: string) {
   return kind.replace(/_/g, " ");
@@ -32,12 +29,14 @@ export function DeliverableCard({
   teammate,
   revisingBy,
   showActions = true,
+  lang,
 }: {
   d: Deliverable;
   teammate?: { id: string; name: string; color: string } | null;
   /** Who is revising it right now (an open revision task), if anyone. */
   revisingBy?: string | null;
   showActions?: boolean;
+  lang: UiLang;
 }) {
   const isMessage = d.kind === "outbound_message";
   return (
@@ -49,25 +48,26 @@ export function DeliverableCard({
           <div className="text-xs text-muted-foreground">
             {kindLabel(d.kind)}
             {d.channel ? ` · ${d.channel}` : ""}
-            {teammate ? ` · ${teammate.name}` : ""} · {d.createdAt.toLocaleString()}
-            {d.versions.length > 0 ? ` · version ${d.versions.length + 1}` : ""}
+            {teammate ? ` · ${teammate.name}` : ""} · {d.createdAt.toLocaleString(dateLocale(lang))}
+            {d.versions.length > 0 ? ` · ${t(lang, "work.version", { n: d.versions.length + 1 })}` : ""}
           </div>
         </div>
         {d.attachments.length > 0 && (
           <span className="font-pixel text-xs text-muted-foreground">🖼 {d.attachments.length}</span>
         )}
-        <Badge tone={DELIVERABLE_TONE[d.status]}>{DELIVERABLE_LABEL[d.status]}</Badge>
+        <Badge tone={DELIVERABLE_TONE[d.status]}>{deliverableLabel(d.status, lang)}</Badge>
         <span className="text-muted-foreground text-xs transition group-open:rotate-90">▶</span>
       </summary>
       <div className="border-t border-border p-3 space-y-3">
         {d.status === "ready_to_post" && (
           <p className="text-xs text-muted-foreground">
-            {isMessage ? "Ready for you to send" : "Ready for you to post"}
-            {d.channel ? ` on ${d.channel}` : ""}: Ajudan doesn&apos;t {isMessage ? "send" : "post"} it. Copy the text
-            {d.attachments.length ? ", download the files" : ""} and {isMessage ? "send" : "post"} it yourself, then mark it posted.
+            {t(lang, isMessage ? "work.readySend" : "work.readyPost", {
+              on: d.channel ? t(lang, "work.readyOn", { channel: d.channel }) : "",
+              files: d.attachments.length ? t(lang, "work.readyFiles") : "",
+            })}
           </p>
         )}
-        {revisingBy && <p className="text-xs text-muted-foreground">{revisingBy} is revising this.</p>}
+        {revisingBy && <p className="text-xs text-muted-foreground">{t(lang, "work.revising", { name: revisingBy })}</p>}
         <ImageStrip businessId={d.businessId} images={d.attachments} size={120} />
         <Prose className="max-h-[28rem] overflow-y-auto">{d.content}</Prose>
         <div className="flex flex-wrap items-center gap-2">
@@ -77,7 +77,7 @@ export function DeliverableCard({
               <input type="hidden" name="businessId" value={d.businessId} />
               <input type="hidden" name="deliverableId" value={d.id} />
               <Button variant="secondary" className="h-7 px-2.5 text-xs">
-                {isMessage ? "Mark sent" : "Mark posted"}
+                {isMessage ? t(lang, "work.markSent") : t(lang, "work.markPosted")}
               </Button>
             </form>
           )}

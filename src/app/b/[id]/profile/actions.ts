@@ -2,10 +2,11 @@
 
 import { deleteSecret, normalizeHost, setSecret } from "@/lib/secrets";
 import { eq } from "drizzle-orm";
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { closeBrowser, ensureBrowser, normalizeSites } from "@/lib/browser";
 import { parseBudget } from "@/lib/budget";
+import { t } from "@/lib/i18n";
 import { parseLanguage } from "@/lib/language";
 import { cancelLink, startLink, unlinkRequestPath, whatsappDir } from "@/lib/whatsapp";
 import fs from "node:fs";
@@ -17,7 +18,7 @@ export type ProfileFormState = { error?: string; ok?: boolean };
 
 export async function saveProfile(businessId: string, _prev: ProfileFormState, fd: FormData): Promise<ProfileFormState> {
   const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
-  if (!biz?.profile) return { error: "No profile to edit yet" };
+  if (!biz?.profile) return { error: t(biz?.language, "profile.err.noProfile") };
 
   const str = (k: string) => String(fd.get(k) ?? "").trim();
   const name = str("name") || biz.name;
@@ -45,13 +46,17 @@ export async function saveProfile(businessId: string, _prev: ProfileFormState, f
   return { ok: true };
 }
 
-/** Change the business's primary language; teammates' BUSINESS.md states it. */
+/**
+ * Change the business's primary language: teammates' BUSINESS.md states it, the worker reads it
+ * for every prompt, and the app's screens follow it (src/lib/i18n).
+ */
 export async function saveLanguage(businessId: string, fd: FormData) {
   const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
   if (!biz) throw new Error("Business not found");
   const language = parseLanguage(fd.get("language"));
   db.update(schema.businesses).set({ language }).where(eq(schema.businesses.id, businessId)).run();
   if (biz.profile) refreshWorkspaces(businessId, biz.profile, language);
+  revalidatePath(`/b/${businessId}`, "layout"); // nav and the rest of the chrome switch language too
   refresh();
 }
 
@@ -128,7 +133,7 @@ export async function saveSecretAction(businessId: string, _prev: { error?: stri
       note: String(fd.get("note") ?? "").trim(),
     });
     refresh();
-    return { ok: `Saved ${name}. Teammates use it as {{secret.${name}}}.` };
+    return { ok: t(String(fd.get("lang") ?? ""), "profile.secrets.saved", { name, usage: `{{secret.${name}}}` }) };
   } catch (err) {
     return { error: (err as Error).message };
   }
@@ -142,7 +147,10 @@ export async function deleteSecretAction(businessId: string, name: string) {
 /** The most the team may spend per day; queued work waits once it's reached. */
 export async function saveDailyBudget(businessId: string, fd: FormData) {
   const dailyBudgetUsd = parseBudget(fd.get("budget"));
-  if (dailyBudgetUsd === null) throw new Error("The daily budget must be a positive amount in dollars");
+  if (dailyBudgetUsd === null) {
+    const biz = db.select({ language: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+    throw new Error(t(biz?.language, "profile.err.budget"));
+  }
   db.update(schema.businesses).set({ dailyBudgetUsd }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }

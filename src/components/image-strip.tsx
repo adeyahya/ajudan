@@ -2,6 +2,7 @@
 
 import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, FileIcon, MusicIcon, PlayIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useT } from "@/components/i18n";
 import { Button } from "@/components/ui/button";
 import { mediaKind } from "@/lib/media-types";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,7 @@ export function ImageStrip({
   size?: number;
   className?: string;
 }) {
+  const t = useT();
   const [open, setOpen] = useState<number | null>(null);
   useEffect(() => {
     if (open === null) return;
@@ -95,13 +97,13 @@ export function ImageStrip({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
           onClick={() => setOpen(null)}
           role="dialog"
-          aria-label="Media viewer"
+          aria-label={t("ui.mediaViewer")}
         >
           <div className="relative flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
             <Viewer businessId={businessId} file={current} />
             <div className="flex items-center gap-2">
               {images.length > 1 && (
-                <Button variant="outline" size="icon" onClick={() => setOpen((open - 1 + images.length) % images.length)} aria-label="Previous">
+                <Button variant="outline" size="icon" onClick={() => setOpen((open - 1 + images.length) % images.length)} aria-label={t("ui.previous")}>
                   <ChevronLeftIcon />
                 </Button>
               )}
@@ -109,16 +111,16 @@ export function ImageStrip({
                 {open + 1} / {images.length}
               </span>
               {images.length > 1 && (
-                <Button variant="outline" size="icon" onClick={() => setOpen((open + 1) % images.length)} aria-label="Next">
+                <Button variant="outline" size="icon" onClick={() => setOpen((open + 1) % images.length)} aria-label={t("ui.next")}>
                   <ChevronRightIcon />
                 </Button>
               )}
-              <Button asChild variant="outline" size="icon" aria-label="Download">
+              <Button asChild variant="outline" size="icon" aria-label={t("ui.download")}>
                 <a href={fileUrl(businessId, current)} download={fileName(current)}>
                   <DownloadIcon />
                 </a>
               </Button>
-              <Button variant="outline" size="icon" onClick={() => setOpen(null)} aria-label="Close">
+              <Button variant="outline" size="icon" onClick={() => setOpen(null)} aria-label={t("ui.close")}>
                 <XIcon />
               </Button>
             </div>

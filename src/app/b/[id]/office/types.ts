@@ -1,4 +1,5 @@
 import type { ActivityEvent, TeammateState } from "@/db/schema";
+import { t, type MessageKey } from "@/lib/i18n";
 
 /** Events from the server render carry Dates; events from SSE carry ISO strings. */
 export type FeedEvent = Omit<ActivityEvent, "createdAt"> & { createdAt: Date | string };
@@ -20,11 +21,11 @@ export const EFFECT_TYPES: ReadonlySet<string> = new Set<OfficeEffect["type"]>([
   "approval_requested",
 ]);
 
-export const STATE_LABEL: Record<TeammateState, string> = {
-  idle: "Idle",
-  working: "Working",
-  waiting: "Needs approval",
-  error: "Error",
+export const STATE_LABEL: Record<TeammateState, MessageKey> = {
+  idle: "office.state.idle",
+  working: "office.state.working",
+  waiting: "office.state.waiting",
+  error: "office.state.error",
 };
 
 export const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "red"> = {
@@ -34,13 +35,13 @@ export const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "
   error: "red",
 };
 
-export function relativeTime(now: number, at: Date | string) {
+export function relativeTime(now: number, at: Date | string, lang?: string | null) {
   const s = Math.max(0, Math.round((now - new Date(at).getTime()) / 1000));
-  if (s < 10) return "just now";
-  if (s < 60) return `${s}s ago`;
+  if (s < 10) return t(lang, "office.time.justNow");
+  if (s < 60) return t(lang, "office.time.seconds", { n: s });
   const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return t(lang, "office.time.minutes", { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (h < 24) return t(lang, "office.time.hours", { n: h });
+  return t(lang, "office.time.days", { n: Math.round(h / 24) });
 }

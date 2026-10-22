@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useT, useTn } from "@/components/i18n";
 import { cn } from "@/components/kit";
 import { OfficeEngine } from "./engine";
 import { layoutFor, TILE } from "./room";
 import type { OfficeTeammate } from "./state";
-import type { OfficeEffect } from "./types";
+import { STATE_LABEL, type OfficeEffect } from "./types";
 
 type Props = {
   businessName: string;
@@ -39,6 +40,8 @@ export function OfficeCanvas({
   onSelect,
   onOpenApprovals,
 }: Props) {
+  const tr = useT();
+  const tn = useTn();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<OfficeEngine | null>(null);
@@ -190,7 +193,7 @@ export function OfficeCanvas({
         ref={canvasRef}
         className={cn("absolute inset-0 h-full w-full [image-rendering:pixelated]", hoverId ? "cursor-pointer" : "cursor-default")}
         role="img"
-        aria-label={`Office of ${businessName}: ${teammates.map((t) => `${t.name} is ${t.state}`).join(", ")}`}
+        aria-label={tr("office.canvasLabel", { business: businessName, people: teammates.map((t) => tr("office.personState", { name: t.name, state: tr(STATE_LABEL[t.state]) })).join(", ") })}
         onPointerMove={onMove}
         onPointerLeave={onLeave}
         onClick={onClick}
@@ -216,7 +219,7 @@ export function OfficeCanvas({
           className="absolute -translate-x-1/2 rounded-full bg-[#2a1d22]/75 px-[0.6em] py-[0.25em] font-medium leading-none text-white"
           style={{ left: pct(o.seatX + 8, WW), top: pct((o.dy + 1) * TILE + 1, HH) }}
         >
-          You
+          {tr("office.you")}
         </div>
         {pendingApprovals > 0 && (
           <button
@@ -224,9 +227,9 @@ export function OfficeCanvas({
             onClick={onOpenApprovals}
             className="pointer-events-auto absolute -translate-x-1/2 -translate-y-full cursor-pointer rounded-full border-2 border-[#2a1d22] bg-amber-400 px-[0.5em] py-[0.15em] font-bold leading-none text-[#2a1d22] shadow-[2px_2px_0_rgba(42,29,34,0.25)] hover:bg-amber-300"
             style={{ left: pct(o.dx * TILE + 40, WW), top: pct(o.dy * TILE - 6, HH) }}
-            aria-label={`${pendingApprovals} pending approvals`}
+            aria-label={tn("office.pendingApprovals", pendingApprovals)}
           >
-            {pendingApprovals} to review
+            {tr("office.toReview", { count: pendingApprovals })}
           </button>
         )}
 
@@ -282,8 +285,8 @@ export function OfficeCanvas({
                   data-state="waiting"
                   style={bubblePos}
                   onClick={onOpenApprovals}
-                  title={`${t.name} needs your approval`}
-                  aria-label={`${t.name} needs your approval`}
+                  title={tr("office.needsYourApproval", { name: t.name })}
+                  aria-label={tr("office.needsYourApproval", { name: t.name })}
                   className={cn(bubbleBase, "pointer-events-auto z-20 cursor-pointer bg-transparent p-0 border-0 shadow-none")}
                 >
                   <span className="block animate-bounce rounded-[4px] border-2 border-[#2a1d22] bg-amber-400 px-[0.55em] py-[0.3em] text-[1.25em] font-black text-[#2a1d22] shadow-[2px_2px_0_rgba(42,29,34,0.25)] hover:bg-amber-300">
@@ -300,7 +303,7 @@ export function OfficeCanvas({
                   data-state="error"
                   style={bubblePos}
                   className={cn(bubbleBase, "z-10 bg-red-500 px-[0.45em] py-[0.3em] text-[1.1em] text-white")}
-                  title={t.currentActivity ?? "Something went wrong"}
+                  title={t.currentActivity ?? tr("office.somethingWrong")}
                 >
                   ⚠
                 </div>

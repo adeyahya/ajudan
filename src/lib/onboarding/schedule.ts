@@ -1,5 +1,6 @@
 import { Cron } from "croner";
 import type { Autonomy } from "@/db/schema";
+import { t, type MessageKey } from "@/lib/i18n";
 
 /** Scheduled runs may not come closer together than this (each run is a paid Claude run). */
 export const MIN_CRON_INTERVAL_MS = 60 * 60 * 1000;
@@ -38,17 +39,25 @@ export function nextRunOf(expr: string | null | undefined, from = new Date()): D
   }
 }
 
-export const AUTONOMY_OPTIONS: { value: Autonomy; label: string; help: string }[] = [
-  { value: "draft", label: "Draft only", help: "Prepares work for you to review. Never takes action on its own." },
-  { value: "ask", label: "Ask first", help: "Works on its own, but asks your approval before anything goes out." },
-  { value: "auto", label: "Autopilot", help: "Acts on its own within its role and reports what it did." },
-];
+export const AUTONOMY_VALUES: Autonomy[] = ["draft", "ask", "auto"];
+
+/** The autonomy choices with their label and help text in the UI language. */
+export function autonomyOptions(lang?: string | null): { value: Autonomy; label: string; help: string }[] {
+  return AUTONOMY_VALUES.map((value) => ({
+    value,
+    label: t(lang, `autonomy.${value}.label`),
+    help: t(lang, `autonomy.${value}.help`),
+  }));
+}
 
 export function isAutonomy(v: unknown): v is Autonomy {
   return v === "draft" || v === "ask" || v === "auto";
 }
 
-export const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** Day d (0 = Sunday … 6 = Saturday), full or short ("Monday"/"Mon", "Senin"/"Sen"). */
+export function dayName(d: number, lang?: string | null, short = false): string {
+  return t(lang, `${short ? "dayShort" : "day"}.${d}` as MessageKey);
+}
 
 /**
  * What the schedule picker on the Team page produces: a time of day plus daily,
@@ -121,17 +130,16 @@ function parseDays(dow: string): number[] | null {
 }
 
 /** Plain-words description of the schedules the picker makes (and the common hand-written ones). */
-export function describeCron(expr: string | null | undefined): string {
-  if (!expr) return "No recurring work";
+export function describeCron(expr: string | null | undefined, lang?: string | null): string {
+  if (!expr) return t(lang, "cron.none");
   const e = expr.trim();
   const p = parseDaily(e);
   if (!p) return e;
   const time = `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
-  if (p.days === "*") return `Every day at ${time}`;
-  if (p.days.length === 7) return `Every day at ${time}`;
-  if (p.days.join(",") === "1,2,3,4,5") return `Weekdays at ${time}`;
-  if (p.days.join(",") === "0,6") return `Weekends at ${time}`;
-  if (p.days.length === 1) return `Every ${DAY_NAMES[p.days[0]]} at ${time}`;
-  const names = p.days.map((d) => DAY_NAMES[d]);
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} at ${time}`;
+  if (p.days === "*" || p.days.length === 7) return t(lang, "cron.everyDay", { time });
+  if (p.days.join(",") === "1,2,3,4,5") return t(lang, "cron.weekdays", { time });
+  if (p.days.join(",") === "0,6") return t(lang, "cron.weekends", { time });
+  if (p.days.length === 1) return t(lang, "cron.oneDay", { day: dayName(p.days[0], lang), time });
+  const names = p.days.map((d) => dayName(d, lang));
+  return t(lang, "cron.someDays", { days: names.slice(0, -1).join(", "), last: names[names.length - 1], time });
 }

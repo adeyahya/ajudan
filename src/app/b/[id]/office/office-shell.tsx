@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useLang, useT, useTn } from "@/components/i18n";
 import { useActivity } from "@/components/live";
 import { Avatar, Badge, Card, cn } from "@/components/kit";
 import type { ActivityEvent } from "@/db/schema";
@@ -43,6 +44,8 @@ export function OfficeShell({
   initialNow: number;
 }) {
   const router = useRouter();
+  const tr = useT();
+  const tn = useTn();
   const isDesktop = useIsDesktop();
   const [state, setState] = useState(initialState);
   const [feed, setFeed] = useState<FeedEvent[]>(() => [...initialEvents].reverse());
@@ -110,14 +113,14 @@ export function OfficeShell({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{businessName}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {state.teammates.length} teammates in the office
-            {state.queuedTasks > 0 && ` · ${state.queuedTasks} queued`}
+            {tn("office.inOffice", state.teammates.length)}
+            {state.queuedTasks > 0 && ` ${tr("office.queued", { count: state.queuedTasks })}`}
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="inline-flex items-center gap-1.5">
             <span className={cn("size-2 rounded-full", working ? "bg-emerald-500 animate-pulse" : "bg-border")} />
-            {working} working
+            {tr("office.working", { count: working })}
           </span>
           <span className="text-muted-foreground">·</span>
           <Link
@@ -129,7 +132,7 @@ export function OfficeShell({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {state.pendingApprovals} {state.pendingApprovals === 1 ? "needs" : "need"} approval
+            {tn("office.needApproval", state.pendingApprovals)}
           </Link>
         </div>
       </div>
@@ -178,8 +181,9 @@ function Roster({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const tr = useT();
   if (!teammates.length) {
-    return <Card className="p-4 text-sm text-muted-foreground">No active teammates yet.</Card>;
+    return <Card className="p-4 text-sm text-muted-foreground">{tr("office.noTeammates")}</Card>;
   }
   return (
     <div className="grid gap-2 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
@@ -197,7 +201,7 @@ function Roster({
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm truncate">{t.name}</span>
-              <Badge tone={STATE_TONE[t.state]}>{STATE_LABEL[t.state]}</Badge>
+              <Badge tone={STATE_TONE[t.state]}>{tr(STATE_LABEL[t.state])}</Badge>
             </span>
             <span className="block text-xs text-muted-foreground truncate">{t.title}</span>
             {t.currentActivity && <span className="block text-xs mt-1 line-clamp-2 md:hidden">{t.currentActivity}</span>}
@@ -220,6 +224,7 @@ function TeammatePanel({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const tr = useT();
   // Below lg the panel sits under the office; bring it into view when a teammate is picked.
   useEffect(() => {
     if (!window.matchMedia("(min-width: 1024px)").matches) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -232,38 +237,40 @@ function TeammatePanel({
           <div className="font-semibold">{t.name}</div>
           <div className="text-xs text-muted-foreground">{t.title}</div>
         </div>
-        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm px-1" aria-label="Close">
+        <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm px-1" aria-label={tr("ui.close")}>
           ✕
         </button>
       </div>
       <div className="flex items-center gap-2 text-sm">
-        <Badge tone={STATE_TONE[t.state]}>{STATE_LABEL[t.state]}</Badge>
-        <span className="text-muted-foreground truncate">{t.currentActivity ?? (t.state === "idle" ? "Ready for a task" : "")}</span>
+        <Badge tone={STATE_TONE[t.state]}>{tr(STATE_LABEL[t.state])}</Badge>
+        <span className="text-muted-foreground truncate">{t.currentActivity ?? (t.state === "idle" ? tr("office.readyForTask") : "")}</span>
       </div>
       {t.state === "waiting" && (
         <Link href={`/b/${businessId}/approvals`} className="block text-sm text-amber-700 dark:text-amber-300 hover:underline">
-          Review the pending approval →
+          {tr("office.reviewApproval")}
         </Link>
       )}
       <TaskForm key={t.id} businessId={businessId} teammateId={t.id} name={t.name} viaManager={!!managerId && managerId !== t.id} />
       <Link href={`/b/${businessId}/teammates/${t.id}`} className="block text-sm text-primary hover:underline">
-        Open {t.name}&apos;s page →
+        {tr("office.openPage", { name: t.name })}
       </Link>
     </Card>
   );
 }
 
 function ActivityFeed({ feed, byId, now }: { feed: FeedEvent[]; byId: Map<string, OfficeTeammate>; now: number }) {
+  const tr = useT();
+  const lang = useLang();
   return (
     <Card className="flex flex-col max-h-[640px]">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Activity</h2>
+        <h2 className="text-sm font-semibold">{tr("office.activity")}</h2>
         <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-emerald-500" /> live
+          <span className="size-1.5 rounded-full bg-emerald-500" /> {tr("office.live")}
         </span>
       </div>
       {feed.length === 0 ? (
-        <p className="p-4 text-sm text-muted-foreground">Nothing yet. Give a teammate a task to get started.</p>
+        <p className="p-4 text-sm text-muted-foreground">{tr("office.feedEmpty")}</p>
       ) : (
         <ol className="overflow-y-auto divide-y divide-border">
           {feed.map((e) => {
@@ -288,7 +295,7 @@ function ActivityFeed({ feed, byId, now }: { feed: FeedEvent[]; byId: Map<string
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     {tm ? `${tm.name} · ` : ""}
-                    {relativeTime(now, e.createdAt)}
+                    {relativeTime(now, e.createdAt, lang)}
                   </p>
                 </div>
               </li>

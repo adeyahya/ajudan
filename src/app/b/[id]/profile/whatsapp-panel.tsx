@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { Badge, Button } from "@/components/kit";
+import { t, type UiLang } from "@/lib/i18n";
 import { isLinked, linkState, listGroups, readSyncStatus, type WaGroup } from "@/lib/whatsapp";
 import { cancelWhatsappLink, saveWhatsappChats, startWhatsappLink, unlinkWhatsapp } from "./actions";
 import { WhatsappQr } from "./whatsapp-link";
@@ -12,10 +13,12 @@ export async function WhatsappPanel({
   businessId,
   allowed,
   teammatesWithAccess,
+  lang,
 }: {
   businessId: string;
   allowed: { jid: string; name: string }[];
   teammatesWithAccess: string[];
+  lang: UiLang;
 }) {
   await connection();
   const link = await linkState();
@@ -43,18 +46,16 @@ export async function WhatsappPanel({
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg text-primary">WhatsApp</h2>
         <Badge tone={linked ? "green" : linking ? "amber" : "neutral"}>
-          {linked ? (sync.running ? "Linked · syncing" : "Linked") : linking ? "Linking" : "Not linked"}
+          {linked
+            ? t(lang, sync.running ? "profile.wa.linkedSyncing" : "profile.wa.linked")
+            : t(lang, linking ? "profile.wa.linking" : "profile.wa.notLinked")}
         </Badge>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Link the business&apos;s WhatsApp (ideally the business number) as a linked device. Teammates with WhatsApp access
-        can read and post only in the chats you tick below. Other chats stay private. It uses wacli and the unofficial
-        WhatsApp Web protocol, so keep posting human-paced.
-      </p>
+      <p className="text-xs text-muted-foreground">{t(lang, "profile.wa.help")}</p>
 
       {!linked && !linking && (
         <form action={startWhatsappLink.bind(null, businessId)}>
-          <Button type="submit">Link WhatsApp</Button>
+          <Button type="submit">{t(lang, "profile.wa.link")}</Button>
         </form>
       )}
       {!linked && linking && (
@@ -62,7 +63,7 @@ export async function WhatsappPanel({
           <WhatsappQr businessId={businessId} />
           <form action={cancelWhatsappLink}>
             <Button type="submit" variant="ghost">
-              Cancel
+              {t(lang, "common.cancel")}
             </Button>
           </form>
         </div>
@@ -70,15 +71,15 @@ export async function WhatsappPanel({
 
       {linked && (
         <form action={saveWhatsappChats.bind(null, businessId)} className="grid gap-2">
-          <p className="font-pixel text-sm">Chats teammates may use</p>
-          {groupsError && <p className="text-xs text-bad">Couldn&apos;t read groups: {groupsError}</p>}
+          <p className="font-pixel text-sm">{t(lang, "profile.wa.chats")}</p>
+          {groupsError && <p className="text-xs text-bad">{t(lang, "profile.wa.groupsError", { error: groupsError })}</p>}
           {!groupsError && groups.length === 0 && (
-            <p className="text-xs text-muted-foreground pixel-caret">Waiting for your groups to sync (refresh in a minute)</p>
+            <p className="text-xs text-muted-foreground pixel-caret">{t(lang, "profile.wa.waitingSync")}</p>
           )}
           <div className="grid max-h-72 gap-1 overflow-y-auto pr-1">
             {parents.map((p) => (
               <div key={p.JID} className="grid gap-1">
-                <ChatCheckbox g={p} checked={allowedJids.has(p.JID)} label={`🏘 ${p.Name} (community)`} />
+                <ChatCheckbox g={p} checked={allowedJids.has(p.JID)} label={t(lang, "profile.wa.community", { name: p.Name })} />
                 {children(p).map((c) => (
                   <ChatCheckbox key={c.JID} g={c} checked={allowedJids.has(c.JID)} label={c.Name} indent />
                 ))}
@@ -90,19 +91,19 @@ export async function WhatsappPanel({
             {missing.map((c) => (
               <label key={c.jid} className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input type="checkbox" name="chat" value={`${c.jid}|${c.name}`} defaultChecked className="size-4" />
-                {c.name} (not synced yet)
+                {t(lang, "profile.wa.notSynced", { name: c.name })}
               </label>
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" variant="secondary">
-              Save chats
+              {t(lang, "profile.wa.saveChats")}
             </Button>
             <span className="text-xs text-muted-foreground">
-              {allowed.length ? `${allowed.length} allowed` : "None allowed yet"} ·{" "}
+              {allowed.length ? t(lang, "profile.wa.allowed", { count: allowed.length }) : t(lang, "profile.wa.noneAllowed")} ·{" "}
               {teammatesWithAccess.length
-                ? `Can use it: ${teammatesWithAccess.join(", ")}`
-                : "Turn on “Can use WhatsApp” for a teammate on the Team page"}
+                ? t(lang, "profile.wa.canUse", { names: teammatesWithAccess.join(", ") })
+                : t(lang, "profile.wa.turnOn")}
             </span>
           </div>
         </form>
@@ -110,12 +111,12 @@ export async function WhatsappPanel({
 
       {linked && (
         <form action={unlinkWhatsapp.bind(null, businessId)}>
-          <Button type="submit" variant="ghost" title="Logs this linked device out of WhatsApp">
-            Unlink WhatsApp
+          <Button type="submit" variant="ghost" title={t(lang, "profile.wa.unlinkTitle")}>
+            {t(lang, "profile.wa.unlink")}
           </Button>
         </form>
       )}
-      {sync.error && <p className="text-xs text-bad">Sync stopped: {sync.error}</p>}
+      {sync.error && <p className="text-xs text-bad">{t(lang, "profile.wa.syncStopped", { error: sync.error })}</p>}
     </div>
   );
 }

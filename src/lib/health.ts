@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { Job } from "@/db/schema";
 import { spentByTeammate, spentThisWeek, spentToday, startOfDay, startOfWeek } from "@/lib/budget";
+import { uiLang } from "@/lib/i18n";
 import { laneOf, type Lane } from "@/lib/jobs";
 import { backupsDir, currentDataDir } from "@/lib/paths";
 import { workerHealth, type WorkerHealth } from "@/lib/worker-heartbeat";
@@ -133,14 +134,20 @@ export async function getLastBackup() {
   return dir ? latestDailyBackup(dir) : null;
 }
 
-/** "3s", "4m", "2h 10m", "3d": for ages and durations on the Health page. */
-export function formatAge(ms: number) {
+const AGE_UNITS = {
+  en: { s: "s", m: "m", h: "h", d: "d" },
+  id: { s: " dtk", m: " mnt", h: " j", d: " hr" },
+};
+
+/** "3s", "4m", "2h 10m", "3d" (Indonesian: "3 dtk", "2 j 10 mnt"): for ages and durations on the Health page. */
+export function formatAge(ms: number, lang?: string | null) {
+  const u = AGE_UNITS[uiLang(lang)];
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return `${s}${u.s}`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return `${m}${u.m}`;
   const h = Math.floor(m / 60);
-  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  if (h < 24) return m % 60 ? `${h}${u.h} ${m % 60}${u.m}` : `${h}${u.h}`;
   const d = Math.floor(h / 24);
-  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
+  return h % 24 ? `${d}${u.d} ${h % 24}${u.h}` : `${d}${u.d}`;
 }

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { Badge, Button, Label, Textarea } from "@/components/kit";
 import { browserStatus, SUGGESTED_SITES } from "@/lib/browser";
+import { t, tn, type UiLang } from "@/lib/i18n";
 import { closeBusinessBrowser, openBusinessBrowser, saveBrowserSites } from "./actions";
 
 /**
@@ -11,10 +12,12 @@ export async function BrowserPanel({
   businessId,
   sites,
   teammatesWithAccess,
+  lang,
 }: {
   businessId: string;
   sites: string[];
   teammatesWithAccess: string[];
+  lang: UiLang;
 }) {
   await connection();
   const status = await browserStatus();
@@ -22,14 +25,10 @@ export async function BrowserPanel({
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg text-primary">Business browser</h2>
-        <Badge tone={status.running ? "green" : "neutral"}>{status.running ? "Open" : "Closed"}</Badge>
+        <h2 className="text-lg text-primary">{t(lang, "profile.browser.title")}</h2>
+        <Badge tone={status.running ? "green" : "neutral"}>{t(lang, status.running ? "profile.browser.open" : "profile.browser.closed")}</Badge>
       </div>
-      <p className="text-xs text-muted-foreground">
-        A separate Chrome profile just for this business, on this laptop. Open it, log in to Shopee Seller Center, TikTok and
-        the like once, and your teammates can work in those accounts. They never type passwords or codes, and they ask
-        before changing anything (depending on each teammate&apos;s freedom setting).
-      </p>
+      <p className="text-xs text-muted-foreground">{t(lang, "profile.browser.help")}</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <form action={openBusinessBrowser.bind(null, businessId)} className="flex flex-wrap items-center gap-2">
@@ -38,19 +37,19 @@ export async function BrowserPanel({
             placeholder="https://seller.shopee.co.id"
             className="pixel-select h-8 w-56 bg-transparent px-2 text-sm outline-none"
           />
-          <Button type="submit">{status.running ? "Open page" : "Open browser"}</Button>
+          <Button type="submit">{t(lang, status.running ? "profile.browser.openPage" : "profile.browser.openBrowser")}</Button>
         </form>
         {status.running && (
           <form action={closeBusinessBrowser.bind(null, businessId)}>
             <Button type="submit" variant="secondary">
-              Close
+              {t(lang, "common.close")}
             </Button>
           </form>
         )}
       </div>
 
       <form action={saveBrowserSites.bind(null, businessId)} className="grid gap-2">
-        <Label htmlFor="sites">Sites teammates may open (one per line, subdomains included)</Label>
+        <Label htmlFor="sites">{t(lang, "profile.browser.sites")}</Label>
         <Textarea
           id="sites"
           name="sites"
@@ -59,23 +58,20 @@ export async function BrowserPanel({
           placeholder={SUGGESTED_SITES.slice(0, 4).join("\n")}
         />
         <p className="text-xs text-muted-foreground">
-          {sites.length
-            ? `${sites.length} site${sites.length === 1 ? "" : "s"} allowed.`
-            : "Empty: teammates can't open any site until you add one here or approve a teammate's request for it."}{" "}
-          Suggestions:{" "}
-          {SUGGESTED_SITES.join(", ")}.
+          {sites.length ? tn(lang, "profile.browser.sitesAllowed", sites.length) : t(lang, "profile.browser.sitesEmpty")}{" "}
+          {t(lang, "profile.browser.suggestions", { sites: SUGGESTED_SITES.join(", ") })}
         </p>
         <div>
           <Button type="submit" variant="secondary">
-            Save sites
+            {t(lang, "profile.browser.saveSites")}
           </Button>
         </div>
       </form>
 
       <p className="text-xs text-muted-foreground">
         {teammatesWithAccess.length
-          ? `Can use it: ${teammatesWithAccess.join(", ")}.`
-          : "No teammate can use it yet. Turn on “Can use the business browser” for a teammate on the Team page."}
+          ? t(lang, "profile.browser.canUse", { names: teammatesWithAccess.join(", ") })
+          : t(lang, "profile.browser.nobody")}
       </p>
     </div>
   );

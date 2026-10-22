@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Chat, type ChatMessage } from "@/components/chat";
+import { useT } from "@/components/i18n";
 import { LiveRefresh, useActivity } from "@/components/live";
 
 /** The interview thread with live "what the interviewer is doing" steps. */
@@ -20,6 +21,7 @@ export function InterviewChat({
   canSend: boolean;
   sendAction: (text: string) => Promise<void>;
 }) {
+  const t = useT();
   const [live, setLive] = useState<{ after: number; steps: string[] }>({ after: messages.length, steps: [] });
   useActivity(businessId, (e) => {
     if (e.type !== "onboarding_tool") return;
@@ -34,14 +36,14 @@ export function InterviewChat({
       <LiveRefresh businessId={businessId} types={["onboarding_reply", "onboarding_error", "profile_ready", "profile_updated", "team_proposed"]} />
       <Chat
         className="flex-1"
-        agent={{ id: "interviewer", name: "Interviewer", color: "#3f7d74" }}
+        agent={{ id: "interviewer", name: t("onboarding.interviewer"), color: "#3f7d74" }}
         messages={messages}
         busy={busy}
         busyLabel={busyLabel}
         liveSteps={liveSteps}
         sendAction={canSend ? sendAction : undefined}
-        placeholder="Type your answer…"
-        emptyState={<p className="py-10 text-center text-sm text-muted-foreground">Starting your interview…</p>}
+        placeholder={t("onboarding.placeholder")}
+        emptyState={<p className="py-10 text-center text-sm text-muted-foreground">{t("onboarding.starting")}</p>}
       />
     </>
   );

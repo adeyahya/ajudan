@@ -16,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useOptimistic, useRef, useState, useTransition, type ReactNode } from "react";
+import { useT, useTn } from "@/components/i18n";
 import { ImageStrip, fileUrl } from "@/components/image-strip";
 import { Avatar } from "@/components/kit";
 import { Markdown } from "@/components/markdown";
@@ -40,6 +41,7 @@ import {
   TraceLine,
   TraceTitle,
 } from "@/components/ui/trace";
+import type { MessageKey, Vars } from "@/lib/i18n";
 import { MEDIA_ACCEPT, mediaKind } from "@/lib/media-types";
 import { cn } from "@/lib/utils";
 
@@ -73,7 +75,7 @@ export function Chat({
   agent,
   messages,
   busy,
-  busyLabel = "Thinking…",
+  busyLabel,
   liveSteps = [],
   sendAction,
   uploadBusinessId,
@@ -99,6 +101,7 @@ export function Chat({
   inputDisabled?: boolean;
   className?: string;
 }) {
+  const t = useT();
   const [optimistic, addOptimistic] = useOptimistic(
     messages,
     (state, m: { text: string; attachments: string[] }) => [
@@ -118,7 +121,7 @@ export function Chat({
   const send = (text: string) => {
     const attachments = uploads.flatMap((u) => (u.path ? [u.path] : []));
     if (!sendAction || (!text.trim() && !attachments.length)) return;
-    const body = text.trim() || "(See the attached files.)";
+    const body = text.trim() || t("chat.seeAttached");
     setUploads([]);
     startSending(async () => {
       addOptimistic({ text: body, attachments });
@@ -132,7 +135,7 @@ export function Chat({
       const key = `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`;
       setUploads((u) => [...u, { key, name: file.name, progress: 0 }]);
       const patch = (v: Partial<Upload>) => setUploads((u) => u.map((x) => (x.key === key ? { ...x, ...v } : x)));
-      uploadFile(uploadBusinessId, file, (progress) => patch({ progress }))
+      uploadFile(uploadBusinessId, file, (progress) => patch({ progress }), t)
         .then((path) => patch({ path, progress: 1 }))
         .catch((err: Error) => patch({ error: err.message }));
     }
@@ -167,8 +170,8 @@ export function Chat({
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80">
           <div className="pixel-panel flex flex-col items-center gap-2 px-8 py-6 text-center">
             <UploadIcon className="size-8 text-primary" />
-            <p className="font-pixel">Drop files to attach</p>
-            <p className="text-xs text-muted-foreground">Footage, photos, music or documents for {agent.name}</p>
+            <p className="font-pixel">{t("chat.dropTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("chat.dropBody", { name: agent.name })}</p>
           </div>
         </div>
       )}
@@ -192,7 +195,7 @@ export function Chat({
                 <MessageScrollerItem messageId="thinking">
                   <AgentTurn
                     agent={agent}
-                    m={{ id: "thinking", role: "assistant", content: "", pending: true, steps: liveSteps, meta: busyLabel }}
+                    m={{ id: "thinking", role: "assistant", content: "", pending: true, steps: liveSteps, meta: busyLabel ?? t("chat.thinking") }}
                   />
                 </MessageScrollerItem>
               )}
@@ -216,7 +219,7 @@ export function Chat({
           )}
           <PromptInput
             disabled={inputDisabled || showThinking}
-            placeholder={showThinking ? `${agent.name} is working…` : placeholder}
+            placeholder={showThinking ? t("chat.isWorking", { name: agent.name }) : placeholder}
             onSubmit={send}
             uploads={uploads}
             businessId={uploadBusinessId}
@@ -248,6 +251,7 @@ function UserTurn({ m, businessId }: { m: ChatMessage; businessId?: string }) {
 }
 
 function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
+  const t = useT();
   return (
     // RPG dialogue box: portrait on the left, a name plate, then the text.
     <Message className="flex-row items-start gap-3">
@@ -265,7 +269,7 @@ function AgentTurn({ m, agent }: { m: ChatMessage; agent: ChatAgent }) {
         </MessageHeader>
         {m.pending ? (
           <>
-            <LiveTrace steps={m.steps ?? []} label={m.meta ?? "Thinking…"} />
+            <LiveTrace steps={m.steps ?? []} label={m.meta ?? t("chat.thinking")} />
             {m.footer && <MessageFooter className="flex flex-wrap items-center gap-2">{m.footer}</MessageFooter>}
           </>
         ) : (
@@ -320,6 +324,7 @@ function LiveTrace({ steps, label }: { steps: string[]; label: string }) {
 
 /** Finished reply: steps folded into one line ("Worked through 6 steps"). */
 function StepsTrace({ steps }: { steps: string[] }) {
+  const tn = useTn();
   return (
     <Trace>
       <TraceCollapsible>
@@ -328,9 +333,7 @@ function StepsTrace({ steps }: { steps: string[] }) {
             <TraceIcon>
               <CheckIcon />
             </TraceIcon>
-            <TraceTitle>
-              Worked through {steps.length} step{steps.length === 1 ? "" : "s"}
-            </TraceTitle>
+            <TraceTitle>{tn("chat.workedSteps", steps.length)}</TraceTitle>
           </TraceLine>
         </TraceCollapsibleTrigger>
         <TraceCollapsibleContent>
@@ -350,11 +353,12 @@ function StepsTrace({ steps }: { steps: string[] }) {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const t = useT();
   return (
     <Button
       variant="ghost"
       size="icon-sm"
-      aria-label="Copy"
+      aria-label={t("chat.copy")}
       onClick={async () => {
         await navigator.clipboard.writeText(text);
         setCopied(true);
@@ -367,7 +371,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 /** Upload one file to the business's media library; resolves to its folder-relative path. */
-function uploadFile(businessId: string, file: File, onProgress: (p: number) => void) {
+function uploadFile(businessId: string, file: File, onProgress: (p: number) => void, t: (key: MessageKey, vars?: Vars) => string) {
   return new Promise<string>((resolve, reject) => {
     // XHR, not fetch: it reports upload progress (footage can be big).
     const xhr = new XMLHttpRequest();
@@ -378,12 +382,12 @@ function uploadFile(businessId: string, file: File, onProgress: (p: number) => v
       try {
         const body = JSON.parse(xhr.responseText) as { path?: string; error?: string };
         if (xhr.status < 300 && body.path) resolve(body.path);
-        else reject(new Error(body.error ?? `Upload failed (${xhr.status})`));
+        else reject(new Error(body.error ?? t("chat.uploadFailed", { status: xhr.status })));
       } catch {
-        reject(new Error(`Upload failed (${xhr.status})`));
+        reject(new Error(t("chat.uploadFailed", { status: xhr.status })));
       }
     };
-    xhr.onerror = () => reject(new Error("Upload failed (network)"));
+    xhr.onerror = () => reject(new Error(t("chat.uploadFailedNetwork")));
     xhr.send(file);
   });
 }
@@ -391,6 +395,7 @@ function uploadFile(businessId: string, file: File, onProgress: (p: number) => v
 function UploadChip({ u, businessId, onRemove }: { u: Upload; businessId?: string; onRemove: () => void }) {
   const kind = mediaKind(u.name);
   const Icon = kind === "video" ? VideoIcon : kind === "audio" ? MusicIcon : FileIcon;
+  const t = useT();
   return (
     <div
       className={cn(
@@ -410,13 +415,13 @@ function UploadChip({ u, businessId, onRemove }: { u: Upload; businessId?: strin
       <div className="min-w-0 flex-1">
         <div className="truncate">{u.name}</div>
         <div className="text-[10px] text-muted-foreground">
-          {u.error ? "Failed" : u.path ? "Ready" : `Uploading ${Math.round(u.progress * 100)}%`}
+          {u.error ? t("chat.failed") : u.path ? t("chat.ready") : t("chat.uploading", { pct: Math.round(u.progress * 100) })}
         </div>
       </div>
       {!u.path && !u.error && (
         <div className="absolute bottom-0 left-0 h-[3px] bg-primary" style={{ width: `${u.progress * 100}%` }} />
       )}
-      <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${u.name}`}>
+      <button type="button" onClick={onRemove} className="absolute top-1 right-1 text-muted-foreground hover:text-foreground" aria-label={t("chat.removeFile", { name: u.name })}>
         <XIcon className="size-3.5" />
       </button>
     </div>
@@ -441,6 +446,7 @@ function PromptInput({
   onAddFiles?: (files: FileList | File[]) => void;
   onRemoveUpload: (key: string) => void;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -508,18 +514,19 @@ function PromptInput({
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => picker.current?.click()}
-                  aria-label="Attach files"
-                  title="Attach footage, photos or files (or drop them here)"
+                  aria-label={t("chat.attach")}
+                  title={t("chat.attachTitle")}
                 >
                   <PaperclipIcon />
                 </InputGroupButton>
               </>
             )}
             <span className="text-xs text-muted-foreground">
-              Enter to send · Shift+Enter for a new line{onAddFiles ? " · drop files to attach" : ""}
+              {t("chat.hint")}
+              {onAddFiles ? t("chat.hintDrop") : ""}
             </span>
           </div>
-          <InputGroupButton type="submit" variant="default" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label="Send">
+          <InputGroupButton type="submit" variant="default" size="icon-sm" className="rounded-full" disabled={!canSend} aria-label={t("chat.send")}>
             <ArrowUpIcon />
           </InputGroupButton>
         </InputGroupAddon>

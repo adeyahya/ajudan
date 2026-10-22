@@ -1,7 +1,16 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
 import { decide } from "@/lib/approvals";
+import { t } from "@/lib/i18n";
+
+/** decide()'s errors are shared with WhatsApp approvals; translate the one the owner sees here. */
+function ownerError(businessId: string, error: string) {
+  const lang = db.select({ language: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.language;
+  return error === "This request was already decided." ? t(lang, "approvals.err.alreadyDecided") : error;
+}
 
 /**
  * Approve or reject a pending outward action. The decision queues the waiting task's
@@ -36,7 +45,7 @@ export async function approveCapability(businessId: string, approvalId: string, 
     via: "app",
   });
   refresh();
-  return r.ok ? { ok: "Approved" } : { error: r.error };
+  return r.ok ? { ok: "Approved" } : { error: ownerError(businessId, r.error) };
 }
 
 export async function rejectCapability(businessId: string, approvalId: string, fd: FormData) {

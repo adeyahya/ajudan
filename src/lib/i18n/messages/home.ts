@@ -1,0 +1,84 @@
+/** Home: the businesses list, new business and open folder forms (src/app/page.tsx, home-forms.tsx, actions.ts). */
+export const en = {
+  "home.title": "Your businesses",
+  "home.subtitleApp":
+    "Each business lives in its own folder: its team, work, history and logged-in browser. Open one per window; every open window keeps working at the same time.",
+  "home.subtitleWeb":
+    "Each business lives in its own folder: its team, work, history and logged-in browser. Only the open business works; the others are paused until you switch back.",
+  "home.newTitle": "Start a new business",
+  "home.newBody": "Ajudan creates a folder for it, looks at your website, then interviews you for a few minutes.",
+  "home.openTitle": "Open a business folder",
+  "home.openBody":
+    "For a folder that isn't listed above, for example one you moved, copied from another laptop or restored from a backup.",
+  "home.empty": "No businesses yet. Start one below; it will be saved in {dir}.",
+  "home.running": "Running",
+  "home.folderMissing": "Folder missing",
+  "home.open": "Open",
+  "home.paused": "Paused",
+  "home.noWebsite": "No website",
+  "home.showWindow": "Show window",
+  "home.openInWindow": "Open in a window",
+  "home.removeTitle": "Remove from this list. The folder stays on disk.",
+  "home.remove": "Remove from list",
+  "home.continue": "Continue",
+  "home.switchTo": "Switch to this",
+
+  "home.form.name": "Business name",
+  "home.form.namePlaceholder": "Acme Coffee",
+  "home.form.website": "Website",
+  "home.form.language": "Language",
+  "home.form.folder": "Folder (everything for this business is stored here)",
+  "home.form.create": "Create folder & start interview",
+  "home.form.path": "Folder path",
+  "home.form.open": "Open",
+  "home.form.opening": "Opening…",
+
+  "home.err.name": "Give the business a name",
+  "home.err.exists": "{dir} already holds a business. Open it instead.",
+  "home.err.isFile": "{dir} is a file, not a folder",
+  "home.err.path": "Type the folder's path",
+  "home.err.missing": "{dir} doesn't exist",
+  "home.err.notBusiness": "{dir} has no ajudan.db, so it isn't a business folder",
+};
+
+export const id: Record<keyof typeof en, string> = {
+  "home.title": "Bisnis kamu",
+  "home.subtitleApp":
+    "Setiap bisnis punya foldernya sendiri: tim, hasil kerja, riwayat, dan browser yang sudah login. Buka satu bisnis per jendela; semua jendela yang terbuka tetap bekerja bersamaan.",
+  "home.subtitleWeb":
+    "Setiap bisnis punya foldernya sendiri: tim, hasil kerja, riwayat, dan browser yang sudah login. Hanya bisnis yang sedang dibuka yang bekerja; yang lain berhenti dulu sampai kamu pindah lagi.",
+  "home.newTitle": "Mulai bisnis baru",
+  "home.newBody": "Ajudan membuatkan folder untuknya, melihat website kamu, lalu mewawancaraimu selama beberapa menit.",
+  "home.openTitle": "Buka folder bisnis",
+  "home.openBody":
+    "Untuk folder yang tidak ada di daftar atas, misalnya yang kamu pindahkan, salin dari laptop lain, atau pulihkan dari cadangan.",
+  "home.empty": "Belum ada bisnis. Mulai satu di bawah; nanti disimpan di {dir}.",
+  "home.running": "Berjalan",
+  "home.folderMissing": "Folder tidak ada",
+  "home.open": "Dibuka",
+  "home.paused": "Berhenti sementara",
+  "home.noWebsite": "Tanpa website",
+  "home.showWindow": "Tampilkan jendela",
+  "home.openInWindow": "Buka di jendela",
+  "home.removeTitle": "Hapus dari daftar ini. Foldernya tetap ada di disk.",
+  "home.remove": "Hapus dari daftar",
+  "home.continue": "Lanjutkan",
+  "home.switchTo": "Pindah ke sini",
+
+  "home.form.name": "Nama bisnis",
+  "home.form.namePlaceholder": "Kopi Senja",
+  "home.form.website": "Website",
+  "home.form.language": "Bahasa",
+  "home.form.folder": "Folder (semua data bisnis ini disimpan di sini)",
+  "home.form.create": "Buat folder & mulai wawancara",
+  "home.form.path": "Lokasi folder",
+  "home.form.open": "Buka",
+  "home.form.opening": "Membuka…",
+
+  "home.err.name": "Beri nama bisnisnya dulu",
+  "home.err.exists": "{dir} sudah berisi bisnis. Buka saja folder itu.",
+  "home.err.isFile": "{dir} itu file, bukan folder",
+  "home.err.path": "Ketik lokasi foldernya",
+  "home.err.missing": "{dir} tidak ada",
+  "home.err.notBusiness": "{dir} tidak punya ajudan.db, jadi bukan folder bisnis",
+};

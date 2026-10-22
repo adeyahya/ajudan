@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Pixelify_Sans } from "next/font/google";
 import Link from "next/link";
 import { Suspense } from "react";
-import { OpenFolderBadge } from "@/components/open-folder-badge";
+import { HeaderTagline, OpenFolderBadge } from "@/components/open-folder-badge";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -50,6 +50,10 @@ function PixelLogo() {
   );
 }
 
+// <html lang> stays static: the root layout renders outside any <Suspense>, so reading the
+// request (Accept-Language) or the business here would block prerendering under Cache
+// Components. I18nProvider (src/components/i18n.tsx) updates it on the client, and the
+// business layout and home page put `lang` on their own wrapper for the server HTML.
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${pixelify.variable} h-full antialiased`}>
@@ -60,7 +64,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <PixelLogo />
               <span className="font-pixel text-xl leading-none text-ink drop-shadow-[1px_1px_0_#fff3c4]">Ajudan</span>
             </Link>
-            <span className="font-pixel hidden text-xs text-ink/70 sm:inline">· your AI team, at work</span>
+            <Suspense fallback={null}>
+              <HeaderTagline />
+            </Suspense>
             <Suspense fallback={null}>
               <OpenFolderBadge />
             </Suspense>

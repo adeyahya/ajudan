@@ -3,6 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { normalizePhone } from "@/lib/humans";
+import { t } from "@/lib/i18n";
 import { addHuman, setOwnerHuman, type FormState } from "../team/actions";
 
 /**
@@ -12,9 +13,9 @@ import { addHuman, setOwnerHuman, type FormState } from "../team/actions";
  */
 export async function setMyNumber(businessId: string, _prev: FormState, formData: FormData): Promise<FormState> {
   const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
-  if (!biz) return { error: "Business not found" };
+  if (!biz) return { error: t(String(formData.get("lang") ?? ""), "common.businessNotFound") };
   const phone = normalizePhone(String(formData.get("phone") ?? ""), biz.language);
-  if (!phone) return { error: "Enter your WhatsApp number with the country code, e.g. +62 812 3456 7890" };
+  if (!phone) return { error: t(biz.language, "manager.err.phone") };
   const existing = db
     .select({ id: schema.teammates.id })
     .from(schema.teammates)
@@ -29,10 +30,11 @@ export async function setMyNumber(businessId: string, _prev: FormState, formData
     .get();
   if (!existing) {
     const fd = new FormData();
-    fd.set("name", String(formData.get("name") ?? "").trim() || "Owner");
-    fd.set("title", "Owner");
+    // Stored on the team in the business's working language, like the manager's title.
+    fd.set("name", String(formData.get("name") ?? "").trim() || t(biz.language, "manager.owner.defaultName"));
+    fd.set("title", t(biz.language, "manager.owner.defaultTitle"));
     fd.set("phone", `+${phone}`);
-    fd.set("helps", "Decisions and approvals\nAnswers about the business");
+    fd.set("helps", t(biz.language, "manager.owner.defaultHelps"));
     const added = await addHuman(businessId, {}, fd);
     if (added.error) return added;
   }
@@ -43,7 +45,7 @@ export async function setMyNumber(businessId: string, _prev: FormState, formData
       .from(schema.teammates)
       .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.phone, phone), eq(schema.teammates.status, "active")))
       .get();
-  if (!human) return { error: "Couldn't add you to the team" };
+  if (!human) return { error: t(biz.language, "manager.err.add") };
   await setOwnerHuman(businessId, human.id);
   return { ok: true };
 }

@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { LANGUAGES } from "@/lib/language";
+import { languageName, LANGUAGES } from "@/lib/language";
 
 /** Form field (name="language") for a business's primary language. */
 export function LanguageSelect({ id, defaultValue }: { id?: string; defaultValue: string }) {
@@ -11,7 +11,7 @@ export function LanguageSelect({ id, defaultValue }: { id?: string; defaultValue
       <SelectContent>
         {LANGUAGES.map((l) => (
           <SelectItem key={l.code} value={l.code}>
-            {l.nativeLabel === l.label ? l.label : `${l.nativeLabel} (${l.label})`}
+            {languageName(l.code)}
           </SelectItem>
         ))}
       </SelectContent>

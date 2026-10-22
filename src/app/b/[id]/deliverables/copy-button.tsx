@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { Button } from "@/components/kit";
+import { useT } from "@/components/i18n";
 
 export function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -20,7 +22,7 @@ export function CopyButton({ text }: { text: string }) {
         }
       }}
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? t("common.copied") : t("common.copy")}
     </Button>
   );
 }

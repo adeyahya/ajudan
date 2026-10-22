@@ -22,6 +22,7 @@ import { Badge, Button, Card, Input, PageHeader, PageSkeleton } from "@/componen
 import { FileMarkdown } from "@/components/markdown";
 import { ROOTS, cleanRel, fileStat, fileType, listDir, readText, searchFiles, type Entry, type FileType } from "@/lib/browse";
 import { getBusiness } from "@/lib/data";
+import { dateLocale, t, tn, uiLang, type MessageKey, type UiLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,7 +50,11 @@ function size(n: number) {
   if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
   return `${n} B`;
 }
-const when = (d: Date) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const when = (d: Date, lang: UiLang) => d.toLocaleString(dateLocale(lang), { dateStyle: "medium", timeStyle: "short" });
+
+/** The top folders (src/lib/browse.ts ROOTS), named in the UI language. */
+const rootLabel = (key: string, lang: UiLang) => t(lang, `files.root.${key}` as MessageKey);
+const rootHint = (key: string, lang: UiLang) => t(lang, `files.root.${key}.hint` as MessageKey);
 
 const ICONS: Record<FileType | "dir", typeof FileIcon> = {
   dir: FolderIcon,
@@ -70,6 +75,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   const sp = await searchParams;
   const biz = await getBusiness(id);
   if (!biz) notFound();
+  const lang = uiLang(biz.language);
   const raw = typeof sp.path === "string" ? sp.path : "";
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
   const rel = cleanRel(raw);
@@ -91,20 +97,20 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   return (
     <div>
       <LiveRefresh businessId={id} types={LIVE} />
-      <PageHeader title="Files" subtitle="Everything your team made and keeps: work, the media library, and each teammate's memory and drafts." />
+      <PageHeader title={t(lang, "files.title")} subtitle={t(lang, "files.subtitle")} />
       <div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
         <aside className="space-y-3">
           <form action={`/b/${id}/files`} className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={q} placeholder="Search files…" className="pl-8" />
+            <Input name="q" defaultValue={q} placeholder={t(lang, "files.search")} className="pl-8" />
           </form>
           <Card className="p-2">
             <nav className="text-sm">
               <Link href={href(id, "")} className={cn("flex items-center gap-2 px-2 py-1 hover:bg-muted", !rel && !q && "bg-muted font-medium")}>
-                <FolderOpenIcon className="size-4 text-primary" /> All files
+                <FolderOpenIcon className="size-4 text-primary" /> {t(lang, "files.all")}
               </Link>
               {ROOTS.map((r) => (
-                <Tree key={r.key} businessId={id} rel={r.key} label={r.label} open={folder} names={names} depth={0} />
+                <Tree key={r.key} businessId={id} rel={r.key} label={rootLabel(r.key, lang)} open={folder} names={names} depth={0} />
               ))}
             </nav>
           </Card>
@@ -112,11 +118,15 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
 
         <main className="min-w-0 space-y-4">
           {q ? (
-            <SearchResults businessId={id} q={q} names={names} />
+            <SearchResults businessId={id} q={q} names={names} lang={lang} />
           ) : (
             <>
-              <Breadcrumbs businessId={id} rel={rel} names={names} />
-              {stat.isDir ? <FolderView businessId={id} rel={rel} names={names} /> : <FileView businessId={id} rel={rel} size={stat.size} mtime={stat.mtime} />}
+              <Breadcrumbs businessId={id} rel={rel} names={names} lang={lang} />
+              {stat.isDir ? (
+                <FolderView businessId={id} rel={rel} names={names} lang={lang} />
+              ) : (
+                <FileView businessId={id} rel={rel} size={stat.size} mtime={stat.mtime} lang={lang} />
+              )}
             </>
           )}
         </main>
@@ -149,16 +159,16 @@ function Tree({ businessId, rel, label, open, names, depth }: { businessId: stri
   );
 }
 
-function Breadcrumbs({ businessId, rel, names }: { businessId: string; rel: string; names: Map<string, string> }) {
+function Breadcrumbs({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Map<string, string>; lang: UiLang }) {
   const parts = rel ? rel.split("/") : [];
   return (
     <div className="flex flex-wrap items-center gap-1 text-sm">
       <Link href={href(businessId, "")} className="text-muted-foreground hover:text-foreground">
-        Files
+        {t(lang, "files.title")}
       </Link>
       {parts.map((p, i) => {
         const r = parts.slice(0, i + 1).join("/");
-        const label = i === 0 ? (ROOTS.find((x) => x.key === p)?.label ?? p) : (names.get(r)?.split(" · ")[0] ?? p);
+        const label = i === 0 ? (ROOTS.some((x) => x.key === p) ? rootLabel(p, lang) : p) : (names.get(r)?.split(" · ")[0] ?? p);
         return (
           <span key={r} className="flex items-center gap-1">
             <span className="text-muted-foreground">/</span>
@@ -176,7 +186,7 @@ function Breadcrumbs({ businessId, rel, names }: { businessId: string; rel: stri
   );
 }
 
-function FolderView({ businessId, rel, names }: { businessId: string; rel: string; names: Map<string, string> }) {
+function FolderView({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Map<string, string>; lang: UiLang }) {
   const entries = listDir(rel) ?? [];
   if (!rel) {
     return (
@@ -188,10 +198,10 @@ function FolderView({ businessId, rel, names }: { businessId: string; rel: strin
               <Card className="h-full space-y-1 p-4 transition hover:-translate-y-0.5">
                 <div className="flex items-center gap-2">
                   <FolderIcon className="size-5 text-primary" />
-                  <span className="font-pixel text-lg">{r.label}</span>
+                  <span className="font-pixel text-lg">{rootLabel(r.key, lang)}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">{r.hint}</p>
-                {e && <Badge>{e.children} items</Badge>}
+                <p className="text-xs text-muted-foreground">{rootHint(r.key, lang)}</p>
+                {e && <Badge>{tn(lang, "files.items", e.children ?? 0)}</Badge>}
               </Card>
             </Link>
           );
@@ -199,7 +209,7 @@ function FolderView({ businessId, rel, names }: { businessId: string; rel: strin
       </div>
     );
   }
-  if (!entries.length) return <Card className="p-6 text-sm text-muted-foreground">This folder is empty.</Card>;
+  if (!entries.length) return <Card className="p-6 text-sm text-muted-foreground">{t(lang, "files.emptyFolder")}</Card>;
   const visual = entries.filter((e) => e.type === "image" || e.type === "video");
   const rest = entries.filter((e) => e.type !== "image" && e.type !== "video");
   return (
@@ -224,12 +234,24 @@ function FolderView({ businessId, rel, names }: { businessId: string; rel: strin
           ))}
         </div>
       )}
-      {rest.length > 0 && <EntryList businessId={businessId} entries={rest} names={names} />}
+      {rest.length > 0 && <EntryList businessId={businessId} entries={rest} names={names} lang={lang} />}
     </div>
   );
 }
 
-function EntryList({ businessId, entries, names, showPath }: { businessId: string; entries: Entry[]; names: Map<string, string>; showPath?: boolean }) {
+function EntryList({
+  businessId,
+  entries,
+  names,
+  showPath,
+  lang,
+}: {
+  businessId: string;
+  entries: Entry[];
+  names: Map<string, string>;
+  showPath?: boolean;
+  lang: UiLang;
+}) {
   return (
     <Card className="divide-y divide-border p-0">
       {entries.map((e) => {
@@ -245,7 +267,7 @@ function EntryList({ businessId, entries, names, showPath }: { businessId: strin
               )}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">
-              {e.isDir ? `${e.children ?? 0} items` : `${size(e.size)} · ${when(e.mtime)}`}
+              {e.isDir ? tn(lang, "files.items", e.children ?? 0) : `${size(e.size)} · ${when(e.mtime, lang)}`}
             </span>
           </Link>
         );
@@ -254,19 +276,17 @@ function EntryList({ businessId, entries, names, showPath }: { businessId: strin
   );
 }
 
-function SearchResults({ businessId, q, names }: { businessId: string; q: string; names: Map<string, string> }) {
+function SearchResults({ businessId, q, names, lang }: { businessId: string; q: string; names: Map<string, string>; lang: UiLang }) {
   const found = searchFiles(q);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 text-sm">
-        <span>
-          {found.length} file{found.length === 1 ? "" : "s"} matching <span className="font-medium">“{q}”</span>
-        </span>
+        <span>{tn(lang, "files.found", found.length, { q })}</span>
         <Link href={href(businessId, "")} className="text-muted-foreground hover:text-foreground">
-          Clear search
+          {t(lang, "files.clearSearch")}
         </Link>
       </div>
-      {found.length > 0 && <EntryList businessId={businessId} entries={found} names={names} showPath />}
+      {found.length > 0 && <EntryList businessId={businessId} entries={found} names={names} showPath lang={lang} />}
     </div>
   );
 }
@@ -312,7 +332,19 @@ function parseCsv(text: string, maxRows = 300) {
   return rows;
 }
 
-function FileView({ businessId, rel, size: bytes, mtime }: { businessId: string; rel: string; size: number; mtime: Date }) {
+function FileView({
+  businessId,
+  rel,
+  size: bytes,
+  mtime,
+  lang,
+}: {
+  businessId: string;
+  rel: string;
+  size: number;
+  mtime: Date;
+  lang: UiLang;
+}) {
   const type = fileType(rel);
   const name = rel.split("/").pop() ?? rel;
   const url = fileUrl(businessId, rel);
@@ -329,25 +361,25 @@ function FileView({ businessId, rel, size: bytes, mtime }: { businessId: string;
           {name}
         </h2>
         <span className="text-xs text-muted-foreground">
-          {size(bytes)} · {when(mtime)}
+          {size(bytes)} · {when(mtime, lang)}
         </span>
         {newer && (
           <Button asChild variant="secondary" size="sm">
             <Link href={href(businessId, newer.rel)} title={newer.name}>
-              ← Newer
+              {t(lang, "files.newer")}
             </Link>
           </Button>
         )}
         {older && (
           <Button asChild variant="secondary" size="sm">
             <Link href={href(businessId, older.rel)} title={older.name}>
-              Older →
+              {t(lang, "files.older")}
             </Link>
           </Button>
         )}
         <Button asChild variant="secondary" size="sm">
           <a href={fileUrl(businessId, rel, true)}>
-            <DownloadIcon /> Download
+            <DownloadIcon /> {t(lang, "files.download")}
           </a>
         </Button>
       </div>
@@ -368,15 +400,19 @@ function FileView({ businessId, rel, size: bytes, mtime }: { businessId: string;
         )}
         {type === "pdf" && <iframe src={url} title={name} className="h-[75vh] w-full bg-white" />}
         {type === "markdown" && text && <MarkdownPreview businessId={businessId} rel={rel} text={text.text} />}
-        {type === "csv" && text && <CsvPreview text={text.text} />}
+        {type === "csv" && text && <CsvPreview text={text.text} lang={lang} />}
         {type === "json" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-relaxed">{prettyJson(text.text)}</pre>}
         {type === "text" && text && <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed">{text.text}</pre>}
         {type === "other" && (
           <div className="p-8 text-center text-sm text-muted-foreground">
-            No preview for this kind of file. <a href={fileUrl(businessId, rel, true)} className="underline">Download it</a> to open it.
+            {t(lang, "files.noPreview")}{" "}
+            <a href={fileUrl(businessId, rel, true)} className="underline">
+              {t(lang, "files.downloadIt")}
+            </a>{" "}
+            {t(lang, "files.toOpen")}
           </div>
         )}
-        {text?.truncated && <p className="border-t border-border p-2 text-center text-xs text-muted-foreground">Showing the first 1 MB. Download for the rest.</p>}
+        {text?.truncated && <p className="border-t border-border p-2 text-center text-xs text-muted-foreground">{t(lang, "files.truncated")}</p>}
       </Card>
     </div>
   );
@@ -405,10 +441,10 @@ function MarkdownPreview({ businessId, rel, text }: { businessId: string; rel: s
   );
 }
 
-function CsvPreview({ text }: { text: string }) {
+function CsvPreview({ text, lang }: { text: string; lang: UiLang }) {
   const rows = parseCsv(text);
   const [head, ...body] = rows;
-  if (!head) return <p className="p-4 text-sm text-muted-foreground">Empty file.</p>;
+  if (!head) return <p className="p-4 text-sm text-muted-foreground">{t(lang, "files.emptyFile")}</p>;
   return (
     <div className="max-h-[75vh] overflow-auto">
       <table className="w-full border-collapse text-xs">
@@ -433,7 +469,7 @@ function CsvPreview({ text }: { text: string }) {
           ))}
         </tbody>
       </table>
-      {rows.length >= 300 && <p className="p-2 text-center text-xs text-muted-foreground">Showing the first 300 rows.</p>}
+      {rows.length >= 300 && <p className="p-2 text-center text-xs text-muted-foreground">{t(lang, "files.first300")}</p>}
     </div>
   );
 }
