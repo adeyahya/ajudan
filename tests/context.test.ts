@@ -137,6 +137,17 @@ describe("the workspace", () => {
     expect(pages.find((p) => p.key === "products")!.body).toContain("- Washi set");
   });
 
+  it("a mind map reaches the prompt as an outline, and an accepted suggestion becomes ideas on it", () => {
+    const map = ctx.createPage(biz.id, { title: "Rencana 2027", section: "business", kind: "mindmap", body: "- Marketing\n  - Reels\n" });
+    expect(ctx.contextPrompt(biz.id, mate.id).prompt).toContain("### Rencana 2027\n(A mind map");
+    const s = ctx.createSuggestion({ businessId: biz.id, teammate: mate, page: map, kind: "append", body: "- Operations\n  - Restock Monday", reason: "r", source: "s" });
+    expect(ctx.decideSuggestion(biz.id, s.id, true)).toMatchObject({ ok: true });
+    const tree = ctx.parseMindMap(ctx.getPage(biz.id, map.id)!.body);
+    expect(tree.map((n) => n.text)).toEqual(["Marketing", "Operations"]);
+    expect(tree[1].children.map((n) => n.text)).toEqual(["Restock Monday"]);
+    ctx.deletePage(biz.id, map.id);
+  });
+
   it("owner feedback lands on the learned page and TEAM.md follows it", () => {
     recordRejectionNote({ businessId: biz.id, teammateId: mate.id, summary: "Sinta wants to post", note: "Not on Sundays" });
     expect(ctx.pageByKey(biz.id, "learned")!.body).toContain('"Not on Sundays"');
