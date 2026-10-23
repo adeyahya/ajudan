@@ -35,6 +35,16 @@ export const STATE_TONE: Record<TeammateState, "neutral" | "green" | "amber" | "
   error: "red",
 };
 
+/** Feed rows are one short paragraph: drop markdown marks and fold lines so the clamp reads cleanly. */
+export function plainText(md: string) {
+  return md
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/(\*\*|__|\*|`)(\S(?:.*?\S)?)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function relativeTime(now: number, at: Date | string, lang?: string | null) {
   const s = Math.max(0, Math.round((now - new Date(at).getTime()) / 1000));
   if (s < 10) return t(lang, "office.time.justNow");
