@@ -131,3 +131,23 @@ describe("Glob patterns", () => {
     expect(globToRegExp("work/*.png").test("work/sub/x.png")).toBe(false);
   });
 });
+
+describe("WebFetch", () => {
+  it("doesn't follow a redirect past the private-host check", async () => {
+    const { builtinTools } = await import("@/lib/agent/builtin-tools");
+    const [fetchTool] = builtinTools(["WebFetch"], { cwd, plugins: [], skills: [] });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, { status: 302, headers: { location: "http://127.0.0.1:9222/json" } });
+    }) as typeof fetch;
+    try {
+      const r = await fetchTool.run({ url: "https://example.com/go" }, { signal: new AbortController().signal, toolCallId: "t" });
+      expect(r.text).toContain("redirects to http://127.0.0.1:9222/json");
+      const again = await fetchTool.run({ url: "http://127.0.0.1:9222/json" }, { signal: new AbortController().signal, toolCallId: "t" });
+      expect(again).toMatchObject({ isError: true });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

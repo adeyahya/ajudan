@@ -55,6 +55,8 @@ export async function runWithAiSdk<T>(opts: RunAgentOptions, backend: Backend, m
 
     /** Permission first (like Claude Code), then the tool; a stop for an approval ends the run here. */
     const runGated = async (t: EngineTool, input: Record<string, unknown>, toolCallId: string): Promise<ToolOut> => {
+      // A step's calls run together: once one stopped the run (an approval), the rest don't start.
+      if (signal.aborted) throw signal.reason ?? new Error("Stopped");
       emit({ type: "assistant", message: { content: [{ type: "tool_use", id: toolCallId, name: t.name, input }] } });
       let args = input;
       if (!allowed.has(t.name)) {

@@ -179,10 +179,16 @@ export function builtinTools(names: string[], ctx: Ctx): EngineTool[] {
         }
         if (!/^https?:$/.test(url.protocol)) return fail("Only http and https pages.");
         if (isPrivateHost(url.hostname)) return fail(`${url.hostname} is a local or private address; WebFetch only reaches public sites.`);
-        const res = await fetch(url, { signal: AbortSignal.any([c.signal, AbortSignal.timeout(30_000)]), headers: { "user-agent": "Mozilla/5.0 (Ajudan)" } });
+        // Redirects aren't followed: the new address goes back to the model, so fetching
+        // it passes the private-host check again (like http_request).
+        const res = await fetch(url, { signal: AbortSignal.any([c.signal, AbortSignal.timeout(30_000)]), headers: { "user-agent": "Mozilla/5.0 (Ajudan)" }, redirect: "manual" });
+        const location = res.headers.get("location");
+        if (res.status >= 300 && res.status < 400 && location) {
+          return { text: `${res.status}: ${url} redirects to ${new URL(location, url)}. Fetch that address if you still need it.` };
+        }
         const type = res.headers.get("content-type") ?? "";
         if (!/text|json|xml|javascript/.test(type)) return fail(`${url.host} sent ${type || "an unknown type"}, not text.`);
-        const body = await res.text();
+        const body = await readCapped(res, 2_000_000);
         const text = /html/.test(type) ? htmlToText(body) : body;
         return { text: `${res.status} ${url}\n${i.prompt ? `(looking for: ${str(i.prompt)})\n` : ""}\n${clip(text, 40_000)}`, isError: !res.ok };
       },
@@ -237,6 +243,22 @@ export function globToRegExp(glob: string) {
     else re += c.replace(/[.+^$()|[\]\\]/g, "\\$&");
   }
   return new RegExp(`^${re}$`);
+}
+
+/** The body as text, at most `max` bytes (a huge page can't fill the worker's memory). */
+async function readCapped(res: Response, max: number) {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < max) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  await reader.cancel().catch(() => {});
+  return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, max));
 }
 
 function htmlToText(html: string) {
