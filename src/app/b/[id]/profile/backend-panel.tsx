@@ -10,9 +10,9 @@ import { ActionForm, SubmitButton } from "../team/action-form";
 import { saveBackendAction, testBackendAction } from "./actions";
 
 /**
- * Business → AI backend: which provider runs the team (src/lib/backend.ts). Claude Code
- * uses the local login; OpenRouter needs a key (kept in the Keychain, never shown again);
- * Ollama runs on this computer. Blank fields take the provider's defaults.
+ * Business → AI backend: which provider runs the team (src/lib/backend.ts). Claude runs
+ * on Claude Code with the local login; OpenRouter (key kept in the Keychain, never shown
+ * again) and Ollama run on the AI SDK engine. Blank fields take the provider's defaults.
  */
 export function BackendPanel({ businessId, stored, hasKey }: { businessId: string; stored: BackendSettings | null; hasKey: boolean }) {
   const t = useT();

@@ -8,7 +8,7 @@ process.env.AJUDAN_DATA_DIR = dir;
 const { db, schema } = await import("@/db");
 const sup = await import("@/lib/supervision");
 const edits = await import("@/lib/team-edits");
-const { backendEnv, backendOf } = await import("@/lib/backend");
+const { backendOf } = await import("@/lib/backend");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -41,29 +41,14 @@ describe("supervised mode", () => {
 });
 
 describe("AI backend", () => {
-  it("defaults to Claude Code and overrides nothing", () => {
-    expect(backendOf(null).provider).toBe("claude");
-    expect(backendEnv(backendOf(null), null, "/cfg")).toEqual({});
+  it("defaults to Claude Code", () => {
+    expect(backendOf(null)).toEqual({ provider: "claude", baseUrl: "", mainModel: "", fastModel: "" });
   });
 
-  it("points Claude Code at Ollama with the chosen models", () => {
-    const b = backendOf({ provider: "ollama", mainModel: "qwen3-coder:30b" });
-    expect(b).toEqual({ provider: "ollama", baseUrl: "http://localhost:11434", mainModel: "qwen3-coder:30b", fastModel: "qwen3-coder:30b" });
-    const env = backendEnv(b, null, "/cfg");
-    // Its own config folder: with ~/.claude, Claude Code would send the Claude login instead.
-    expect(env.CLAUDE_CONFIG_DIR).toBe("/cfg");
-    expect(env.ANTHROPIC_BASE_URL).toBe("http://localhost:11434");
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("ollama");
-    expect(env.ANTHROPIC_API_KEY).toBe("");
-    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("qwen3-coder:30b");
-  });
-
-  it("uses OpenRouter's key and trims the endpoint", () => {
-    const b = backendOf({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/", mainModel: "a/main", fastModel: "a/fast" });
-    const env = backendEnv(b, "sk-or-test", "/cfg");
-    expect(env.ANTHROPIC_BASE_URL).toBe("https://openrouter.ai/api");
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("sk-or-test");
-    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("a/main");
-    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("a/fast");
+  it("fills in the provider's defaults; the fast model falls back to the main one", () => {
+    expect(backendOf({ provider: "ollama", mainModel: "qwen3-coder:30b" })).toEqual({ provider: "ollama", baseUrl: "http://localhost:11434", mainModel: "qwen3-coder:30b", fastModel: "qwen3-coder:30b" });
+    expect(backendOf({ provider: "ollama", baseUrl: "http://box:11434/v1/", mainModel: "m" }).baseUrl).toBe("http://box:11434");
+    const b = backendOf({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1/", mainModel: "a/main", fastModel: "a/fast" });
+    expect(b).toEqual({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", mainModel: "a/main", fastModel: "a/fast" });
   });
 });

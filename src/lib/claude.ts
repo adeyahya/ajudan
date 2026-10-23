@@ -11,8 +11,9 @@ import {
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import { backendEnv, backendOf, type Backend } from "@/lib/backend";
-import { CONFIG_DIR } from "@/lib/folders";
+import { runWithAiSdk } from "@/lib/agent/run";
+import { AGENT_SESSIONS_DIR } from "@/lib/agent/sessions";
+import { backendOf, type Backend } from "@/lib/backend";
 import { toMs, UsageLimitError } from "@/lib/rest";
 import { backendKey } from "@/lib/secrets";
 
@@ -20,7 +21,8 @@ import { backendKey } from "@/lib/secrets";
  * The single entry point for every LLM call in Ajudan. It runs Claude Code headless
  * through the Agent SDK, so locally it uses your Claude Code login. Before serving
  * other businesses, set ANTHROPIC_API_KEY — no code change needed. A business can run
- * on OpenRouter or Ollama instead (src/lib/backend.ts): same Claude Code, other endpoint.
+ * on OpenRouter or Ollama instead (src/lib/backend.ts): those runs take the AI SDK
+ * engine (src/lib/agent/run.ts), with the same options, tools and permission checks.
  */
 
 export const MODELS = {
@@ -86,44 +88,41 @@ const LIMIT_TEXT = /usage limit reached|hit your (?:usage )?limit|out of (?:extr
 export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunAgentResult<T>> {
   fs.mkdirSync(opts.cwd, { recursive: true });
   const backend = businessBackend(opts.businessId);
-  const onClaude = backend.provider === "claude";
-  const model = onClaude ? (opts.model ?? MODELS.main) : opts.model === MODELS.fast ? backend.fastModel : backend.mainModel;
-  const key = backend.provider === "openrouter" ? await backendKey(opts.businessId) : null;
-  if (backend.provider === "openrouter" && !key) {
-    return { text: "", structured: undefined, sessionId: undefined, costUsd: 0, ok: false, error: "No OpenRouter API key: add it in Business → AI backend." };
+  if (backend.provider !== "claude") {
+    // OpenRouter and Ollama run on the AI SDK engine (src/lib/agent/run.ts), not Claude Code.
+    const key = backend.provider === "openrouter" ? await backendKey(opts.businessId) : null;
+    if (backend.provider === "openrouter" && !key) {
+      return { text: "", structured: undefined, sessionId: undefined, costUsd: 0, ok: false, error: "No OpenRouter API key: add it in Business → AI backend." };
+    }
+    return runWithAiSdk<T>(opts, backend, opts.model === MODELS.fast ? backend.fastModel : backend.mainModel, key);
   }
-  // Web search is a server tool of Anthropic's API; other providers don't run it.
-  const tools = onClaude ? opts.tools : opts.tools?.filter((t) => t !== "WebSearch");
-  const allowedTools = onClaude ? opts.allowedTools : opts.allowedTools?.filter((t) => t !== "WebSearch");
 
   const q = query({
     prompt: opts.prompt,
     options: {
       cwd: opts.cwd,
-      model,
+      model: opts.model ?? MODELS.main,
       systemPrompt: opts.systemPrompt,
       // Isolation: ignore ~/.claude and project settings, hooks, CLAUDE.md and MCP config.
       settingSources: [],
-      tools: tools ?? [],
-      allowedTools,
+      tools: opts.tools ?? [],
+      allowedTools: opts.allowedTools,
       disallowedTools: opts.disallowedTools,
       mcpServers: opts.mcpServers,
       plugins: opts.plugins?.map((p) => ({ type: "local" as const, path: p })),
       sandbox: opts.sandbox,
-      // Effort levels are Claude's; other models may reject the thinking settings.
-      effort: onClaude ? opts.effort : undefined,
+      effort: opts.effort,
       skills: opts.skills,
       canUseTool: opts.canUseTool,
       resume: opts.resume,
       maxTurns: opts.maxTurns ?? 30,
-      // Ollama runs locally and costs nothing (Claude Code would price it as a Claude model).
-      maxBudgetUsd: backend.provider === "ollama" ? undefined : opts.maxBudgetUsd,
+      maxBudgetUsd: opts.maxBudgetUsd,
       // Claude Code validates against draft-07; zod defaults to 2020-12.
       outputFormat: opts.outputSchema
         ? { type: "json_schema", schema: z.toJSONSchema(opts.outputSchema, { target: "draft-7" }) as Record<string, unknown> }
         : undefined,
       abortController: opts.abortController,
-      env: { ...process.env, ...backendEnv(backend, key, OTHER_BACKEND_CONFIG_DIR), CLAUDE_AGENT_SDK_CLIENT_APP: "ajudan/0.1.0" },
+      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "ajudan/0.1.0" },
     },
   });
 
@@ -150,13 +149,8 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
     }
     if (m.type === "result") {
       const said = m.subtype === "success" ? m.result : "";
-      const costUsd = backend.provider === "ollama" ? 0 : m.total_cost_usd;
-      // The rest (src/lib/rest.ts) is about the shared Claude login; another provider's
-      // limit or empty credits only fail this run.
-      if (!onClaude && (limited || (rejected && m.subtype !== "success"))) {
-        return { text: textParts.join("\n"), structured: undefined, sessionId, costUsd, ok: false, error: `${providerName(backend)}: rate limit or credits used up` };
-      }
-      if (onClaude && (limited || (rejected && m.subtype !== "success") || (m.subtype === "success" && m.num_turns <= 1 && LIMIT_TEXT.test(said) && said.length < 300))) {
+      const costUsd = m.total_cost_usd;
+      if (limited || (rejected && m.subtype !== "success") || (m.subtype === "success" && m.num_turns <= 1 && LIMIT_TEXT.test(said) && said.length < 300)) {
         throw new UsageLimitError(resetsAt ?? toMs(Number(said.match(/\|(\d{10,13})\b/)?.[1])));
       }
       if (m.subtype === "success") {
@@ -184,22 +178,16 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
         sessionId,
         costUsd,
         ok: false,
-        error: `${providerName(backend)} run ended with ${m.subtype}${"errors" in m && m.errors ? `: ${JSON.stringify(m.errors)}` : ""}`,
+        error: `Claude run ended with ${m.subtype}${"errors" in m && m.errors ? `: ${JSON.stringify(m.errors)}` : ""}`,
       };
     }
   }
   return { text: textParts.join("\n"), structured: undefined, sessionId, costUsd: 0, ok: false, error: "No result" };
 }
 
-/**
- * Claude Code's config folder on OpenRouter or Ollama: its own, so the local Claude login
- * stays out of those runs (src/lib/backend.ts). Their sessions are kept there too.
- */
-const OTHER_BACKEND_CONFIG_DIR = path.join(CONFIG_DIR, "claude-code");
-
-/** Where this business's Claude Code sessions are kept (for resuming them). */
+/** Where this business's sessions are kept (for resuming them): Claude Code's, or the AI SDK engine's. */
 export function claudeConfigDir(businessId: string) {
-  return businessBackend(businessId).provider === "claude" ? path.join(os.homedir(), ".claude") : OTHER_BACKEND_CONFIG_DIR;
+  return businessBackend(businessId).provider === "claude" ? path.join(os.homedir(), ".claude") : AGENT_SESSIONS_DIR;
 }
 
 /** The business's backend, read per run so a switch applies to the next run. */
@@ -207,8 +195,6 @@ function businessBackend(businessId: string): Backend {
   const row = db.select({ b: schema.businesses.aiBackend }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
   return backendOf(row?.b);
 }
-
-const providerName = (b: Backend) => (b.provider === "openrouter" ? "OpenRouter" : b.provider === "ollama" ? "Ollama" : "Claude");
 
 function hostOf(url: unknown) {
   try {
