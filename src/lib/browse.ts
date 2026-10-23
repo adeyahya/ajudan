@@ -89,17 +89,30 @@ export type Entry = {
   children?: number;
 };
 
+/** Reads only the start of the file: listings show titles for whole folders. */
 function mdTitle(abs: string) {
   try {
-    const head = fs.readFileSync(abs, "utf8").slice(0, 1500);
+    const buf = Buffer.alloc(1500);
+    const fd = fs.openSync(abs, "r");
+    let n = 0;
+    try {
+      n = fs.readSync(fd, buf, 0, buf.length, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+    const head = buf.subarray(0, n).toString("utf8");
     return /^title:\s*"?(.+?)"?\s*$/m.exec(head)?.[1] ?? /^#\s+(.+)$/m.exec(head)?.[1];
   } catch {
     return undefined;
   }
 }
 
-/** A folder's entries: folders first, then files newest first. */
-export function listDir(rel: string): Entry[] | null {
+/**
+ * A folder's entries, folders first, then files newest first. Each entry costs a stat;
+ * pass `details: false` to skip the markdown titles and folder item counts (a read per
+ * entry) and add them later with withDetails for the entries actually shown.
+ */
+export function listDir(rel: string, { details = true }: { details?: boolean } = {}): Entry[] | null {
   const dir = currentDataDir();
   if (!dir) return null;
   if (!rel) {
@@ -110,7 +123,7 @@ export function listDir(rel: string): Entry[] | null {
   }
   const abs = resolveBrowsable(rel);
   if (!abs || !fs.statSync(abs).isDirectory()) return null;
-  return fs
+  const entries = fs
     .readdirSync(abs, { withFileTypes: true })
     .filter((d) => !d.name.startsWith("."))
     .map((d): Entry => {
@@ -125,11 +138,36 @@ export function listDir(rel: string): Entry[] | null {
         size: isDir ? 0 : st.size,
         mtime: st.mtime,
         type: isDir ? "dir" : fileType(d.name),
-        title: !isDir && d.name.endsWith(".md") ? mdTitle(p) : undefined,
-        children: isDir ? countVisible(p) : undefined,
       };
     })
     .sort((a, b) => Number(b.isDir) - Number(a.isDir) || (a.isDir ? a.name.localeCompare(b.name) : b.mtime.getTime() - a.mtime.getTime()));
+  return details ? withDetails(entries) : entries;
+}
+
+/** Fill in markdown titles and folder item counts (listDir with `details: false`). */
+export function withDetails(entries: Entry[]): Entry[] {
+  const dir = currentDataDir();
+  if (!dir) return entries;
+  return entries.map((e) => {
+    const p = path.join(dir, e.rel);
+    if (e.isDir) return { ...e, children: countVisible(p) };
+    return e.name.endsWith(".md") ? { ...e, title: mdTitle(p) } : e;
+  });
+}
+
+/** A folder's subfolders by name, without a stat per file (the Files tree). */
+export function listFolders(rel: string): { name: string; rel: string }[] {
+  const abs = resolveBrowsable(rel);
+  if (!abs) return [];
+  try {
+    return fs
+      .readdirSync(abs, { withFileTypes: true })
+      .filter((d) => !d.name.startsWith(".") && (d.isDirectory() || (d.isSymbolicLink() && fs.statSync(path.join(abs, d.name)).isDirectory())))
+      .map((d) => ({ name: d.name, rel: `${rel}/${d.name}` }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
 }
 
 function countVisible(abs: string) {
@@ -148,13 +186,17 @@ export function searchFiles(q: string, limit = 200): Entry[] {
   const out: Entry[] = [];
   const walk = (rel: string, depth: number) => {
     if (depth > 6) return;
-    for (const e of listDir(rel) ?? []) {
+    for (const e of listDir(rel, { details: false }) ?? []) {
       if (e.isDir) walk(e.rel, depth + 1);
-      else if (e.name.toLowerCase().includes(needle) || e.title?.toLowerCase().includes(needle)) out.push(e);
+      else if (e.name.toLowerCase().includes(needle)) out.push(e);
+      else if (e.name.endsWith(".md")) {
+        const [d] = withDetails([e]);
+        if (d.title?.toLowerCase().includes(needle)) out.push(d);
+      }
     }
   };
   for (const r of ROOTS) if (fs.existsSync(path.join(dir, r.key))) walk(r.key, 0);
-  return out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, limit);
+  return withDetails(out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, limit));
 }
 
 /** A text file's contents for previewing (capped). */

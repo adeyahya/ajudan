@@ -1,15 +1,17 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ContextPage, ContextSuggestion } from "@/db/schema";
-import { listLibrary } from "@/lib/assets";
+import { listLibrary, type LibraryItem } from "@/lib/assets";
 import { listContacts } from "@/lib/contacts";
 import {
   budgetPages,
   compactDiff,
   diffLines,
   ensureContextWorkspace,
+  listPageHeads,
   listPages,
+  type LoadedPages,
   normalizeMarkdown,
   pageForAgents,
   pageIcon,
@@ -50,7 +52,7 @@ export async function treePages(businessId: string): Promise<TreePage[]> {
   await connection();
   ensureContextWorkspace(businessId);
   const pending = pendingSuggestions(businessId);
-  return listPages(businessId).map((p) => ({
+  return listPageHeads(businessId).map((p) => ({
     id: p.id,
     title: p.title,
     section: p.section,
@@ -75,8 +77,8 @@ export function isStale(p: Pick<ContextPage, "kind" | "lastCheckedAt" | "updated
 }
 
 /** How full a teammate's prompt is with always-pages (the budget's characters), and which pages were cut. */
-export function promptLoad(businessId: string, teammateId: string) {
-  const { always } = pagesFor(businessId, teammateId);
+export function promptLoad(businessId: string, teammateId: string, loaded?: LoadedPages) {
+  const { always } = pagesFor(businessId, teammateId, loaded);
   const { items } = budgetPages(always);
   const used = items.reduce((n, i) => n + i.chars, 0);
   return { used, total: PROMPT_BUDGET.total, items };
@@ -86,12 +88,12 @@ export function promptLoad(businessId: string, teammateId: string) {
  * The home's "needs you" numbers: suggestions waiting, pages to check, pages nobody read
  * this week (a week old at least), and the room left in the fullest teammate's prompt.
  */
-export async function contextHealth(businessId: string, mates: { id: string }[]) {
+export async function contextHealth(businessId: string, mates: { id: string }[], loaded: LoadedPages) {
   await connection();
-  const pages = listPages(businessId);
+  const { pages } = loaded;
   const usage = usageThisWeek(businessId);
   const now = Date.now();
-  const loads = mates.map((m) => promptLoad(businessId, m.id));
+  const loads = mates.map((m) => promptLoad(businessId, m.id, loaded));
   const fullest = loads.reduce((max, l) => Math.max(max, l.used / l.total), 0);
   return {
     pending: pendingSuggestions(businessId).length,
@@ -154,20 +156,24 @@ export function pendingFor(businessId: string) {
 }
 
 /** Library files with how many saved pieces of work use each (for gallery blocks). */
-export function galleryAssets(businessId: string) {
+export function galleryAssets(businessId: string, library: LibraryItem[] = listLibrary(businessId)) {
   const uses = new Map<string, number>();
-  for (const d of db.select({ a: schema.deliverables.attachments }).from(schema.deliverables).where(eq(schema.deliverables.businessId, businessId)).all()) {
+  for (const d of db
+    .select({ a: schema.deliverables.attachments })
+    .from(schema.deliverables)
+    .where(and(eq(schema.deliverables.businessId, businessId), sql`json_array_length(${schema.deliverables.attachments}) > 0`))
+    .all()) {
     for (const p of d.a) uses.set(p, (uses.get(p) ?? 0) + 1);
   }
-  return listLibrary(businessId)
+  return library
     .filter((a) => a.tags.length)
     .slice(0, 300)
     .map((a) => ({ path: a.path, title: a.title, tags: a.tags, kind: a.kind, usedIn: uses.get(a.path) ?? 0 }));
 }
 
 /** Library images for a page cover (any image, tagged or not). */
-export function coverImages(businessId: string): CoverImage[] {
-  return listLibrary(businessId)
+export function coverImages(businessId: string, library: LibraryItem[] = listLibrary(businessId)): CoverImage[] {
+  return library
     .filter((a) => a.kind === "image")
     .slice(0, 120)
     .map((a) => ({ path: a.path, title: a.title }));

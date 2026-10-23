@@ -69,7 +69,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
   const order = (s: string) => SECTIONS.indexOf(s as (typeof SECTIONS)[number]);
   const sorted = [...pages].sort((a, b) => order(a.section) - order(b.section) || a.sortOrder - b.sortOrder);
   const modes = new Map(sorted.map((p) => [p.id, readersFor(p, [mate], rows)[0].mode]));
-  const load = promptLoad(id, mate.id);
+  const load = promptLoad(id, mate.id, { pages, rows });
   const inPrompt = new Map(load.items.map((i) => [i.id, i]));
   const usage = usageThisWeek(id);
   const cards: LensCard[] = sorted.map((p) => {
@@ -88,7 +88,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
       runs: usage.get(p.id)?.byTeammate.get(mate.id) ?? 0,
     };
   });
-  const prompt = contextPrompt(id, mate.id).prompt;
+  const prompt = contextPrompt(id, mate.id, { pages, rows }).prompt;
 
   return (
     <PageBody width="wide">

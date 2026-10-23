@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import { overBudget, spentThisWeek, spentToday } from "@/lib/budget";
@@ -38,11 +38,13 @@ export async function getSpend(businessId: string) {
 
 export async function pendingApprovalCount(businessId: string) {
   await connection();
-  return db
-    .select({ id: schema.approvals.id })
-    .from(schema.approvals)
-    .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
-    .all().length;
+  return (
+    db
+      .select({ n: count() })
+      .from(schema.approvals)
+      .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
+      .get()?.n ?? 0
+  );
 }
 
 /** XP, levels, trust and the clean-queue streak for the chat home (src/lib/progress.ts). */
@@ -59,12 +61,17 @@ export async function getProgress(businessId: string) {
     .from(schema.tasks)
     .where(and(eq(schema.tasks.businessId, businessId), eq(schema.tasks.status, "done")))
     .all();
+  // Count revisions in SQL: the versions column holds full copies of earlier content.
   const deliverables = db
-    .select({ teammateId: schema.deliverables.teammateId, status: schema.deliverables.status, versions: schema.deliverables.versions, createdAt: schema.deliverables.createdAt })
+    .select({
+      teammateId: schema.deliverables.teammateId,
+      status: schema.deliverables.status,
+      revisions: sql<number>`json_array_length(${schema.deliverables.versions})`,
+      createdAt: schema.deliverables.createdAt,
+    })
     .from(schema.deliverables)
     .where(eq(schema.deliverables.businessId, businessId))
-    .all()
-    .map(({ versions, ...d }) => ({ ...d, revisions: versions.length }));
+    .all();
   const approvals = db
     .select({ teammateId: schema.approvals.teammateId, status: schema.approvals.status, createdAt: schema.approvals.createdAt, decidedAt: schema.approvals.decidedAt })
     .from(schema.approvals)

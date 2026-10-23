@@ -23,24 +23,36 @@ export async function editorSources(businessId: string): Promise<EditorSource[]>
   const items = listLibrary(businessId)
     .filter((i) => i.kind === "video" || i.kind === "audio")
     .slice(0, 120);
-  return Promise.all(
-    items.map(async (i) => {
-      const info = await mediaInfo(path.join(dir, i.path));
-      return {
-        path: i.path,
-        name: i.name,
-        title: i.title,
-        kind: i.kind,
-        album: i.album,
-        starred: i.starred,
-        duration: info.durationSec ?? 0,
-        width: info.width,
-        height: info.height,
-        hasAudio: info.hasAudio,
-      };
-    }),
-  );
+  // A few ffprobes at a time (results are cached per file, see mediaInfo).
+  const out: EditorSource[] = new Array(items.length);
+  let next = 0;
+  const probeNext = async () => {
+    while (next < items.length) {
+      const n = next++;
+      out[n] = await source(items[n]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PROBES_AT_ONCE, items.length) }, probeNext));
+  return out;
+
+  async function source(i: LibraryItem): Promise<EditorSource> {
+    const info = await mediaInfo(path.join(dir, i.path));
+    return {
+      path: i.path,
+      name: i.name,
+      title: i.title,
+      kind: i.kind,
+      album: i.album,
+      starred: i.starred,
+      duration: info.durationSec ?? 0,
+      width: info.width,
+      height: info.height,
+      hasAudio: info.hasAudio,
+    };
+  }
 }
+
+const PROBES_AT_ONCE = 6;
 
 export async function listEdits(businessId: string, kind: EditKind) {
   await connection();

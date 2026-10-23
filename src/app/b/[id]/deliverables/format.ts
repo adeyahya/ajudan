@@ -8,8 +8,8 @@ export function kindLabel(kind: string) {
 }
 
 /** When the piece last changed: the latest revision, else when it was saved. */
-export function updatedAt(d: Pick<Deliverable, "createdAt" | "versions">) {
-  const last = d.versions.at(-1)?.savedAt;
+export function updatedAt(d: Pick<Deliverable, "createdAt"> & ({ versions: Deliverable["versions"] } | { lastSavedAt: string | null })) {
+  const last = "versions" in d ? d.versions.at(-1)?.savedAt : d.lastSavedAt;
   return last ? new Date(last) : d.createdAt;
 }
 

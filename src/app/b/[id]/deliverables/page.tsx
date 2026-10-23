@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { and, desc, eq, inArray, isNotNull, like, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, like, sql, type SQL } from "drizzle-orm";
 import { connection } from "next/server";
 import { CircleDot, Clock, FolderCheck, Image as ImageIcon, Radio, Tag, Type, User, X } from "lucide-react";
 import { db, schema } from "@/db";
@@ -74,8 +74,19 @@ async function loadDeliverables(businessId: string, f: Filters, peekId: string |
   if (f.kinds.length) where.push(inArray(schema.deliverables.kind, f.kinds));
   if (f.teammates.length) where.push(inArray(schema.deliverables.teammateId, f.teammates));
   if (f.q) where.push(like(schema.deliverables.title, `%${f.q}%`));
+  // Only what the table shows: content and earlier versions stay in the database.
   const rows = db
-    .select()
+    .select({
+      id: schema.deliverables.id,
+      title: schema.deliverables.title,
+      kind: schema.deliverables.kind,
+      status: schema.deliverables.status,
+      teammateId: schema.deliverables.teammateId,
+      channel: schema.deliverables.channel,
+      attachments: schema.deliverables.attachments,
+      createdAt: schema.deliverables.createdAt,
+      lastSavedAt: sql<string | null>`json_extract(${schema.deliverables.versions}, '$[#-1].savedAt')`,
+    })
     .from(schema.deliverables)
     .where(and(...where))
     .orderBy(desc(schema.deliverables.createdAt))
@@ -83,8 +94,8 @@ async function loadDeliverables(businessId: string, f: Filters, peekId: string |
     .all();
   // Counts for the view tabs (status only; the other filters narrow the table, not the tabs).
   const counts = new Map<string, number>();
-  for (const r of db.select({ status: schema.deliverables.status }).from(schema.deliverables).where(base).all())
-    counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
+  for (const r of db.select({ status: schema.deliverables.status, n: count() }).from(schema.deliverables).where(base).groupBy(schema.deliverables.status).all())
+    counts.set(r.status, r.n);
   const kinds = db
     .selectDistinct({ kind: schema.deliverables.kind })
     .from(schema.deliverables)
@@ -94,10 +105,7 @@ async function loadDeliverables(businessId: string, f: Filters, peekId: string |
     .sort();
   const mates = db.select().from(schema.teammates).where(eq(schema.teammates.businessId, businessId)).all();
   // The peeked piece is loaded by id, so a search-result link opens it whatever the view.
-  const peek = peekId
-    ? (rows.find((r) => r.id === peekId) ??
-      db.select().from(schema.deliverables).where(and(base, eq(schema.deliverables.id, peekId))).get())
-    : undefined;
+  const peek = peekId ? db.select().from(schema.deliverables).where(and(base, eq(schema.deliverables.id, peekId))).get() : undefined;
   // Pieces a teammate is revising right now (the owner's "Needs changes" or the manager's review).
   const revising = new Map(
     db
@@ -195,7 +203,7 @@ async function Content({ params, searchParams }: Pick<Props, "params" | "searchP
           </div>
         )}
 
-        <DataTable<Deliverable>
+        <DataTable<(typeof data.rows)[number]>
           className="mt-1"
           rows={data.rows}
           getRowId={(d) => d.id}

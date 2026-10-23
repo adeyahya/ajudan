@@ -1,0 +1,19 @@
+CREATE INDEX `activity_events_task_type_idx` ON `activity_events` (`task_id`,`type`,`id`);--> statement-breakpoint
+CREATE INDEX `activity_events_business_type_idx` ON `activity_events` (`business_id`,`type`,`created_at`);--> statement-breakpoint
+CREATE INDEX `assets_business_idx` ON `assets` (`business_id`);--> statement-breakpoint
+CREATE INDEX `contacts_business_name_idx` ON `contacts` (`business_id`,`name`);--> statement-breakpoint
+CREATE INDEX `context_loads_business_created_idx` ON `context_loads` (`business_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `context_loads_teammate_idx` ON `context_loads` (`business_id`,`teammate_id`,`id`);--> statement-breakpoint
+CREATE INDEX `context_suggestions_page_idx` ON `context_suggestions` (`page_id`,`status`);--> statement-breakpoint
+CREATE INDEX `context_suggestions_task_idx` ON `context_suggestions` (`task_id`);--> statement-breakpoint
+CREATE INDEX `deliverables_business_created_idx` ON `deliverables` (`business_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `deliverables_business_status_idx` ON `deliverables` (`business_id`,`status`);--> statement-breakpoint
+CREATE INDEX `deliverables_teammate_idx` ON `deliverables` (`teammate_id`);--> statement-breakpoint
+CREATE INDEX `deliverables_task_idx` ON `deliverables` (`task_id`);--> statement-breakpoint
+CREATE INDEX `human_messages_human_sent_idx` ON `human_messages` (`human_id`,`sent_at`);--> statement-breakpoint
+CREATE INDEX `tasks_teammate_created_idx` ON `tasks` (`teammate_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `tasks_business_status_idx` ON `tasks` (`business_id`,`status`);--> statement-breakpoint
+CREATE INDEX `tasks_business_finished_idx` ON `tasks` (`business_id`,`finished_at`);--> statement-breakpoint
+CREATE INDEX `tasks_parent_idx` ON `tasks` (`parent_task_id`);--> statement-breakpoint
+CREATE INDEX `tasks_deliverable_idx` ON `tasks` (`deliverable_id`);--> statement-breakpoint
+CREATE INDEX `wa_watches_business_status_idx` ON `wa_watches` (`business_id`,`status`);

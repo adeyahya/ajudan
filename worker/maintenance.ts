@@ -1,9 +1,9 @@
 /**
  * Housekeeping for the open business folder: a daily database backup
  * (backups/daily-YYYY-MM-DD.db, the last 7 kept) and pruning of old activity
- * events and finished jobs, which otherwise grow without bound, and the weekly Context
- * review when the owner turned it on (src/lib/reorganize.ts). Runs once when a folder is
- * opened and then once a day.
+ * events (and each task's extra tool steps), context loads and finished jobs, which
+ * otherwise grow without bound, and the weekly Context review when the owner turned it
+ * on (src/lib/reorganize.ts). Runs once when a folder is opened and then once a day.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +14,10 @@ import { dueReorganizeBusinesses, reorganizeState, requestReorganize } from "@/l
 
 const DAY = 24 * 60 * 60 * 1000;
 const KEEP_EVENTS_DAYS = 30;
+/** Tool steps kept per task: the chat shows a run's latest ones, the rest is noise. */
+const KEEP_STEPS_PER_TASK = 200;
+/** What runs read (the Context inspector and usage counts look at the last week). */
+const KEEP_LOADS_DAYS = 90;
 const KEEP_JOBS_DAYS = 14;
 const KEEP_DAILY_BACKUPS = 7;
 
@@ -80,9 +84,18 @@ export function prune() {
     .delete(schema.activityEvents)
     .where(lt(schema.activityEvents.createdAt, new Date(now - KEEP_EVENTS_DAYS * DAY)))
     .run().changes;
+  // A long run logs hundreds of steps; keep each task's newest.
+  const steps = db.run(sql`
+    DELETE FROM activity_events WHERE id IN (
+      SELECT id FROM (
+        SELECT id, row_number() OVER (PARTITION BY task_id ORDER BY id DESC) AS n
+        FROM activity_events WHERE type = 'tool' AND task_id IS NOT NULL
+      ) WHERE n > ${KEEP_STEPS_PER_TASK}
+    )`).changes;
+  const loads = db.delete(schema.contextLoads).where(lt(schema.contextLoads.createdAt, new Date(now - KEEP_LOADS_DAYS * DAY))).run().changes;
   const jobs = db
     .delete(schema.jobs)
     .where(and(inArray(schema.jobs.status, ["done", "failed"]), lt(schema.jobs.finishedAt, new Date(now - KEEP_JOBS_DAYS * DAY))))
     .run().changes;
-  if (events || jobs) console.log(`[maintenance] pruned ${events} old events, ${jobs} finished jobs`);
+  if (events || steps || loads || jobs) console.log(`[maintenance] pruned ${events} old events, ${steps} extra steps, ${loads} old context loads, ${jobs} finished jobs`);
 }

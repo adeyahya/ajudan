@@ -32,7 +32,7 @@ import { DocLayoutButtons } from "@/components/doc-layout";
 import { DataTable, Gallery, GalleryTile, type Column } from "@/components/data-table";
 import { Button, CardGridSkeleton, EmptyState, IconButton, Input, PageBody, PageHeader, PropertyList, Skeleton, cn } from "@/components/kit";
 import { FileMarkdown } from "@/components/markdown";
-import { ROOTS, cleanRel, fileStat, fileType, listDir, readText, searchFiles, type Entry, type FileType } from "@/lib/browse";
+import { ROOTS, cleanRel, fileStat, fileType, listDir, listFolders, readText, searchFiles, withDetails, type Entry, type FileType } from "@/lib/browse";
 import { getBusiness } from "@/lib/data";
 import { dateLocale, t, tn, uiLang, type MessageKey, type UiLang } from "@/lib/i18n";
 
@@ -71,7 +71,16 @@ const LIVE = ["deliverable_saved", "image_rendered", "video_rendered", "asset_do
 
 const fileUrl = (businessId: string, rel: string, download = false) =>
   `/api/b/${businessId}/files/${rel.split("/").map(encodeURIComponent).join("/")}${download ? "?download=1" : ""}`;
-const href = (businessId: string, rel: string) => `/b/${businessId}/files${rel ? `?path=${encodeURIComponent(rel)}` : ""}`;
+const href = (businessId: string, rel: string, page = 1) => {
+  const p = new URLSearchParams();
+  if (rel) p.set("path", rel);
+  if (page > 1) p.set("page", String(page));
+  const qs = p.toString();
+  return `/b/${businessId}/files${qs ? `?${qs}` : ""}`;
+};
+
+/** Entries per folder page: a big folder is listed (stat) whole but titled and rendered a page at a time. */
+const PAGE_SIZE = 200;
 
 function size(n: number) {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
@@ -116,6 +125,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   const lang = uiLang(biz.language);
   const raw = typeof sp.path === "string" ? sp.path : "";
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
+  const pageNo = Math.max(1, Number(sp.page) || 1);
   const rel = cleanRel(raw);
   if (rel === null) notFound();
   const stat = rel ? fileStat(rel) : { isDir: true, size: 0, mtime: new Date() };
@@ -169,7 +179,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
           {q ? (
             <SearchResults businessId={id} q={q} names={names} lang={lang} />
           ) : stat.isDir ? (
-            <FolderView businessId={id} rel={rel} names={names} lang={lang} />
+            <FolderView businessId={id} rel={rel} names={names} lang={lang} page={pageNo} />
           ) : (
             <FileView businessId={id} rel={rel} size={stat.size} mtime={stat.mtime} lang={lang} />
           )}
@@ -220,7 +230,7 @@ function TreeRow({
 function Tree({ businessId, rel, label, open, names, depth, q }: { businessId: string; rel: string; label: string; open: string; names: Names; depth: number; q: string }) {
   const expanded = open === rel || open.startsWith(`${rel}/`);
   const here = open === rel && !q;
-  const subfolders = expanded ? (listDir(rel) ?? []).filter((e) => e.isDir) : [];
+  const subfolders = expanded ? listFolders(rel) : [];
   return (
     <div className="space-y-px">
       <TreeRow
@@ -269,9 +279,9 @@ function entryColumns(names: Names, lang: UiLang, showPath = false): Column<Entr
   ];
 }
 
-function FolderView({ businessId, rel, names, lang }: { businessId: string; rel: string; names: Names; lang: UiLang }) {
-  const entries = listDir(rel) ?? [];
+function FolderView({ businessId, rel, names, lang, page }: { businessId: string; rel: string; names: Names; lang: UiLang; page: number }) {
   if (!rel) {
+    const entries = listDir(rel) ?? [];
     const rows = ROOTS.map((r) => ({ key: r.key, children: entries.find((x) => x.rel === r.key)?.children ?? 0 }));
     return (
       <>
@@ -302,11 +312,14 @@ function FolderView({ businessId, rel, names, lang }: { businessId: string; rel:
       </>
     );
   }
+  const all = listDir(rel, { details: false }) ?? [];
+  const pages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const entries = withDetails(all.slice((Math.min(page, pages) - 1) * PAGE_SIZE, Math.min(page, pages) * PAGE_SIZE));
   const visual = entries.filter((e) => e.type === "image" || e.type === "video");
   const rest = entries.filter((e) => e.type !== "image" && e.type !== "video");
   return (
     <>
-      <PageHeader title={segLabel(rel, names, lang)} description={tn(lang, "files.items", entries.length)} />
+      <PageHeader title={segLabel(rel, names, lang)} description={tn(lang, "files.items", all.length)} />
       {!entries.length && <EmptyState icon={<FolderOpenIcon />} title={t(lang, "files.emptyFolder")} body={t(lang, "files.emptyFolderBody")} />}
       {visual.length > 0 && (
         <Gallery className="mb-10">
@@ -337,6 +350,29 @@ function FolderView({ businessId, rel, names, lang }: { businessId: string; rel:
       )}
       {rest.length > 0 && (
         <DataTable label={segLabel(rel, names, lang)} rows={rest} getRowId={(e) => e.rel} rowHref={(e) => href(businessId, e.rel)} columns={entryColumns(names, lang)} minWidth={560} />
+      )}
+      {pages > 1 && (
+        <nav aria-label={t(lang, "files.pages")} className="mt-6 flex items-center justify-between text-[13px] text-muted-foreground">
+          {page > 1 ? (
+            <Button asChild size="sm" variant="ghost">
+              <Link href={href(businessId, rel, page - 1)}>
+                <ChevronLeftIcon /> {t(lang, "files.newerPage")}
+              </Link>
+            </Button>
+          ) : (
+            <span />
+          )}
+          <span className="tabular-nums">{t(lang, "files.pageOf", { page: Math.min(page, pages), pages })}</span>
+          {page < pages ? (
+            <Button asChild size="sm" variant="ghost">
+              <Link href={href(businessId, rel, page + 1)}>
+                {t(lang, "files.olderPage")} <ChevronRightIcon />
+              </Link>
+            </Button>
+          ) : (
+            <span />
+          )}
+        </nav>
       )}
     </>
   );
@@ -412,7 +448,7 @@ function FileView({ businessId, rel, size: bytes, mtime, lang }: { businessId: s
   const type = fileType(rel);
   const name = rel.split("/").pop() ?? rel;
   const url = fileUrl(businessId, rel);
-  const siblings = (listDir(rel.split("/").slice(0, -1).join("/")) ?? []).filter((e) => !e.isDir);
+  const siblings = (listDir(rel.split("/").slice(0, -1).join("/"), { details: false }) ?? []).filter((e) => !e.isDir);
   const i = siblings.findIndex((e) => e.rel === rel);
   const newer = i > 0 ? siblings[i - 1] : undefined;
   const older = i >= 0 && i < siblings.length - 1 ? siblings[i + 1] : undefined;

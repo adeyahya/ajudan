@@ -1,4 +1,4 @@
-import { and, eq, gte, like } from "drizzle-orm";
+import { and, count, eq, gte, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logEvent } from "@/lib/events";
 import { listHumans } from "@/lib/humans";
@@ -111,16 +111,14 @@ export function ownerReplied(businessId: string, jid: string, text: string) {
 export function deskScore(businessId: string) {
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
-  const all = db
-    .select({ at: schema.activityEvents.createdAt })
-    .from(schema.activityEvents)
-    .where(and(eq(schema.activityEvents.businessId, businessId), eq(schema.activityEvents.type, "owner_replied")))
-    .all();
-  const today = db
-    .select({ id: schema.activityEvents.id })
-    .from(schema.activityEvents)
-    .where(and(eq(schema.activityEvents.businessId, businessId), eq(schema.activityEvents.type, "owner_replied"), gte(schema.activityEvents.createdAt, midnight)))
-    .all().length;
-  const xp = all.length * XP_PER_REPLY;
-  return { today, total: all.length, xp, level: Math.floor(xp / 100) + 1, toNext: 100 - (xp % 100) };
+  const replies = (since?: Date) =>
+    db
+      .select({ n: count() })
+      .from(schema.activityEvents)
+      .where(and(eq(schema.activityEvents.businessId, businessId), eq(schema.activityEvents.type, "owner_replied"), since ? gte(schema.activityEvents.createdAt, since) : undefined))
+      .get()?.n ?? 0;
+  const total = replies();
+  const today = replies(midnight);
+  const xp = total * XP_PER_REPLY;
+  return { today, total, xp, level: Math.floor(xp / 100) + 1, toNext: 100 - (xp % 100) };
 }

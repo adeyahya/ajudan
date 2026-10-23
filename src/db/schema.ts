@@ -163,7 +163,14 @@ export const tasks = sqliteTable("tasks", {
   createdAt: createdAt(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
-}, (t) => [index("tasks_teammate_status_idx").on(t.teammateId, t.status)]);
+}, (t) => [
+  index("tasks_teammate_status_idx").on(t.teammateId, t.status),
+  index("tasks_teammate_created_idx").on(t.teammateId, t.createdAt),
+  index("tasks_business_status_idx").on(t.businessId, t.status),
+  index("tasks_business_finished_idx").on(t.businessId, t.finishedAt),
+  index("tasks_parent_idx").on(t.parentTaskId),
+  index("tasks_deliverable_idx").on(t.deliverableId),
+]);
 
 /**
  * "superseded": the run that asked can't be resumed (it restarts from scratch and asks
@@ -218,7 +225,12 @@ export const deliverables = sqliteTable("deliverables", {
    */
   versions: text("versions", { mode: "json" }).$type<DeliverableVersion[]>().notNull().default([]),
   createdAt: createdAt(),
-});
+}, (t) => [
+  index("deliverables_business_created_idx").on(t.businessId, t.createdAt),
+  index("deliverables_business_status_idx").on(t.businessId, t.status),
+  index("deliverables_teammate_idx").on(t.teammateId),
+  index("deliverables_task_idx").on(t.taskId),
+]);
 
 export type DeliverableVersion = {
   title: string;
@@ -242,7 +254,11 @@ export const activityEvents = sqliteTable("activity_events", {
   message: text("message").notNull(),
   data: text("data", { mode: "json" }).$type<Record<string, unknown>>(),
   createdAt: createdAt(),
-}, (t) => [index("activity_events_business_id_idx").on(t.businessId, t.id)]);
+}, (t) => [
+  index("activity_events_business_id_idx").on(t.businessId, t.id),
+  index("activity_events_task_type_idx").on(t.taskId, t.type, t.id),
+  index("activity_events_business_type_idx").on(t.businessId, t.type, t.createdAt),
+]);
 
 /**
  * The WhatsApp conversation with human teammates, as Ajudan saw it: requests and
@@ -268,7 +284,7 @@ export const humanMessages = sqliteTable("human_messages", {
   waMessageId: text("wa_message_id").unique(),
   sentAt: integer("sent_at", { mode: "timestamp_ms" }).notNull(),
   createdAt: createdAt(),
-});
+}, (t) => [index("human_messages_human_sent_idx").on(t.humanId, t.sentAt)]);
 
 /**
  * Credentials the team may use (API keys, tokens). Only the name, the hosts it may be
@@ -321,7 +337,7 @@ export const waWatches = sqliteTable("wa_watches", {
    */
   pace: text("pace").$type<WatchPace>().notNull().default("normal"),
   createdAt: createdAt(),
-});
+}, (t) => [index("wa_watches_business_status_idx").on(t.businessId, t.status)]);
 
 export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit" | "context_test_ask" | "context_reorganize";
 
@@ -355,7 +371,7 @@ export const assets = sqliteTable("assets", {
   album: text("album"),
   starred: integer("starred", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
-});
+}, (t) => [index("assets_business_idx").on(t.businessId)]);
 
 /**
  * Local git repositories the owner connected (src/lib/repos.ts). Teammates with
@@ -394,7 +410,7 @@ export const contacts = sqliteTable("contacts", {
   /** "owner", or "teammate:<id>" for a contact a teammate added (save_contact). */
   createdBy: text("created_by").notNull().default("owner"),
   createdAt: createdAt(),
-});
+}, (t) => [index("contacts_business_name_idx").on(t.businessId, t.name)]);
 
 export type EditKind = "video" | "audio";
 export type EditStatus = "draft" | "queued" | "rendering" | "done" | "failed";
@@ -507,7 +523,11 @@ export const contextSuggestions = sqliteTable("context_suggestions", {
   status: text("status").$type<SuggestionStatus>().notNull().default("pending"),
   decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
-}, (t) => [index("context_suggestions_business_idx").on(t.businessId, t.status)]);
+}, (t) => [
+  index("context_suggestions_business_idx").on(t.businessId, t.status),
+  index("context_suggestions_page_idx").on(t.pageId, t.status),
+  index("context_suggestions_task_idx").on(t.taskId),
+]);
 
 /**
  * What a task's run read: always-pages put in its prompt, pages it fetched (read_page),
@@ -528,7 +548,12 @@ export const contextLoads = sqliteTable("context_loads", {
   chars: integer("chars").notNull().default(0),
   truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
   createdAt: createdAt(),
-}, (t) => [index("context_loads_task_idx").on(t.taskId), index("context_loads_page_idx").on(t.pageId, t.createdAt)]);
+}, (t) => [
+  index("context_loads_task_idx").on(t.taskId),
+  index("context_loads_page_idx").on(t.pageId, t.createdAt),
+  index("context_loads_business_created_idx").on(t.businessId, t.createdAt),
+  index("context_loads_teammate_idx").on(t.businessId, t.teammateId, t.id),
+]);
 
 /** A dry run from the inspector: what a teammate would answer from its context alone (no tools, nothing sent). */
 export const contextAsks = sqliteTable("context_asks", {

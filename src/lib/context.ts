@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { ContextPage, ContextSection, ReaderMode, SuggestionKind, Teammate } from "@/db/schema";
 import { applySuggestion, budgetPages, DEFAULT_ICONS, defaultReaderMode, forAgents, normalizeMarkdown, readerMode, SECTIONS } from "@/lib/context-text";
@@ -34,6 +34,18 @@ export function listPages(businessId: string) {
   return db.select().from(schema.contextPages).where(eq(schema.contextPages.businessId, businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
 }
 
+// Every column but the page's content (body, editor blocks): for trees, titles and lookups.
+const headColumns = Object.fromEntries(Object.entries(getTableColumns(schema.contextPages)).filter(([k]) => k !== "body" && k !== "blocks")) as Omit<
+  ReturnType<typeof getTableColumns<typeof schema.contextPages>>,
+  "body" | "blocks"
+>;
+export type PageHead = Omit<ContextPage, "body" | "blocks">;
+
+/** listPages without the content, which can be large: for trees, title lookups and counts. */
+export function listPageHeads(businessId: string): PageHead[] {
+  return db.select(headColumns).from(schema.contextPages).where(eq(schema.contextPages.businessId, businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
+}
+
 export function getPage(businessId: string, id: string) {
   return db.select().from(schema.contextPages).where(and(eq(schema.contextPages.id, id), eq(schema.contextPages.businessId, businessId))).get();
 }
@@ -44,14 +56,14 @@ export function pageByKey(businessId: string, key: string) {
 
 /** A page by id, exact title, or the closest title (case-insensitive, then contains). */
 export function findPage(businessId: string, ref: string) {
-  const pages = listPages(businessId);
+  const pages = listPageHeads(businessId);
   const r = ref.trim().replace(/^["“@]|["”]$/g, "").toLowerCase();
-  return (
+  const head =
     pages.find((p) => p.id === ref.trim()) ??
     pages.find((p) => p.title.toLowerCase() === r) ??
     pages.find((p) => p.title.toLowerCase().includes(r)) ??
-    pages.find((p) => r.includes(p.title.toLowerCase()))
-  );
+    pages.find((p) => r.includes(p.title.toLowerCase()));
+  return head && getPage(businessId, head.id);
 }
 
 /**
@@ -221,7 +233,7 @@ export function updatePage(
 
 /** A page and every page under it (ids, the page first). */
 function subtreeIds(businessId: string, id: string) {
-  const pages = listPages(businessId);
+  const pages = listPageHeads(businessId);
   const out = [id];
   for (let i = 0; i < out.length; i++) for (const p of pages) if (p.parentId === out[i] && !out.includes(p.id)) out.push(p.id);
   return out;
@@ -271,10 +283,16 @@ export function deletePage(businessId: string, id: string) {
 // ---- readers ----
 
 export function readerRows(businessId: string) {
-  const pages = listPages(businessId).map((p) => p.id);
-  if (!pages.length) return [];
-  return db.select().from(schema.contextReaders).where(inArray(schema.contextReaders.pageId, pages)).all();
+  return db
+    .select(getTableColumns(schema.contextReaders))
+    .from(schema.contextReaders)
+    .innerJoin(schema.contextPages, eq(schema.contextPages.id, schema.contextReaders.pageId))
+    .where(eq(schema.contextPages.businessId, businessId))
+    .all();
 }
+
+/** Pages and reader rows, loaded once and passed to pagesFor when it runs per teammate. */
+export type LoadedPages = { pages: ContextPage[]; rows: ReturnType<typeof readerRows> };
 
 export function setReaderMode(businessId: string, pageId: string, teammateId: string, mode: ReaderMode) {
   const page = getPage(businessId, pageId);
@@ -287,9 +305,8 @@ export function setReaderMode(businessId: string, pageId: string, teammateId: st
 }
 
 /** The pages a teammate gets: always (in its prompt) and when needed (by title), never left out. */
-export function pagesFor(businessId: string, teammateId: string) {
-  const pages = listPages(businessId);
-  const rows = readerRows(businessId);
+export function pagesFor(businessId: string, teammateId: string, loaded?: LoadedPages) {
+  const { pages, rows } = loaded ?? { pages: listPages(businessId), rows: readerRows(businessId) };
   const order = (p: ContextPage) => SECTIONS.indexOf(p.section);
   const sorted = [...pages].sort((a, b) => order(a) - order(b) || a.sortOrder - b.sortOrder);
   const mode = (p: ContextPage) => readerMode(p, teammateId, rows);
@@ -312,8 +329,8 @@ export function readablePage(businessId: string, teammateId: string, ref: string
  * The context part of a teammate's system prompt: its always-pages (within the budget)
  * and the titles of the rest. Returns what went in, for recordLoads.
  */
-export function contextPrompt(businessId: string, teammateId: string) {
-  const { always, whenNeeded } = pagesFor(businessId, teammateId);
+export function contextPrompt(businessId: string, teammateId: string, loaded?: LoadedPages) {
+  const { always, whenNeeded } = pagesFor(businessId, teammateId, loaded);
   const { text, items } = budgetPages(always);
   const more = whenNeeded.slice(0, 40).map((p) => `- ${p.title}${p.kind === "database" ? " (database)" : p.kind === "mindmap" ? " (mind map)" : ""}`);
   if (!text && !more.length) return { prompt: "", items };

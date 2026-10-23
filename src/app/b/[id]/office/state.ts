@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ActivityEvent, TeammateState } from "@/db/schema";
@@ -50,23 +50,21 @@ export function queryOfficeState(businessId: string): OfficeState {
     .all();
   const managerId = teammates.find((t) => t.roleKey === MANAGER_ROLE.key)?.id ?? null;
 
-  const pendingApprovals = db
-    .select({ id: schema.approvals.id })
-    .from(schema.approvals)
-    .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
-    .all().length;
+  const pendingApprovals =
+    db
+      .select({ n: count() })
+      .from(schema.approvals)
+      .where(and(eq(schema.approvals.businessId, businessId), eq(schema.approvals.status, "pending")))
+      .get()?.n ?? 0;
 
   const taskRows = db
-    .select({ status: schema.tasks.status })
+    .select({ status: schema.tasks.status, n: count() })
     .from(schema.tasks)
     .where(and(eq(schema.tasks.businessId, businessId), inArray(schema.tasks.status, ["running", "queued"])))
+    .groupBy(schema.tasks.status)
     .all();
 
-  const deliverableCount = db
-    .select({ id: schema.deliverables.id })
-    .from(schema.deliverables)
-    .where(eq(schema.deliverables.businessId, businessId))
-    .all().length;
+  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(eq(schema.deliverables.businessId, businessId)).get()?.n ?? 0;
 
   return {
     teammates,
@@ -74,8 +72,8 @@ export function queryOfficeState(businessId: string): OfficeState {
     deliverableCount,
     pendingApprovals,
     rest: readRest(),
-    runningTasks: taskRows.filter((t) => t.status === "running").length,
-    queuedTasks: taskRows.filter((t) => t.status === "queued").length,
+    runningTasks: taskRows.find((t) => t.status === "running")?.n ?? 0,
+    queuedTasks: taskRows.find((t) => t.status === "queued")?.n ?? 0,
   };
 }
 

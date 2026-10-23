@@ -19,7 +19,7 @@ import { PageIcon } from "./page-icon";
  */
 export async function ContextHome({ businessId, lang, q }: { businessId: string; lang: UiLang; q: string }) {
   const { pages, rows, mates, mateViews, managerId } = await contextBase(businessId);
-  const health = await contextHealth(businessId, mates);
+  const health = await contextHealth(businessId, mates, { pages, rows });
   const pending = pendingSuggestions(businessId);
   const names = new Map(mates.map((m) => [m.id, m.name]));
   const byId = new Map(pages.map((p) => [p.id, p]));

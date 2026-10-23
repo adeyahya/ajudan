@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { LiveRefresh } from "@/components/live";
 import { EditorSkeleton, PageBody } from "@/components/kit";
 import { listContacts } from "@/lib/contacts";
+import { listLibrary } from "@/lib/assets";
 import { pageIcon, usageThisWeek } from "@/lib/context";
 import { getBusiness } from "@/lib/data";
 import { uiLang } from "@/lib/i18n";
@@ -63,6 +64,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
     lastCheckedAt: page.lastCheckedAt?.toISOString() ?? null,
     stale: isStale(page),
   };
+  const library = listLibrary(id);
   const counts = new Map<string, number>();
   for (const s of pending) if (s.pageId && s.pageId !== page.id) counts.set(s.pageId, (counts.get(s.pageId) ?? 0) + 1);
   return (
@@ -84,12 +86,12 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
         contactsCount={page.kind === "database" ? listContacts(id).length : 0}
         size={promptSize(page)}
         history={pageHistory(id, page.id, names)}
-        covers={coverImages(id)}
+        covers={coverImages(id, library)}
         editor={{
           businessId: id,
           pages: pages.filter((p) => p.id !== page.id).map((p) => ({ id: p.id, title: p.title })),
           contacts: mentionContacts(id),
-          assets: galleryAssets(id),
+          assets: galleryAssets(id, library),
         }}
       />
     </>

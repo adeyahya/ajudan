@@ -37,9 +37,10 @@ export function useActivity(
 /**
  * Drop this into any server-rendered page: it calls router.refresh() (debounced)
  * whenever the worker logs activity for the business, so the page shows fresh data.
- * Pass `types` to refresh only for some event types.
+ * Pass `types` to refresh only for some event types, and `stepsOf` (a teammate id) to
+ * skip other teammates' tool steps, which are the bulk of the stream during a run.
  */
-export function LiveRefresh({ businessId, types }: { businessId: string; types?: string[] }) {
+export function LiveRefresh({ businessId, types, stepsOf }: { businessId: string; types?: string[]; stepsOf?: string }) {
   const router = useRouter();
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const schedule = () => {
@@ -52,6 +53,7 @@ export function LiveRefresh({ businessId, types }: { businessId: string; types?:
     businessId,
     (e) => {
       if (types && !types.includes(e.type)) return;
+      if (stepsOf && e.type === "tool" && e.teammateId !== stepsOf) return;
       schedule();
     },
     schedule,

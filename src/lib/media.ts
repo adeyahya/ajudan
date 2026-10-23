@@ -44,11 +44,29 @@ export type MediaInfo = {
   hasAudio?: boolean;
 };
 
+/**
+ * ffprobe results by path, kept while the file's size and mtime stay the same: the
+ * Studio editors and list_media describe the same library over and over.
+ */
+const probed = new Map<string, { stamp: string; info: MediaInfo }>();
+const MAX_PROBED = 5000;
+
 /** Size, and for video/audio/images duration, dimensions, fps and audio (ffprobe). */
 export async function mediaInfo(abs: string): Promise<MediaInfo> {
   const kind = mediaKind(abs);
-  const info: MediaInfo = { kind, bytes: fs.statSync(abs).size };
+  const st = fs.statSync(abs);
+  const info: MediaInfo = { kind, bytes: st.size };
   if (kind === "file") return info;
+  const stamp = `${st.size}:${st.mtimeMs}`;
+  const hit = probed.get(abs);
+  if (hit?.stamp === stamp) return { ...hit.info };
+  await probe(abs, kind, info);
+  if (probed.size >= MAX_PROBED) probed.delete(probed.keys().next().value!);
+  probed.set(abs, { stamp, info: { ...info } });
+  return info;
+}
+
+async function probe(abs: string, kind: MediaKind, info: MediaInfo) {
   try {
     const { stdout } = await run(
       FFPROBE,
@@ -76,7 +94,6 @@ export async function mediaInfo(abs: string): Promise<MediaInfo> {
   } catch {
     // Unknown format: size is still useful.
   }
-  return info;
 }
 
 export function describeMedia(rel: string, info: MediaInfo) {

@@ -38,16 +38,22 @@ function useKindLabel() {
 }
 
 /** Write briefs, notes and scripts, and edit the team's drafts; hand any doc to a teammate for later. */
+/** A list row: no full text, just its start for the search box. */
+export type DocRow = Pick<Deliverable, "id" | "title" | "kind" | "status" | "teammateId"> & { excerpt: string };
+
 export function Docs({
   businessId,
   docs,
+  doc,
   docId,
   filter,
   teammates,
   media,
 }: {
   businessId: string;
-  docs: Deliverable[];
+  docs: DocRow[];
+  /** The open doc, in full. */
+  doc?: Deliverable;
   docId?: string;
   filter: DocsFilter;
   teammates: Mate[];
@@ -57,7 +63,6 @@ export function Docs({
   const kindLabel = useKindLabel();
   const [q, setQ] = useState("");
   const [hand, setHand] = useState<{ key: string; text: string; attachments: string[] } | null>(null);
-  const doc = docs.find((d) => d.id === docId);
   // Focus mode hides the list: the doc takes the whole width.
   const { focus } = useDocLayout();
   const names = useMemo(() => new Map(teammates.map((m) => [m.id, m.name])), [teammates]);
@@ -65,7 +70,7 @@ export function Docs({
     if (filter === "mine" && d.teammateId) return false;
     if (filter === "team" && !d.teammateId) return false;
     const s = q.trim().toLowerCase();
-    return !s || `${d.title} ${d.kind} ${d.content}`.toLowerCase().includes(s);
+    return !s || `${d.title} ${d.kind} ${d.excerpt}`.toLowerCase().includes(s);
   });
   const base = `/b/${businessId}/studio/docs`;
   const href = (f: DocsFilter, id?: string) => {

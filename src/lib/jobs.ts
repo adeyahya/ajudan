@@ -82,7 +82,8 @@ export function claimJob(lane?: Lane, allow?: (job: Job) => boolean) {
       if (!businessId) return true;
       if (!budgets.has(businessId)) {
         const biz = tx.select({ cap: schema.businesses.dailyBudgetUsd }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
-        const over = !!biz && overBudget(spentToday(businessId), biz.cap);
+        // No cap (the default): skip summing today's spend on every tick.
+        const over = !!biz && biz.cap > 0 && overBudget(spentToday(businessId), biz.cap);
         budgets.set(businessId, !over);
         if (over) paused.add(businessId);
       }

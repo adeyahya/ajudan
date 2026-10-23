@@ -3,7 +3,7 @@ import path from "node:path";
 import { CornerDownRight, Phone } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { db, schema } from "@/db";
@@ -26,6 +26,9 @@ import { activeWatches, watchState } from "@/lib/watches";
 import { cn } from "@/lib/utils";
 import { AboutPeek, TeammateMenu } from "./about-peek";
 import { cancelTaskAction, retryTaskAction, runScheduledNow, sendTaskMessage } from "./actions";
+
+/** Tool steps kept per message; a long run shows its latest ones. */
+const STEPS_PER_TASK = 80;
 
 const STATE_TONE: Record<TeammateState, BadgeTone> = {
   idle: "gray",
@@ -51,22 +54,17 @@ async function loadTeammate(businessId: string, teammateId: string) {
     .limit(30)
     .all()
     .reverse();
-  const steps = tasks.length
-    ? db
-        .select({ taskId: schema.activityEvents.taskId, message: schema.activityEvents.message })
-        .from(schema.activityEvents)
-        .where(
-          and(
-            eq(schema.activityEvents.type, "tool"),
-            inArray(
-              schema.activityEvents.taskId,
-              tasks.map((t) => t.id),
-            ),
-          ),
-        )
-        .orderBy(asc(schema.activityEvents.id))
-        .all()
-    : [];
+  // The newest steps of each task (indexed on task_id, type, id), oldest first.
+  const steps = tasks.flatMap((t) =>
+    db
+      .select({ taskId: schema.activityEvents.taskId, message: schema.activityEvents.message })
+      .from(schema.activityEvents)
+      .where(and(eq(schema.activityEvents.taskId, t.id), eq(schema.activityEvents.type, "tool")))
+      .orderBy(desc(schema.activityEvents.id))
+      .limit(STEPS_PER_TASK)
+      .all()
+      .reverse(),
+  );
   // Images each task produced, shown under its reply.
   const taskImages = new Map<string, string[]>();
   if (tasks.length) {
@@ -83,11 +81,7 @@ async function loadTeammate(businessId: string, teammateId: string) {
       if (d.taskId && d.attachments.length) taskImages.set(d.taskId, [...(taskImages.get(d.taskId) ?? []), ...d.attachments]);
     }
   }
-  const deliverableCount = db
-    .select({ id: schema.deliverables.id })
-    .from(schema.deliverables)
-    .where(eq(schema.deliverables.teammateId, teammateId))
-    .all().length;
+  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(eq(schema.deliverables.teammateId, teammateId)).get()?.n ?? 0;
   const mates = db
     .select({ id: schema.teammates.id, name: schema.teammates.name })
     .from(schema.teammates)
@@ -447,7 +441,7 @@ export async function TeammateView({ id, tid, manager = false, embedded = false 
   if (embedded) {
     return (
       <>
-        <LiveRefresh businessId={id} />
+        <LiveRefresh businessId={id} stepsOf={t.id} />
         {conversation}
       </>
     );
@@ -456,7 +450,7 @@ export async function TeammateView({ id, tid, manager = false, embedded = false 
   const autonomy = autonomyOptions(lang).find((o) => o.value === t.autonomy)?.label ?? t.autonomy;
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1">
-      <LiveRefresh businessId={id} />
+      <LiveRefresh businessId={id} stepsOf={t.id} />
       {conversation}
       <Suspense fallback={null}>
       <AboutPeek title={tr(lang, "chathome.about", { name: t.name })}>
