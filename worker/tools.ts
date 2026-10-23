@@ -16,7 +16,7 @@ import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from 
 import { renderHtmlToPng } from "@/lib/images";
 import { assetRows, describeOrganization } from "@/lib/assets";
 import { describeContact, listContacts, searchAddressBook } from "@/lib/contacts";
-import { createSuggestion, findPage, forAgents, listPages, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
+import { createSuggestion, findPage, listPages, pageForAgents, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask, delegatedInstructions, delegationDepth, deriveTaskTitle, MAX_DELEGATION_DEPTH, ownerRequest } from "@/lib/tasks";
@@ -563,7 +563,7 @@ export function createBizServer(ctx: BizContext) {
       async (a) => {
         const pages = listPages(businessId);
         const rows = readerRows(businessId);
-        const shared = pages.filter((p) => p.kind === "page" && readerMode(p, teammate.id, rows) !== "never");
+        const shared = pages.filter((p) => p.kind !== "database" && readerMode(p, teammate.id, rows) !== "never");
         const hits = searchPages(shared, a.query);
         const people = searchAddressBook(businessId, a.query, undefined, 5);
         const contacts = pages.find((p) => p.source === "contacts");
@@ -585,7 +585,7 @@ export function createBizServer(ctx: BizContext) {
         const r = readablePage(businessId, teammate.id, a.page);
         if ("error" in r) return fail(r.error ?? "Not found.");
         const p = r.page;
-        let body = forAgents(p.body).trim();
+        let body = pageForAgents(p);
         if (p.source === "contacts") {
           const all = listContacts(businessId);
           body = `${all.length} people in the address book${all.length > 80 ? " (first 80; search_contacts finds the rest)" : ""}:\n${all.slice(0, 80).map(describeContact).join("\n")}`;
@@ -598,7 +598,7 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "suggest_page_edit",
-      "Propose a change to the owner's Context pages when you learn something durable that's missing or out of date there (a new price or policy, a customer preference, a lesson). You never edit pages yourself: the owner sees exactly what you propose, with your reason and source, and accepts or rejects it. Prefer a short append to the right page; replace only to fix what's wrong, keeping everything else.",
+      "Propose a change to the owner's Context pages when you learn something durable that's missing or out of date there (a new price or policy, a customer preference, a lesson). You never edit pages yourself: the owner sees exactly what you propose, with your reason and source, and accepts or rejects it. Prefer a short append to the right page; replace only to fix what's wrong, keeping everything else. A mind map page is a nested bullet list: suggest ideas as \"- \" bullets, indented two spaces under the idea they branch from.",
       {
         page: z.string().optional().describe("Title or id of the page to change (omit for a new page)"),
         mode: z.enum(["append", "replace", "new_page"]).describe("append: add markdown at the end; replace: the whole page's new markdown; new_page: a new page"),

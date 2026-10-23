@@ -48,6 +48,13 @@ export function forAgents(markdown: string) {
   return markdown.replace(/\[@([^\]]+)\]\(ajudan:\/\/(page|contact)\/[^)]*\)/g, (_, label: string, kind: string) => (kind === "contact" ? `@${label} (contact)` : `@${label}`));
 }
 
+/** A page's text as teammates get it; a mind map says how to read its outline. */
+export function pageForAgents(page: { kind?: string; body: string }) {
+  const text = forAgents(page.body).trim();
+  if (page.kind !== "mindmap" || !text) return text;
+  return `(A mind map: the title is the central topic; each bullet is an idea, nested under the idea it branches from.)\n${text}`;
+}
+
 export type BudgetItem = { id: string; title: string; chars: number; truncated: boolean };
 
 /**
@@ -55,12 +62,12 @@ export type BudgetItem = { id: string; title: string; chars: number; truncated: 
  * `total`; a cut page says how to read the rest. Pages that don't fit at all are left
  * out (and reported as truncated with 0 chars).
  */
-export function budgetPages(pages: { id: string; title: string; body: string }[], budget = PROMPT_BUDGET) {
+export function budgetPages(pages: { id: string; title: string; body: string; kind?: string }[], budget = PROMPT_BUDGET) {
   let left = budget.total;
   const items: BudgetItem[] = [];
   const parts: string[] = [];
   for (const p of pages) {
-    const body = forAgents(p.body).trim() || "(empty)";
+    const body = pageForAgents(p) || "(empty)";
     const room = Math.min(budget.perPage, left);
     if (room < 200) {
       items.push({ id: p.id, title: p.title, chars: 0, truncated: true });
@@ -174,4 +181,63 @@ export function normalizeMarkdown(md: string) {
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// ---- mind maps ----
+
+/**
+ * A mind map page (kind "mindmap") keeps its map as text: the page title is the central
+ * topic and `body` is a nested bullet list, one bullet per idea. Teammates read that list
+ * like any page; the canvas (mind-map.tsx) parses it, and writes it back on each edit.
+ */
+export type MindNode = { id: string; text: string; children: MindNode[] };
+
+let nodeSeq = 0;
+export const newNodeId = () => `n${Date.now().toString(36)}${(nodeSeq++).toString(36)}`;
+
+/**
+ * The branches of a map from its outline. Any bullet ("-", "*", "+", "1.") at any indent
+ * (spaces or tabs) is a node; a deeper bullet belongs to the last shallower one. A
+ * heading starts a branch (the bullets under it are its ideas); any other line becomes
+ * a node under the current heading, so text a teammate wrote as prose isn't lost.
+ */
+export function parseMindMap(body: string): MindNode[] {
+  const roots: MindNode[] = [];
+  // The heading in force sits at indent -1, so top-level bullets go under it.
+  let stack: { indent: number; node: MindNode }[] = [];
+  for (const raw of body.replace(/\r\n/g, "\n").split("\n")) {
+    if (!raw.trim()) continue;
+    const indent = raw.match(/^[ \t]*/)![0].replace(/\t/g, "  ").length;
+    const line = raw.trim();
+    const bullet = line.match(/^(?:[-*+]|\d+[.)])\s+(.*)$/);
+    const heading = !bullet && line.match(/^#{1,6}\s+(.*)$/);
+    const text = (bullet ? bullet[1] : heading ? heading[1] : line).replace(/\\$/, "").trim();
+    if (!text) continue;
+    const node: MindNode = { id: newNodeId(), text, children: [] };
+    if (heading) {
+      roots.push(node);
+      stack = [{ indent: -1, node }];
+      continue;
+    }
+    if (!bullet) {
+      (stack[0]?.indent === -1 ? stack[0].node.children : roots).push(node);
+      continue;
+    }
+    while (stack.length && stack.at(-1)!.indent >= indent) stack.pop();
+    (stack.at(-1)?.node.children ?? roots).push(node);
+    stack.push({ indent, node });
+  }
+  return roots;
+}
+
+/** The outline teammates read: "- idea" per node, two spaces deeper per level. */
+export function mindMapToMarkdown(branches: MindNode[]) {
+  const lines: string[] = [];
+  const walk = (n: MindNode, depth: number) => {
+    const text = n.text.replace(/\s+/g, " ").trim();
+    if (text) lines.push(`${"  ".repeat(depth)}- ${text}`);
+    n.children.forEach((c) => walk(c, text ? depth + 1 : depth));
+  };
+  branches.forEach((b) => walk(b, 0));
+  return lines.length ? `${lines.join("\n")}\n` : "";
 }

@@ -73,12 +73,14 @@ export async function markCheckedAction(businessId: string, pageId: string) {
 
 /**
  * A new page in a section, or under `parentId` (it then takes the parent's section);
- * returns its id for the URL. The sidebar and the ⌘K palette call it with three arguments.
+ * returns its id for the URL. The sidebar and the ⌘K palette call it with three arguments;
+ * `kind` "mindmap" makes a mind map instead.
  */
-export async function createPageAction(businessId: string, section: ContextSection, title: string, parentId?: string | null) {
+export async function createPageAction(businessId: string, section: ContextSection, title: string, parentId?: string | null, kind: "page" | "mindmap" = "page") {
   ownBusiness(businessId);
   if (!SECTIONS.includes(section)) throw new Error("Unknown section");
-  const id = createPage(businessId, { title, section, parentId: parentId ?? null }).id;
+  if (kind !== "page" && kind !== "mindmap") throw new Error("Unknown kind");
+  const id = createPage(businessId, { title, section, kind, parentId: parentId ?? null }).id;
   refresh();
   return id;
 }

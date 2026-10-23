@@ -233,3 +233,25 @@ describe("the workspace", () => {
     expect(ctx.aboutMarkdown(biz.id)).toBe("# Tentang Oru\n\nMine now\n");
   });
 });
+
+describe("mind maps", () => {
+  const shape = (nodes: ReturnType<typeof ctx.parseMindMap>): unknown[] => nodes.map((n) => (n.children.length ? { [n.text]: shape(n.children) } : n.text));
+
+  it("reads a nested outline and writes it back the same", () => {
+    const md = "- Marketing\n  - Instagram\n    - Reels\n  - TikTok\n- Sales\n";
+    const map = ctx.parseMindMap(md);
+    expect(shape(map)).toEqual([{ Marketing: [{ Instagram: ["Reels"] }, "TikTok"] }, "Sales"]);
+    expect(ctx.mindMapToMarkdown(map)).toBe(md);
+  });
+
+  it("takes other bullets, tabs, 4-space indents, headings and prose", () => {
+    const map = ctx.parseMindMap("* A\n\t+ B\n        1. C\n## Ops\n- Stock\nCheck weekly\n");
+    expect(shape(map)).toEqual([{ A: [{ B: ["C"] }] }, { Ops: ["Stock", "Check weekly"] }]);
+  });
+
+  it("drops empty ideas but keeps what was under them", () => {
+    const map = [{ id: "a", text: "  ", children: [{ id: "b", text: "Kept", children: [] }] }];
+    expect(ctx.mindMapToMarkdown(map)).toBe("- Kept\n");
+    expect(ctx.mindMapToMarkdown([])).toBe("");
+  });
+});

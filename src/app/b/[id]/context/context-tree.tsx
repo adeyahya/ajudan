@@ -1,7 +1,7 @@
 "use client";
 
 import { DndContext, DragOverlay, MouseSensor, pointerWithin, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragMoveEvent } from "@dnd-kit/core";
-import { ChevronRight, Ellipsis, FolderInput, Link2, PanelLeft, PenLine, Plus, Smile, Trash2 } from "lucide-react";
+import { ChevronRight, Ellipsis, FolderInput, Link2, Network, PanelLeft, PenLine, Plus, Smile, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type KeyboardEvent } from "react";
@@ -230,9 +230,9 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
   const [focusId, setFocusId] = useState<string | null>(null);
   const tree = useRef<HTMLDivElement>(null);
 
-  const newPage = (section: ContextSection, parentId: string | null = null) =>
+  const newPage = (section: ContextSection, parentId: string | null = null, kind: "page" | "mindmap" = "page") =>
     start(async () => {
-      const id = await createPageAction(businessId, section, t("context.untitled"), parentId);
+      const id = await createPageAction(businessId, section, t("context.untitled"), parentId, kind);
       if (parentId) toggle(parentId, true);
       router.push(`${base}?page=${id}`);
     });
@@ -331,7 +331,7 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
     const y = ("touches" in start ? (start.touches[0]?.clientY ?? 0) : start.clientY) + e.delta.y;
     const r = (y - over.rect.top) / over.rect.height;
     let zone: "before" | "after" | "nest" | "first" = r < 0.25 ? "before" : r > 0.75 ? "after" : "nest";
-    if (target.kind === "database" && zone === "nest") zone = r < 0.5 ? "before" : "after";
+    if (target.kind !== "page" && zone === "nest") zone = r < 0.5 ? "before" : "after";
     // Below an open row with children, "after" reads as "first inside".
     if (zone === "after" && open.has(target.id) && childrenOf(target.id).some((c) => c.id !== dragId)) zone = "first";
     setDrop((d) => (d?.kind === "row" && d.id === target.id && d.zone === zone ? d : { kind: "row", id: target.id, zone }));
@@ -434,6 +434,14 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
           >
             <Plus className="size-4 text-tertiary" strokeWidth={1.75} aria-hidden />
             {t("context.newPage")}
+          </button>
+          <button
+            type="button"
+            onClick={() => newPage(pages.find((p) => p.id === activeId)?.section ?? "business", null, "mindmap")}
+            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium text-muted-foreground transition-colors duration-100 hover:bg-hover hover:text-foreground"
+          >
+            <Network className="size-4 text-tertiary" strokeWidth={1.75} aria-hidden />
+            {t("context.newMindMap")}
           </button>
         </div>
         <DragOverlay dropAnimation={null}>

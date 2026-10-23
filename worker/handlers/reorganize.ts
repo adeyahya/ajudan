@@ -72,7 +72,7 @@ export async function reorganizeContext({ businessId }: JobPayloads["context_reo
     ].filter(Boolean);
     return `<page title="${p.title.replace(/"/g, "'")}" ${meta.map((m) => `[${m}]`).join(" ")}>\n${shown || "(empty)"}${shown.length < body.length ? `\n…(${body.length - shown.length} more chars not shown: keep them if you rewrite this page, or leave it alone)` : ""}\n</page>`;
   });
-  const databases = pages.filter((p) => p.kind === "database").map((p) => `- "${p.title}" (a database, not text: leave it)`);
+  const databases = pages.filter((p) => p.kind !== "page").map((p) => `- "${p.title}" (${p.kind === "mindmap" ? "a mind map the owner draws" : "a database, not text"}: leave it)`);
 
   const mates = db.select().from(schema.teammates).where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active"), eq(schema.teammates.kind, "ai"))).all();
   const memories = mates
@@ -110,7 +110,7 @@ ${languageInstruction(business.language)}`,
       prompt: `The workspace has ${textPages.length} text pages.
 
 ${pageBlocks.join("\n\n")}
-${databases.length ? `\nDatabases:\n${databases.join("\n")}\n` : ""}
+${databases.length ? `\nOther pages (not text):\n${databases.join("\n")}\n` : ""}
 ${memories.length ? `\nWhat the AI teammates keep in their memory.md (read-only for you):\n\n${memories.join("\n\n")}\n` : ""}
 Return your plan.`,
       tools: [],

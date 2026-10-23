@@ -44,6 +44,8 @@ import type { CoverImage, CurrentPage, Mate, ReaderView, SuggestionView, UsageVi
 
 // ProseMirror needs the browser: the editor only renders on the client.
 const PageEditor = dynamic(() => import("./editor"), { ssr: false, loading: () => <EditorSkeleton className="mt-2 [&>*:first-child]:hidden" /> });
+// The mind map measures text with a canvas: client only too.
+const MindMap = dynamic(() => import("./mind-map"), { ssr: false, loading: () => <div className="h-[62vh] min-h-[420px] animate-pulse rounded-lg bg-muted" /> });
 
 const PEEK_TABS: PeekTab[] = ["suggestions", "readers", "usage"];
 
@@ -81,7 +83,7 @@ export function PageView(p: {
   const [icon, setIcon] = useOptimistic(page.icon);
   const [cover, setCover] = useOptimistic(page.cover);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const latest = useRef<{ body: string; blocks: unknown[] } | null>(null);
+  const latest = useRef<{ body: string; blocks?: unknown[] } | null>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
 
   useBreadcrumb([...p.ancestors.map((a) => ({ label: a.title, href: `${base}?page=${a.id}` })), { label: title.trim() || t("context.untitled") }]);
@@ -164,7 +166,7 @@ export function PageView(p: {
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[400px] max-w-[92vw]">
             <p className="mb-2 text-[13px] leading-[18px] font-semibold">{t("context.panel.readers")}</p>
-            <Readers businessId={businessId} pageId={page.id} mates={p.mates} readers={p.readers} isPage={page.kind === "page"} />
+            <Readers businessId={businessId} pageId={page.id} mates={p.mates} readers={p.readers} isPage={page.kind !== "database"} />
           </PopoverContent>
         </Popover>
       ),
@@ -216,7 +218,7 @@ export function PageView(p: {
         onTab={(x) => peek.open(x)}
         businessId={businessId}
         pageId={page.id}
-        isPage={page.kind === "page"}
+        isPage={page.kind !== "database"}
         suggestions={p.suggestions}
         otherPending={p.otherPending}
         mates={p.mates}
@@ -325,7 +327,7 @@ export function PageView(p: {
               if (e.key === "Enter") {
                 e.preventDefault();
                 saveTitle();
-                document.querySelector<HTMLElement>(".ajudan-page-editor [contenteditable=true]")?.focus();
+                document.querySelector<HTMLElement>(".ajudan-page-editor [contenteditable=true], .ajudan-mind-map [role=tree]")?.focus();
               }
               if (e.key === "Escape") {
                 setTitle(page.title);
@@ -343,6 +345,18 @@ export function PageView(p: {
         <div className="mt-4 border-t border-border pt-4">
           {page.kind === "database" ? (
             <DatabaseBlock businessId={businessId} count={p.contactsCount} />
+          ) : page.kind === "mindmap" ? (
+            <MindMap
+              title={title.trim()}
+              markdown={page.body}
+              onEditTitle={() => titleRef.current?.focus()}
+              onSave={(body) => {
+                latest.current = { body };
+                setStatus("saving");
+                clearTimeout(timer.current);
+                timer.current = setTimeout(() => void flush(), 800);
+              }}
+            />
           ) : (
             <div className="min-h-[50vh]">
               <PageEditor

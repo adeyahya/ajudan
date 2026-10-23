@@ -164,7 +164,7 @@ function siblings(businessId: string, parentId: string | null, section: ContextS
 
 export function createPage(
   businessId: string,
-  v: { title: string; section: ContextSection; parentId?: string | null; body?: string; icon?: string | null; createdBy?: string },
+  v: { title: string; section: ContextSection; kind?: "page" | "mindmap"; parentId?: string | null; body?: string; icon?: string | null; createdBy?: string },
 ) {
   // A sub-page lives in its parent's section (the tree shows it under the parent).
   const parent = v.parentId ? getPage(businessId, v.parentId) : undefined;
@@ -177,6 +177,7 @@ export function createPage(
       businessId,
       section,
       parentId,
+      kind: v.kind ?? "page",
       title: v.title.trim().slice(0, 120) || "Untitled",
       body: v.body ?? "",
       icon: v.icon ?? null,
@@ -291,7 +292,7 @@ export function pagesFor(businessId: string, teammateId: string) {
   const sorted = [...pages].sort((a, b) => order(a) - order(b) || a.sortOrder - b.sortOrder);
   const mode = (p: ContextPage) => readerMode(p, teammateId, rows);
   return {
-    always: sorted.filter((p) => p.kind === "page" && mode(p) === "always"),
+    always: sorted.filter((p) => p.kind !== "database" && mode(p) === "always"),
     whenNeeded: sorted.filter((p) => mode(p) === "when_needed" || (p.kind === "database" && mode(p) === "always")),
     never: sorted.filter((p) => mode(p) === "never"),
   };
@@ -312,7 +313,7 @@ export function readablePage(businessId: string, teammateId: string, ref: string
 export function contextPrompt(businessId: string, teammateId: string) {
   const { always, whenNeeded } = pagesFor(businessId, teammateId);
   const { text, items } = budgetPages(always);
-  const more = whenNeeded.slice(0, 40).map((p) => `- ${p.title}${p.kind === "database" ? " (database)" : ""}`);
+  const more = whenNeeded.slice(0, 40).map((p) => `- ${p.title}${p.kind === "database" ? " (database)" : p.kind === "mindmap" ? " (mind map)" : ""}`);
   if (!text && !more.length) return { prompt: "", items };
   const prompt = `## Business context (the owner's Context pages)
 ${text || "(no pages are always shared with you)"}

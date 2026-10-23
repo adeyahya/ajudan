@@ -422,6 +422,8 @@ export type ReaderMode = "always" | "when_needed" | "never";
  * the owner's callouts, mentions and galleries round-trip (null after the body changed
  * elsewhere, e.g. an accepted suggestion: the editor re-reads the markdown).
  */
+export type ContextPageKind = "page" | "database" | "mindmap";
+
 export const contextPages = sqliteTable("context_pages", {
   id: id(),
   businessId: text("business_id")
@@ -430,8 +432,11 @@ export const contextPages = sqliteTable("context_pages", {
   parentId: text("parent_id"),
   section: text("section").$type<ContextSection>().notNull().default("business"),
   title: text("title").notNull(),
-  /** "database": a table view over app data (`source`), not free text. */
-  kind: text("kind").$type<"page" | "database">().notNull().default("page"),
+  /**
+   * "database": a table view over app data (`source`), not free text. "mindmap": a map
+   * whose `body` is a nested bullet list under the title (parseMindMap in context-text.ts).
+   */
+  kind: text("kind").$type<ContextPageKind>().notNull().default("page"),
   /** For database pages: what it shows ("contacts"). */
   source: text("source"),
   /** Pages Ajudan created and keeps track of: "about", "learned", "products", "policies", "contacts". */

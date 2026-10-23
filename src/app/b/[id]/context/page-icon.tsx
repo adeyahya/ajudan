@@ -14,6 +14,7 @@ import {
   CreditCard,
   DollarSign,
   FileText,
+  Network,
   Flag,
   Gift,
   Globe,
@@ -58,6 +59,7 @@ import { useState, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { cn } from "@/components/kit";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import type { ContextPageKind } from "@/db/schema";
 
 /**
  * Page icons (Notion-style): an emoji the owner picks, or one of a curated set of lucide
@@ -125,7 +127,7 @@ export const EMOJI = [
   .match(/\p{Extended_Pictographic}(?:️)?(?:‍\p{Extended_Pictographic}(?:️)?)*/gu) as string[];
 
 /** The icon as an element: emoji text, a lucide icon, or the page / database glyph. */
-export function PageIcon({ icon, kind = "page", size = 16, className }: { icon: string | null; kind?: "page" | "database"; size?: number; className?: string }) {
+export function PageIcon({ icon, kind = "page", size = 16, className }: { icon: string | null; kind?: ContextPageKind; size?: number; className?: string }) {
   if (icon?.startsWith("lucide:")) {
     const Icon = LUCIDE[icon.slice(7)] ?? FileText;
     return <Icon aria-hidden className={cn("shrink-0", className)} style={{ width: size, height: size }} strokeWidth={size > 24 ? 1.5 : 1.75} />;
@@ -137,7 +139,7 @@ export function PageIcon({ icon, kind = "page", size = 16, className }: { icon: 
       </span>
     );
   }
-  const Icon = kind === "database" ? Table2 : FileText;
+  const Icon = kind === "database" ? Table2 : kind === "mindmap" ? Network : FileText;
   return <Icon aria-hidden className={cn("shrink-0", className)} style={{ width: size, height: size }} strokeWidth={size > 24 ? 1.5 : 1.75} />;
 }
 

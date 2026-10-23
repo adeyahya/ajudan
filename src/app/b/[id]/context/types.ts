@@ -1,4 +1,4 @@
-import type { ContextSection, ReaderMode, SuggestionKind } from "@/db/schema";
+import type { ContextPageKind, ContextSection, ReaderMode, SuggestionKind } from "@/db/schema";
 import type { DiffLine } from "@/lib/context-text";
 
 /** Shapes the Konteks server pages hand to their client components. */
@@ -8,7 +8,7 @@ export type TreePage = {
   id: string;
   title: string;
   section: ContextSection;
-  kind: "page" | "database";
+  kind: ContextPageKind;
   key: string | null;
   parentId: string | null;
   icon: string | null;
