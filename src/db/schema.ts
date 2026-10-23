@@ -44,8 +44,11 @@ export const businesses = sqliteTable("businesses", {
   ownerHumanId: text("owner_human_id"),
   /** Domains teammates' sandboxed shell may reach (e.g. "api.orucraft.com"). */
   networkDomains: text("network_domains", { mode: "json" }).$type<string[]>().notNull().default([]),
-  /** Most the team may spend (sum of tasks.costUsd) per server-local day; see src/lib/budget.ts. */
-  dailyBudgetUsd: real("daily_budget_usd").notNull().default(20),
+  /** Optional cap on the team's daily usage (sum of tasks.costUsd); 0 means no limit. See src/lib/budget.ts. */
+  dailyBudgetUsd: real("daily_budget_usd")
+    .notNull()
+    .default(20) // the SQL default from an earlier design; changing it would rebuild the table
+    .$defaultFn(() => 0),
   createdAt: createdAt(),
 });
 

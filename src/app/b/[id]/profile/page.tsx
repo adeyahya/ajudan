@@ -1,9 +1,10 @@
-import { Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, PiggyBank, Store, UserRound } from "lucide-react";
+import { Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, Store, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { Button, EmptyState, LineTabs, PageBody, PageHeader, Prose, PropertyList, Section, Skeleton, ListSkeleton } from "@/components/kit";
-import { getBusiness, getSpend, listTeammates } from "@/lib/data";
+import { getBusiness, listTeammates } from "@/lib/data";
+import { getSpendRollup } from "@/lib/health";
 import { t, uiLang, type UiLang } from "@/lib/i18n";
 import { languageName } from "@/lib/language";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
@@ -16,7 +17,7 @@ import { WhatsappPanel } from "./whatsapp-panel";
 
 /**
  * Business settings, as line tabs (`?tab=`): the profile every teammate reads, WhatsApp,
- * the business browser, credentials, and budget & language.
+ * the business browser, credentials, and usage & language.
  */
 export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   return (
@@ -65,7 +66,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
     { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
     { key: "browser", label: t(lang, "profile.tab.browser"), icon: <MonitorSmartphone /> },
     { key: "credentials", label: t(lang, "profile.tab.credentials"), icon: <KeyRound /> },
-    { key: "budget", label: t(lang, "profile.tab.budget"), icon: <PiggyBank /> },
+    { key: "budget", label: t(lang, "profile.tab.budget"), icon: <Gauge /> },
   ];
 
   return (
@@ -185,7 +186,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
       )}
       {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
       {tab === "credentials" && <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={names((m) => m.shellAccess)} lang={lang} />}
-      {tab === "budget" && <SpendPanel businessId={id} spend={await getSpend(id)} language={biz.language} lang={lang} />}
+      {tab === "budget" && <SpendPanel businessId={id} spend={await getSpendRollup(id)} language={biz.language} lang={lang} />}
     </PageBody>
   );
 }

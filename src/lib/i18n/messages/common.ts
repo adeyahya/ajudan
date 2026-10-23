@@ -11,7 +11,7 @@ export const en = {
   "nav.interview": "Interview",
   "nav.business": "Business",
   "nav.health": "Health",
-  "nav.healthTitle": "Jobs & health: worker, queue, failures, spend, backups",
+  "nav.healthTitle": "Jobs & health: worker, queue, failures, usage, backups",
 
   "nav.inbox": "Inbox",
   "nav.search": "Search",
@@ -30,7 +30,7 @@ export const en = {
   "nav.workerDown": "Worker not running",
   "nav.spend": "{today} today of {cap} · week {week}",
   "nav.spendNoCap": "{today} today · week {week}",
-  "nav.overBudget": "Over today's budget",
+  "nav.overBudget": "Over today's usage cap",
 
   "palette.title": "Search",
   "palette.description": "Find a page, person or piece of work, or run a command",
@@ -167,7 +167,7 @@ export const id: Record<keyof typeof en, string> = {
   "nav.workerDown": "Worker tidak berjalan",
   "nav.spend": "{today} hari ini dari {cap} · minggu ini {week}",
   "nav.spendNoCap": "{today} hari ini · minggu ini {week}",
-  "nav.overBudget": "Melewati anggaran hari ini",
+  "nav.overBudget": "Melewati batas pemakaian hari ini",
 
   "palette.title": "Cari",
   "palette.description": "Cari halaman, orang atau hasil kerja, atau jalankan perintah",

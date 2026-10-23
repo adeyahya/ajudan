@@ -122,7 +122,7 @@ async function Content({ params }: { params: Promise<{ id: string }> }) {
           label={t(lang, "health.spendToday")}
           icon={<Wallet />}
           tone={overBudget ? "danger" : undefined}
-          note={`${t(lang, "health.of", { cap: formatUsd(spend.cap) })} · ${t(lang, "health.weekAmount", { amount: formatUsd(spend.week) })}`}
+          note={[spend.cap > 0 && t(lang, "health.of", { cap: formatUsd(spend.cap) }), t(lang, "health.weekAmount", { amount: formatUsd(spend.week) })].filter(Boolean).join(" · ")}
         >
           {formatUsd(spend.today)}
         </Tile>

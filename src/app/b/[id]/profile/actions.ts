@@ -144,7 +144,7 @@ export async function deleteSecretAction(businessId: string, name: string) {
   refresh();
 }
 
-/** The most the team may spend per day; queued work waits once it's reached. */
+/** The optional daily usage cap (0 = none); queued work waits once it's reached. */
 export async function saveDailyBudget(businessId: string, fd: FormData) {
   const dailyBudgetUsd = parseBudget(fd.get("budget"));
   if (dailyBudgetUsd === null) {
