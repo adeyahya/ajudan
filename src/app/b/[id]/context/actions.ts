@@ -85,6 +85,19 @@ export async function createPageAction(businessId: string, section: ContextSecti
   return id;
 }
 
+export type PageTemplate = "faq" | "prices" | "voice" | "sop";
+const TEMPLATE_SECTION: Record<PageTemplate, ContextSection> = { faq: "product", prices: "product", voice: "how_we_work", sop: "how_we_work" };
+
+/** A new page from a template, written in the business language; returns its id. */
+export async function createFromTemplateAction(businessId: string, template: PageTemplate) {
+  ownBusiness(businessId);
+  if (!(template in TEMPLATE_SECTION)) throw new Error("Unknown template");
+  const lang = db.select({ l: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.l;
+  const id = createPage(businessId, { title: t(lang, `context.tpl.${template}.title`), section: TEMPLATE_SECTION[template], body: t(lang, `context.tpl.${template}.body`) }).id;
+  refresh();
+  return id;
+}
+
 export async function deletePageAction(businessId: string, pageId: string) {
   ownBusiness(businessId);
   const ok = deletePage(businessId, pageId);

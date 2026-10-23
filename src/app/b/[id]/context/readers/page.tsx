@@ -8,14 +8,19 @@ import { db, schema } from "@/db";
 import { SetBreadcrumb } from "@/components/breadcrumb";
 import { LiveRefresh } from "@/components/live";
 import { Avatar, EmptyState, LineTabs, PageBody, PageSkeleton, Prose, Section } from "@/components/kit";
-import { SECTIONS } from "@/lib/context";
+import { contextPrompt, pageIcon, SECTIONS, usageThisWeek } from "@/lib/context";
 import { getBusiness } from "@/lib/data";
 import { t, uiLang } from "@/lib/i18n";
 import { resolveWorkspace } from "@/lib/paths";
-import { contextBase, readersFor } from "../data";
-import { LoadBar, PageModes, TestAsk } from "./readers";
+import { contextBase, promptLoad, readersFor } from "../data";
+import { LensColumns, PromptText, type LensCard } from "./columns";
+import { LoadBar, TestAsk } from "./readers";
 
-/** What a teammate reads: its latest task's context, how each page reaches it, its memory, and a dry-run question. */
+/**
+ * Team view: exactly what one teammate starts every task with. Three columns (always in
+ * the prompt, read when needed, never) to drag pages between, the prompt text as sent,
+ * then its latest run's context, its memory, and a dry-run question.
+ */
 export default function ReadersPage(props: PageProps<"/b/[id]/context/readers">) {
   return (
     <Suspense fallback={<PageSkeleton />}>
@@ -64,10 +69,30 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
   const order = (s: string) => SECTIONS.indexOf(s as (typeof SECTIONS)[number]);
   const sorted = [...pages].sort((a, b) => order(a.section) - order(b.section) || a.sortOrder - b.sortOrder);
   const modes = new Map(sorted.map((p) => [p.id, readersFor(p, [mate], rows)[0].mode]));
+  const load = promptLoad(id, mate.id);
+  const inPrompt = new Map(load.items.map((i) => [i.id, i]));
+  const usage = usageThisWeek(id);
+  const cards: LensCard[] = sorted.map((p) => {
+    const item = inPrompt.get(p.id);
+    const mode = modes.get(p.id)!;
+    return {
+      id: p.id,
+      title: p.title,
+      kind: p.kind,
+      icon: pageIcon(p),
+      // The address book is never in the prompt, only searched: it shows under "when needed".
+      mode: p.kind === "database" && mode === "always" ? "when_needed" : mode,
+      chars: item?.chars ?? 0,
+      cut: !!item?.truncated && item.chars > 0,
+      left: !!item?.truncated && item.chars === 0,
+      runs: usage.get(p.id)?.byTeammate.get(mate.id) ?? 0,
+    };
+  });
+  const prompt = contextPrompt(id, mate.id).prompt;
 
   return (
     <PageBody width="wide">
-      <LiveRefresh businessId={id} types={["context_ask_done", "task_started", "task_done"]} />
+      <LiveRefresh businessId={id} types={["context_ask_done", "task_started", "task_done", "context_decided"]} />
       <SetBreadcrumb items={[{ label: t(lang, "context.tab.readers"), href: `/b/${id}/context/readers` }, { label: mate.name }]} />
       <header className="mb-6">
         <Eye aria-hidden className="mb-3 size-8 text-foreground" strokeWidth={1.5} />
@@ -85,7 +110,12 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
         }))}
       />
 
-      <div className="grid gap-x-12 gap-y-8 2xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_380px]">
+        <LensColumns businessId={id} teammateId={mate.id} name={mate.name} cards={cards} used={load.used} total={load.total} />
+        <PromptText name={mate.name} text={prompt} />
+      </div>
+
+      <div className="mt-12 grid gap-x-12 gap-y-8 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
           <Section title={t(lang, "context.readers.title", { name: mate.name })} description={task ? t(lang, "context.readers.latest", { title: task.title }) : undefined}>
             {task ? (
@@ -93,10 +123,6 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
             ) : (
               <p className="text-[13px] text-muted-foreground">{t(lang, "context.readers.noTask", { name: mate.name })}</p>
             )}
-          </Section>
-
-          <Section title={t(lang, "context.readers.pages", { name: mate.name })}>
-            <PageModes businessId={id} teammateId={mate.id} pages={sorted.map((p) => ({ id: p.id, title: p.title, section: p.section, mode: modes.get(p.id)! }))} />
           </Section>
 
           <Section title={t(lang, "context.readers.memory", { name: mate.name })}>

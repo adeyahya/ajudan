@@ -4,7 +4,22 @@ import { db, schema } from "@/db";
 import type { ContextPage, ContextSuggestion } from "@/db/schema";
 import { listLibrary } from "@/lib/assets";
 import { listContacts } from "@/lib/contacts";
-import { compactDiff, diffLines, ensureContextWorkspace, listPages, normalizeMarkdown, pageIcon, pendingSuggestions, readerMode, readerRows, SECTIONS } from "@/lib/context";
+import {
+  budgetPages,
+  compactDiff,
+  diffLines,
+  ensureContextWorkspace,
+  listPages,
+  normalizeMarkdown,
+  pageForAgents,
+  pageIcon,
+  pagesFor,
+  pendingSuggestions,
+  PROMPT_BUDGET,
+  readerMode,
+  readerRows,
+  usageThisWeek,
+} from "@/lib/context";
 import { isReorganizeSource } from "@/lib/reorganize";
 import { MANAGER_ROLE } from "@/lib/roles";
 import type { CoverImage, Mate, SuggestionView, TreePage } from "./types";
@@ -44,21 +59,65 @@ export async function treePages(businessId: string): Promise<TreePage[]> {
     parentId: p.parentId,
     icon: pageIcon(p),
     pending: pending.filter((s) => s.pageId === p.id).length,
+    stale: isStale(p),
   }));
 }
 
+const DAY = 24 * 3600 * 1000;
+/** Days without the owner confirming or changing a page before it asks for a look. */
+export const STALE_DAYS = 60;
+
+/** A text page nobody confirmed or changed in STALE_DAYS (databases keep themselves current). */
+export function isStale(p: Pick<ContextPage, "kind" | "lastCheckedAt" | "updatedAt" | "createdAt">, now = Date.now()) {
+  if (p.kind === "database") return false;
+  const seen = Math.max(p.lastCheckedAt?.getTime() ?? 0, p.updatedAt?.getTime() ?? 0, p.createdAt.getTime());
+  return now - seen > STALE_DAYS * DAY;
+}
+
+/** How full a teammate's prompt is with always-pages (the budget's characters), and which pages were cut. */
+export function promptLoad(businessId: string, teammateId: string) {
+  const { always } = pagesFor(businessId, teammateId);
+  const { items } = budgetPages(always);
+  const used = items.reduce((n, i) => n + i.chars, 0);
+  return { used, total: PROMPT_BUDGET.total, items };
+}
+
 /**
- * The page /context opens on without ?page=: the first top-level page in tree order
- * (the tree highlights the same one; see firstPageId in context-tree.tsx).
+ * The home's "needs you" numbers: suggestions waiting, pages to check, pages nobody read
+ * this week (a week old at least), and the room left in the fullest teammate's prompt.
  */
-export function firstPage(pages: ContextPage[]) {
-  const ids = new Set(pages.map((p) => p.id));
-  const top = pages.filter((p) => !p.parentId || !ids.has(p.parentId));
-  for (const s of SECTIONS) {
-    const hit = top.find((p) => p.section === s);
-    if (hit) return hit;
-  }
-  return pages[0];
+export async function contextHealth(businessId: string, mates: { id: string }[]) {
+  await connection();
+  const pages = listPages(businessId);
+  const usage = usageThisWeek(businessId);
+  const now = Date.now();
+  const loads = mates.map((m) => promptLoad(businessId, m.id));
+  const fullest = loads.reduce((max, l) => Math.max(max, l.used / l.total), 0);
+  return {
+    pending: pendingSuggestions(businessId).length,
+    stale: pages.filter((p) => isStale(p, now)),
+    unread: pages.filter((p) => p.kind !== "database" && now - p.createdAt.getTime() > 7 * DAY && !usage.get(p.id)?.runs),
+    room: Math.max(0, 1 - fullest),
+    usage,
+  };
+}
+
+/** A page's size as teammates get it, against the per-page prompt budget. */
+export function promptSize(page: Pick<ContextPage, "kind" | "body">) {
+  return { chars: pageForAgents(page).length, max: PROMPT_BUDGET.perPage };
+}
+
+/** Who changed a page lately: decided suggestions (newest first) and the last edit. */
+export function pageHistory(businessId: string, pageId: string, names: Map<string, string>) {
+  return db
+    .select()
+    .from(schema.contextSuggestions)
+    .where(and(eq(schema.contextSuggestions.businessId, businessId), eq(schema.contextSuggestions.pageId, pageId)))
+    .all()
+    .filter((s) => s.status !== "pending")
+    .sort((a, b) => (b.decidedAt ?? b.createdAt).getTime() - (a.decidedAt ?? a.createdAt).getTime())
+    .slice(0, 5)
+    .map((s) => ({ id: s.id, status: s.status, author: s.teammateId ? (names.get(s.teammateId) ?? null) : null, kind: s.kind, at: (s.decidedAt ?? s.createdAt).toISOString() }));
 }
 
 export function readersFor(page: ContextPage, mates: { id: string }[], rows: ReturnType<typeof readerRows>) {

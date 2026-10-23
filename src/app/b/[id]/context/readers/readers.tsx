@@ -1,14 +1,11 @@
 "use client";
 
-import { ArrowUp, FileText, Folder, SlidersHorizontal } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 import Link from "next/link";
-import { useOptimistic, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useT } from "@/components/i18n";
-import { DataTable } from "@/components/data-table";
 import { Avatar, Badge, Button, cn } from "@/components/kit";
-import type { ContextSection, ReaderMode } from "@/db/schema";
-import { setReaderAction, testAskAction } from "../actions";
-import { ModeSwitch } from "../mode-switch";
+import { testAskAction } from "../actions";
 
 type Load = { id: string; label: string; mode: "always" | "fetched" | "memory" | "conversation"; chars: number; truncated: boolean; pageId: string | null };
 
@@ -59,55 +56,6 @@ export function LoadBar({ loads, businessId }: { loads: Load[]; businessId: stri
         ))}
       </ul>
     </div>
-  );
-}
-
-type ModeRow = { id: string; title: string; section: ContextSection; mode: ReaderMode };
-
-/** Every page with this teammate's Always / When needed / Never (the same setting as the page's peek). */
-export function PageModes({ businessId, teammateId, pages }: { businessId: string; teammateId: string; pages: ModeRow[] }) {
-  const t = useT();
-  const [rows, setRow] = useOptimistic(pages, (list, r: { id: string; mode: ReaderMode }) => list.map((p) => (p.id === r.id ? { ...p, mode: r.mode } : p)));
-  const [, start] = useTransition();
-  return (
-    <DataTable
-      label={t("context.readers.pages", { name: "" })}
-      rows={rows}
-      getRowId={(p) => p.id}
-      minWidth={560}
-      columns={[
-        {
-          key: "page",
-          header: t("context.col.page"),
-          icon: <FileText />,
-          cell: (p) => (
-            <Link href={`/b/${businessId}/context?page=${p.id}`} className="hover:underline">
-              {p.title}
-            </Link>
-          ),
-          title: (p) => p.title,
-        },
-        { key: "section", header: t("context.prop.section"), icon: <Folder />, width: 150, cell: (p) => <span className="text-muted-foreground">{t(`context.section.${p.section}`)}</span> },
-        {
-          key: "mode",
-          header: t("context.col.mode"),
-          icon: <SlidersHorizontal />,
-          width: 250,
-          cell: (p) => (
-            <ModeSwitch
-              label={p.title}
-              value={p.mode}
-              onChange={(mode) =>
-                start(async () => {
-                  setRow({ id: p.id, mode });
-                  await setReaderAction(businessId, p.id, teammateId, mode);
-                })
-              }
-            />
-          ),
-        },
-      ]}
-    />
   );
 }
 

@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { TopBarActions, useBreadcrumb } from "@/components/breadcrumb";
 import { DocLayoutButtons } from "@/components/doc-layout";
 import { useLang, useT, useTn } from "@/components/i18n";
-import { Avatar, Button, cn, CountPill, EditorSkeleton, IconButton, PageBody, PropertyList } from "@/components/kit";
+import { Avatar, Button, cn, CountPill, EditorSkeleton, IconButton, PageBody } from "@/components/kit";
 import { SidePeek, SidePeekLayout, useUrlPeek } from "@/components/side-peek";
 import {
   AlertDialog,
@@ -37,23 +37,27 @@ import type { ContextSection } from "@/db/schema";
 import { SECTIONS } from "@/lib/context-text";
 import { dateLocale } from "@/lib/i18n";
 import { deletePageAction, markCheckedAction, movePageAction, renamePageAction, savePageAction, setCoverAction, setIconAction } from "./actions";
-import { PagePeekBody, Readers, type PeekTab } from "./context-peek";
+import { PagePeekBody, Readers, Suggestions, type PeekTab } from "./context-peek";
+import { TeamPanel } from "./team-panel";
 import type { EditorData } from "./editor";
 import { IconPicker, PageIcon } from "./page-icon";
-import type { CoverImage, CurrentPage, Mate, ReaderView, SuggestionView, UsageView } from "./types";
+import type { CoverImage, CurrentPage, HistoryItem, Mate, ReaderView, SizeView, SuggestionView, UsageView } from "./types";
 
 // ProseMirror needs the browser: the editor only renders on the client.
 const PageEditor = dynamic(() => import("./editor"), { ssr: false, loading: () => <EditorSkeleton className="mt-2 [&>*:first-child]:hidden" /> });
 // The mind map measures text with a canvas: client only too.
 const MindMap = dynamic(() => import("./mind-map"), { ssr: false, loading: () => <div className="h-[62vh] min-h-[420px] animate-pulse rounded-lg bg-muted" /> });
 
-const PEEK_TABS: PeekTab[] = ["suggestions", "readers", "usage"];
+const PEEK_TABS: PeekTab[] = ["suggestions", "team", "usage"];
 
 /**
  * One Konteks page, like a Notion page: optional cover (full width), icon, a 40px title,
- * properties (who reads it, owner, last checked, section), then the editor in the doc
- * column (860px, or full width / focus mode from the top bar: src/components/doc-layout.tsx). The top bar carries the save state, "Suggestions (n)" and a "…" menu; the
- * suggestions, readers and usage open in a side peek (?peek=…).
+ * a row of chips (section, who reads it, last checked, reads this week, owner), this
+ * page's pending suggestions inline, then the editor in the doc column (860px, or full
+ * width / focus mode from the top bar: src/components/doc-layout.tsx). On wide screens
+ * "How the team uses this page" (team-panel.tsx) sits beside it; the top bar carries the
+ * save state, "Suggestions (n)" and a "…" menu, and the side peek (?peek=…) has every
+ * suggestion, the team panel and usage.
  */
 export function PageView(p: {
   businessId: string;
@@ -64,6 +68,8 @@ export function PageView(p: {
   suggestions: SuggestionView[];
   otherPending: { pageId: string; title: string; count: number }[];
   usage: UsageView;
+  size: SizeView;
+  history: HistoryItem[];
   contactsCount: number;
   covers: CoverImage[];
   editor: Omit<EditorData, "openPage" | "openContact">;
@@ -74,7 +80,11 @@ export function PageView(p: {
   const router = useRouter();
   const base = `/b/${businessId}/context`;
   const peek = useUrlPeek("peek");
-  const tab = PEEK_TABS.includes(peek.value as PeekTab) ? (peek.value as PeekTab) : "suggestions";
+  // "readers" from older links is the Team tab now.
+  const tab = peek.value === "readers" ? "team" : PEEK_TABS.includes(peek.value as PeekTab) ? (peek.value as PeekTab) : "suggestions";
+  const tn = useTn();
+  // This page's own suggestions show on the page; new-page ones stay in the peek.
+  const inline = p.suggestions.filter((s) => s.pageId === page.id);
   const [title, setTitle] = useState(page.title);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [, start] = useTransition();
@@ -146,57 +156,19 @@ export function PageView(p: {
   const owner = page.owner.kind === "owner" ? t("context.by.owner") : page.owner.kind === "system" ? t("context.by.system") : t("context.by.teammate", { name: page.owner.name ?? "" });
   const checked = page.lastCheckedAt ? new Date(page.lastCheckedAt).toLocaleDateString(dateLocale(lang), { dateStyle: "medium" }) : t("context.never");
 
-  const properties = [
-    {
-      icon: <Users />,
-      label: t("context.prop.readBy"),
-      value: (
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="-mx-1.5 flex h-7 min-w-0 items-center gap-2 rounded-md px-1.5 transition-colors duration-100 hover:bg-hover">
-              {always.length > 0 && (
-                <span className="flex -space-x-1">
-                  {always.slice(0, 5).map((m) => (
-                    <Avatar key={m.id} seed={m.id} name={m.name} color={m.color} size={20} className="ring-2 ring-background" />
-                  ))}
-                </span>
-              )}
-              <span className="truncate">{t("context.readBySummary", { always: always.length, needed: needed.length })}</span>
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-[400px] max-w-[92vw]">
-            <p className="mb-2 text-[13px] leading-[18px] font-semibold">{t("context.panel.readers")}</p>
-            <Readers businessId={businessId} pageId={page.id} mates={p.mates} readers={p.readers} isPage={page.kind !== "database"} />
-          </PopoverContent>
-        </Popover>
-      ),
-    },
-    { icon: <User />, label: t("context.prop.owner"), value: <span className="truncate">{owner}</span> },
-    {
-      icon: <Clock />,
-      label: t("context.prop.lastChecked"),
-      value: (
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{checked}</span>
-          <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs text-muted-foreground" onClick={() =>
-              start(async () => {
-                await markCheckedAction(businessId, page.id);
-                toast(t("context.checkedToast"));
-              })
-            }>
-            {t("context.markChecked")}
-          </Button>
+  const chip = "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full px-2.5 text-xs leading-4 font-medium transition-colors duration-100";
+  const neutral = cn(chip, "bg-secondary text-secondary-foreground hover:bg-hover-strong");
+  const chips = (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {page.parentId ? (
+        <span className={cn(chip, "bg-secondary text-muted-foreground")}>
+          <Folder className="size-3.5" aria-hidden />
+          {t(`context.section.${page.section}`)}
         </span>
-      ),
-    },
-    {
-      icon: <Folder />,
-      label: t("context.prop.section"),
-      value: page.parentId ? (
-        <span className="text-muted-foreground">{t(`context.section.${page.section}`)}</span>
       ) : (
         <Select value={page.section} onValueChange={(v) => start(async () => void (await movePageAction(businessId, page.id, { parentId: null, section: v as ContextSection })))}>
-          <SelectTrigger size="sm" className="-mx-2 border-transparent bg-transparent shadow-none hover:border-transparent" aria-label={t("context.prop.section")}>
+          <SelectTrigger size="sm" className={cn(neutral, "border-0 shadow-none [&>svg]:size-3")} aria-label={t("context.prop.section")}>
+            <Folder className="size-3.5" aria-hidden />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -207,9 +179,60 @@ export function PageView(p: {
             ))}
           </SelectContent>
         </Select>
-      ),
-    },
-  ];
+      )}
+      <Popover>
+        <PopoverTrigger asChild>
+          <button type="button" className={cn(chip, "bg-info-soft text-tag-blue-fg hover:opacity-85")}>
+            {always.length > 0 && (
+              <span className="flex -space-x-1">
+                {always.slice(0, 4).map((m) => (
+                  <Avatar key={m.id} seed={m.id} name={m.name} color={m.color} size={16} className="ring-1 ring-info-soft" />
+                ))}
+              </span>
+            )}
+            <span className="truncate">{t("context.readBySummary", { always: always.length, needed: needed.length })}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[400px] max-w-[92vw]">
+          <p className="mb-2 text-[13px] leading-[18px] font-semibold">{t("context.panel.readers")}</p>
+          <Readers businessId={businessId} pageId={page.id} mates={p.mates} readers={p.readers} isPage={page.kind !== "database"} />
+        </PopoverContent>
+      </Popover>
+      {page.kind !== "database" && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button type="button" className={cn(chip, page.stale ? "bg-warning-soft text-tag-yellow-fg hover:opacity-85" : "bg-secondary text-secondary-foreground hover:bg-hover-strong")}>
+              <Clock className="size-3.5" aria-hidden />
+              {page.lastCheckedAt ? t("context.chip.checked", { date: checked }) : t("context.chip.neverChecked")}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72">
+            <p className="text-[13px] leading-[18px] text-muted-foreground">{t(page.stale ? "context.chip.staleHelp" : "context.chip.checkHelp")}</p>
+            <Button
+              size="sm"
+              className="mt-3"
+              onClick={() =>
+                start(async () => {
+                  await markCheckedAction(businessId, page.id);
+                  toast(t("context.checkedToast"));
+                })
+              }
+            >
+              {t("context.markChecked")}
+            </Button>
+          </PopoverContent>
+        </Popover>
+      )}
+      <button type="button" onClick={() => peek.open("usage")} className={neutral}>
+        <ChartColumn className="size-3.5" aria-hidden />
+        {tn("context.chip.reads", p.usage.runs)}
+      </button>
+      <span className={cn(chip, "text-muted-foreground")}>
+        <User className="size-3.5" aria-hidden />
+        {owner}
+      </span>
+    </div>
+  );
 
   const peekPane = (
     <SidePeek open={!!peek.value} onClose={peek.close} title={t("context.peek.title")} description={page.title}>
@@ -224,6 +247,8 @@ export function PageView(p: {
         mates={p.mates}
         readers={p.readers}
         usage={p.usage}
+        size={p.size}
+        history={p.history}
       />
     </SidePeek>
   );
@@ -247,9 +272,9 @@ export function PageView(p: {
             </IconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onSelect={() => peek.open("readers")}>
+            <DropdownMenuItem onSelect={() => peek.open("team")}>
               <Users />
-              {t("context.peek.tabReaders")}
+              {t("context.peek.tabTeam")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => peek.open("usage")}>
               <ChartColumn />
@@ -286,6 +311,8 @@ export function PageView(p: {
 
       {cover && <Cover businessId={businessId} cover={cover} covers={p.covers} onPick={pickCover} />}
 
+      <div className="flex">
+      <div className="min-w-0 flex-1">
       <PageBody width="doc" className={cn(cover ? "pt-0 sm:pt-0" : "sm:pt-16")}>
         <div className="group/head">
           {icon ? (
@@ -340,7 +367,14 @@ export function PageView(p: {
           />
         </div>
 
-        <PropertyList items={properties} className="mt-4" />
+        {chips}
+
+        {inline.length > 0 && (
+          <section aria-label={t("context.peek.tabSuggestions")} className="mt-6 rounded-lg border border-primary/25 bg-primary-soft p-4">
+            <p className="mb-3 text-[13px] leading-[18px] font-semibold">{tn("context.inline.title", inline.length)}</p>
+            <Suggestions businessId={businessId} suggestions={inline} mates={p.mates} otherPending={[]} />
+          </section>
+        )}
 
         <div className="mt-4 border-t border-border pt-4">
           {page.kind === "database" ? (
@@ -375,6 +409,16 @@ export function PageView(p: {
           )}
         </div>
       </PageBody>
+      </div>
+      {tab !== "team" || !peek.value ? (
+        <aside data-focus-hide aria-label={t("context.team.title")} className="hidden w-[360px] shrink-0 border-l border-border px-5 pt-16 pb-10 2xl:block">
+          <div className="sticky top-[calc(var(--topbar-h)+24px)]">
+            <h2 className="mb-5 text-sm font-semibold">{t("context.team.title")}</h2>
+            <TeamPanel businessId={businessId} pageId={page.id} mates={p.mates} readers={p.readers} isPage={page.kind !== "database"} size={p.size} history={p.history} />
+          </div>
+        </aside>
+      ) : null}
+      </div>
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent>

@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
-import { BookOpen } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { LiveRefresh } from "@/components/live";
-import { EditorSkeleton, EmptyState, PageBody } from "@/components/kit";
+import { EditorSkeleton, PageBody } from "@/components/kit";
 import { listContacts } from "@/lib/contacts";
 import { pageIcon, usageThisWeek } from "@/lib/context";
 import { getBusiness } from "@/lib/data";
-import { t, uiLang } from "@/lib/i18n";
-import { contextBase, coverImages, firstPage, galleryAssets, mentionContacts, pendingFor, readersFor, suggestionView } from "./data";
+import { uiLang } from "@/lib/i18n";
+import { contextBase, coverImages, galleryAssets, isStale, mentionContacts, pageHistory, pendingFor, promptSize, readersFor, suggestionView } from "./data";
+import { ContextHome } from "./home";
 import { PageView } from "./page-view";
 import type { CurrentPage } from "./types";
 
-/** One page of the workspace (?page=<id>; without it, the first page in the tree). */
+/** One page of the workspace (?page=<id>); without one, the Context home (home.tsx, ?q= searches). */
 export default function ContextPage(props: PageProps<"/b/[id]/context">) {
   return (
     <Suspense
@@ -29,18 +29,12 @@ export default function ContextPage(props: PageProps<"/b/[id]/context">) {
 
 async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/context">["params"]; searchParams: PageProps<"/b/[id]/context">["searchParams"] }) {
   const { id } = await params;
-  const { page: wanted } = await searchParams;
+  const { page: wanted, q } = await searchParams;
   const business = await getBusiness(id);
   if (!business) notFound();
   const { pages, rows, mates, mateViews, managerId } = await contextBase(id);
-  const page = pages.find((p) => p.id === wanted) ?? firstPage(pages);
-  if (!page) {
-    return (
-      <PageBody>
-        <EmptyState icon={<BookOpen />} title={t(uiLang(business.language), "context.noPages")} body={t(uiLang(business.language), "context.subtitle")} />
-      </PageBody>
-    );
-  }
+  const page = pages.find((p) => p.id === wanted);
+  if (!page) return <ContextHome businessId={id} lang={uiLang(business.language)} q={typeof q === "string" ? q : ""} />;
   const pending = pendingFor(id);
   const names = new Map(mates.map((m) => [m.id, m.name]));
   const usage = usageThisWeek(id).get(page.id);
@@ -67,6 +61,7 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
     externalStamp: page.blocks ? null : createHash("sha1").update(page.body).digest("hex").slice(0, 12),
     owner: owner(page.createdBy),
     lastCheckedAt: page.lastCheckedAt?.toISOString() ?? null,
+    stale: isStale(page),
   };
   const counts = new Map<string, number>();
   for (const s of pending) if (s.pageId && s.pageId !== page.id) counts.set(s.pageId, (counts.get(s.pageId) ?? 0) + 1);
@@ -87,6 +82,8 @@ async function Content({ params, searchParams }: { params: PageProps<"/b/[id]/co
         otherPending={[...counts].filter(([pid]) => byId.has(pid)).map(([pid, count]) => ({ pageId: pid, title: byId.get(pid)!.title, count }))}
         usage={{ runs: usage?.runs ?? 0, fetched: usage?.fetched ?? 0, byTeammate: [...(usage?.byTeammate ?? new Map()).entries()].map(([tid, count]) => ({ id: tid, count })) }}
         contactsCount={page.kind === "database" ? listContacts(id).length : 0}
+        size={promptSize(page)}
+        history={pageHistory(id, page.id, names)}
         covers={coverImages(id)}
         editor={{
           businessId: id,

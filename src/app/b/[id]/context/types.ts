@@ -13,6 +13,8 @@ export type TreePage = {
   parentId: string | null;
   icon: string | null;
   pending: number;
+  /** Not confirmed or changed in a while (STALE_DAYS in data.ts). */
+  stale: boolean;
 };
 
 export type CurrentPage = TreePage & {
@@ -47,4 +49,7 @@ export type SuggestionView = {
   diff: (DiffLine | { op: "skip"; count: number })[];
 };
 export type UsageView = { runs: number; fetched: number; byTeammate: { id: string; count: number }[] };
+/** A page's text as teammates get it, against the per-page prompt budget. */
+export type SizeView = { chars: number; max: number };
+export type HistoryItem = { id: string; status: string; author: string | null; kind: SuggestionKind; at: string };
 export type CoverImage = { path: string; title: string };

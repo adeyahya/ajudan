@@ -1,14 +1,14 @@
 "use client";
 
 import { DndContext, DragOverlay, MouseSensor, pointerWithin, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragMoveEvent } from "@dnd-kit/core";
-import { ChevronRight, Ellipsis, FolderInput, Link2, Network, PanelLeft, PenLine, Plus, Smile, Trash2 } from "lucide-react";
+import { ChevronRight, Ellipsis, Eye, FolderInput, LayoutGrid, Link2, PanelLeft, PenLine, Plus, Search, Smile, Sparkles, Trash2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 import { TopBarActions } from "@/components/breadcrumb";
 import { useT, useTn } from "@/components/i18n";
-import { Button, cn, IconButton, LineTabs } from "@/components/kit";
+import { Button, cn, IconButton } from "@/components/kit";
 import { useShortcut } from "@/components/shortcuts";
 import {
   AlertDialog,
@@ -34,12 +34,14 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import type { ContextSection } from "@/db/schema";
 import { SECTIONS } from "@/lib/context-text";
 import { createPageAction, deletePageAction, movePageAction, renamePageAction, setIconAction } from "./actions";
+import { NewMenu } from "./new-menu";
 import { IconPicker, PageIcon } from "./page-icon";
 import type { TreePage } from "./types";
 
 /**
- * The Konteks page tree (Notion's sidebar, inside the route): Pages / People / Readers
- * tabs, then the pages by section. Rows nest (20px per level) with a chevron, an icon
+ * The Konteks sidebar (Notion's, inside the route): "+ New" (page, mind map, template), a
+ * title filter, the views (Overview, Team view, People, Organize), then the pages by
+ * section; a dot marks a page not checked in a while. Rows nest (20px per level) with a chevron, an icon
  * (click to change), the title (double-click or F2 to rename) and, on hover, "+" (a page
  * inside) and "…" (rename, icon, move to, copy link, delete).
  *
@@ -62,16 +64,6 @@ const CLOSED_SECTIONS_KEY = "ajudan:ctx:closed";
 /** Top-level pages: no parent, or a parent that's gone. */
 function isTop(p: TreePage, ids: Set<string>) {
   return !p.parentId || !ids.has(p.parentId);
-}
-
-/** The page /context opens on without ?page= (same rule as firstPage in data.ts). */
-export function firstPageId(pages: TreePage[]) {
-  const ids = new Set(pages.map((p) => p.id));
-  for (const s of SECTIONS) {
-    const hit = pages.find((p) => p.section === s && isTop(p, ids));
-    if (hit) return hit.id;
-  }
-  return pages[0]?.id ?? null;
 }
 
 function siblingsOf(pages: TreePage[], parentId: string | null, section: ContextSection) {
@@ -173,7 +165,8 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
   const [pages, addEdit] = useOptimistic(serverPages, applyEdit);
   const [, start] = useTransition();
   const ids = useMemo(() => new Set(pages.map((p) => p.id)), [pages]);
-  const activeId = pathname === base ? (params.get("page") ?? firstPageId(pages)) : null;
+  // No ?page= is the Context home: no row is open.
+  const activeId = pathname === base ? params.get("page") : null;
 
   // Open rows and closed sections, remembered on this device.
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -358,12 +351,14 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
     move({ id, parentId, section: target.section, index: at });
   };
 
-  const tabs = [
-    { href: base, label: t("context.tab.pages"), active: pathname === base },
-    { href: `${base}/people`, label: t("context.tab.people"), active: pathname.startsWith(`${base}/people`) },
-    { href: `${base}/readers`, label: t("context.tab.readers"), active: pathname.startsWith(`${base}/readers`) },
-    { href: `${base}/organize`, label: t("context.tab.organize"), active: pathname.startsWith(`${base}/organize`) },
+  const views = [
+    { href: base, label: t("context.home.crumb"), icon: LayoutGrid, active: pathname === base && !params.get("page") },
+    { href: `${base}/readers`, label: t("context.tab.readers"), icon: Eye, active: pathname.startsWith(`${base}/readers`) },
+    { href: `${base}/people`, label: t("context.tab.people"), icon: Users, active: pathname.startsWith(`${base}/people`) },
+    { href: `${base}/organize`, label: t("context.tab.organize"), icon: Sparkles, active: pathname.startsWith(`${base}/organize`) },
   ];
+  const [filter, setFilter] = useState("");
+  const matches = filter.trim() ? pages.filter((p) => p.title.toLowerCase().includes(filter.trim().toLowerCase())) : null;
 
   const row = (p: TreePage, depth: number) => (
     <TreeRow
@@ -400,7 +395,68 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <LineTabs items={tabs} label={t("context.title")} className="shrink-0 px-3" />
+      <div className="shrink-0 px-2 pt-2">
+        <div className="flex items-center justify-between gap-2 pr-0.5 pl-2">
+          <span className="text-[13px] leading-[18px] font-semibold">{t("context.title")}</span>
+          <NewMenu
+            businessId={businessId}
+            section={pages.find((p) => p.id === activeId)?.section ?? "business"}
+            trigger={
+              <Button size="sm" variant="secondary" className="h-7">
+                <Plus />
+                {t("context.new")}
+              </Button>
+            }
+          />
+        </div>
+        <label className="mt-2 flex h-7 items-center gap-1.5 rounded-md bg-hover px-2 text-tertiary focus-within:bg-background focus-within:shadow-[inset_0_0_0_1px_var(--ring)]">
+          <Search className="size-3.5 shrink-0" aria-hidden />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setFilter("")}
+            aria-label={t("context.tree.filter")}
+            placeholder={t("context.tree.filter")}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-placeholder"
+          />
+        </label>
+        <nav aria-label={t("context.title")} className="mt-2 flex flex-col gap-px">
+          {views.map((v) => (
+            <Link
+              key={v.href}
+              href={v.href}
+              aria-current={v.active ? "page" : undefined}
+              className={cn(
+                "flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium transition-colors duration-100",
+                v.active ? "bg-accent text-foreground" : "text-sidebar-foreground hover:bg-hover",
+              )}
+            >
+              <v.icon className="size-4 text-tertiary" strokeWidth={1.75} aria-hidden />
+              {v.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+      {matches && (
+        <ul aria-label={t("context.tree.filter")} className="min-h-0 flex-1 overflow-y-auto px-2 pt-3 pb-6">
+          {matches.length ? (
+            matches.map((p) => (
+              <li key={p.id}>
+                <Link
+                  href={`${base}?page=${p.id}`}
+                  className={cn("flex h-7 items-center gap-2 rounded-md px-2 text-[13px] font-medium", p.id === activeId ? "bg-accent" : "text-sidebar-foreground hover:bg-hover")}
+                >
+                  <PageIcon icon={p.icon} kind={p.kind} className="text-tertiary" />
+                  <span className="min-w-0 flex-1 truncate">{p.title}</span>
+                  <span className="shrink-0 text-xs text-tertiary">{t(`context.section.${p.section}`)}</span>
+                </Link>
+              </li>
+            ))
+          ) : (
+            <li className="px-2 py-1 text-[13px] text-placeholder">{t("context.tree.noMatch")}</li>
+          )}
+        </ul>
+      )}
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
@@ -409,7 +465,7 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
         onDragEnd={onDragEnd}
         onDragCancel={() => (setDragId(null), setDrop(null))}
       >
-        <div ref={tree} role="tree" aria-label={t("context.tab.pages")} onKeyDown={onKey} className="min-h-0 flex-1 overflow-y-auto px-2 pt-3 pb-6">
+        <div ref={tree} role="tree" aria-label={t("context.tab.pages")} onKeyDown={onKey} className={cn("min-h-0 flex-1 overflow-y-auto px-2 pt-3 pb-6", matches && "hidden")}>
           {SECTIONS.map((s) => {
             const top = pages.filter((x) => x.section === s && isTop(x, ids));
             return (
@@ -427,22 +483,6 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
               </div>
             );
           })}
-          <button
-            type="button"
-            onClick={() => newPage(pages.find((p) => p.id === activeId)?.section ?? "business")}
-            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium text-muted-foreground transition-colors duration-100 hover:bg-hover hover:text-foreground"
-          >
-            <Plus className="size-4 text-tertiary" strokeWidth={1.75} aria-hidden />
-            {t("context.newPage")}
-          </button>
-          <button
-            type="button"
-            onClick={() => newPage(pages.find((p) => p.id === activeId)?.section ?? "business", null, "mindmap")}
-            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-[18px] font-medium text-muted-foreground transition-colors duration-100 hover:bg-hover hover:text-foreground"
-          >
-            <Network className="size-4 text-tertiary" strokeWidth={1.75} aria-hidden />
-            {t("context.newMindMap")}
-          </button>
         </div>
         <DragOverlay dropAnimation={null}>
           {dragging && (
@@ -657,6 +697,9 @@ function TreeRow({
           >
             {page.title || t("context.untitled")}
           </Link>
+        )}
+        {page.pending === 0 && page.stale && (
+          <span title={t("context.tree.stale")} aria-label={t("context.tree.stale")} role="img" className="ml-1 size-1.5 shrink-0 rounded-full bg-warning group-hover/row:hidden" />
         )}
         {page.pending > 0 && (
           <span

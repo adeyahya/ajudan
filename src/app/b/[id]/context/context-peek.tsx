@@ -9,7 +9,8 @@ import { Avatar, Badge, Button, cn, CountPill, EmptyState, Textarea } from "@/co
 import { dateLocale } from "@/lib/i18n";
 import { decideSuggestionAction, setReaderAction } from "./actions";
 import { ModeSwitch } from "./mode-switch";
-import type { Mate, ReaderView, SuggestionView, UsageView } from "./types";
+import type { Mate, ReaderView, SuggestionView, UsageView, HistoryItem, SizeView } from "./types";
+import { TeamPanel } from "./team-panel";
 
 /**
  * The page's side peek (opened from the top bar): what the team suggests for this page,
@@ -17,7 +18,7 @@ import type { Mate, ReaderView, SuggestionView, UsageView } from "./types";
  * (?peek=suggestions|readers|usage) so a reload keeps it.
  */
 
-export type PeekTab = "suggestions" | "readers" | "usage";
+export type PeekTab = "suggestions" | "team" | "usage";
 
 export function PagePeekBody({
   tab,
@@ -30,6 +31,8 @@ export function PagePeekBody({
   mates,
   readers,
   usage,
+  size,
+  history,
 }: {
   tab: PeekTab;
   onTab: (t: PeekTab) => void;
@@ -41,11 +44,13 @@ export function PagePeekBody({
   mates: Mate[];
   readers: ReaderView[];
   usage: UsageView;
+  size: SizeView;
+  history: HistoryItem[];
 }) {
   const t = useT();
   const tabs: { key: PeekTab; label: string; count?: number }[] = [
     { key: "suggestions", label: t("context.peek.tabSuggestions"), count: suggestions.length },
-    { key: "readers", label: t("context.peek.tabReaders") },
+    { key: "team", label: t("context.peek.tabTeam") },
     { key: "usage", label: t("context.peek.tabUsage") },
   ];
   return (
@@ -70,13 +75,26 @@ export function PagePeekBody({
         ))}
       </div>
       {tab === "suggestions" && <Suggestions businessId={businessId} suggestions={suggestions} mates={mates} otherPending={otherPending} />}
-      {tab === "readers" && <Readers businessId={businessId} pageId={pageId} mates={mates} readers={readers} isPage={isPage} />}
+      {tab === "team" && <TeamPanel businessId={businessId} pageId={pageId} mates={mates} readers={readers} isPage={isPage} size={size} history={history} />}
       {tab === "usage" && <Usage usage={usage} mates={mates} />}
     </div>
   );
 }
 
-function Suggestions({ businessId, suggestions, mates, otherPending }: { businessId: string; suggestions: SuggestionView[]; mates: Mate[]; otherPending: { pageId: string; title: string; count: number }[] }) {
+export function Suggestions({
+  businessId,
+  suggestions,
+  mates,
+  otherPending,
+  showPage = false,
+}: {
+  businessId: string;
+  suggestions: SuggestionView[];
+  mates: Mate[];
+  otherPending: { pageId: string; title: string; count: number }[];
+  /** Name the page each one changes (the Context home's list). */
+  showPage?: boolean;
+}) {
   const t = useT();
   const [shown, hide] = useOptimistic(suggestions, (list, id: string) => list.filter((s) => s.id !== id));
   return (
@@ -84,7 +102,7 @@ function Suggestions({ businessId, suggestions, mates, otherPending }: { busines
       {shown.length === 0 ? (
         <EmptyState compact icon={<BookmarkPlus />} title={t("context.panel.noSuggestionsTitle")} body={t("context.panel.noSuggestions")} />
       ) : (
-        shown.map((s) => <SuggestionItem key={s.id} businessId={businessId} s={s} mate={mates.find((m) => m.id === s.authorId)} onDecided={hide} />)
+        shown.map((s) => <SuggestionItem key={s.id} businessId={businessId} s={s} mate={mates.find((m) => m.id === s.authorId)} onDecided={hide} showPage={showPage} />)
       )}
       {otherPending.length > 0 && (
         <div className="border-t border-border pt-4">
