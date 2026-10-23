@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { deskChats, deskMessages, deskScore, deskSummaries } from "@/lib/desk";
-import { readRest } from "@/lib/rest";
+import { restFor } from "@/lib/rest";
 
 /** Customer Desk data, polled by the page: the chat list (or one chat's messages with ?chat=). */
 export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/desk">) {
@@ -15,7 +15,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/desk">) {
       if (!deskChats(id).some((c) => c.jid === chat)) return Response.json({ error: "not a desk chat" }, { status: 404 });
       return Response.json({ messages: await deskMessages(chat) }, { headers });
     }
-    return Response.json({ chats: await deskSummaries(id), score: deskScore(id), rest: readRest() }, { headers });
+    return Response.json({ chats: await deskSummaries(id), score: deskScore(id), rest: restFor(id) }, { headers });
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502, headers });
   }

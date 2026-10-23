@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ActivityEvent, TeammateState } from "@/db/schema";
 import { MANAGER_ROLE } from "@/lib/roles";
-import { readRest, type RestState } from "@/lib/rest";
+import { restFor, type RestState } from "@/lib/rest";
 
 /** What the office needs to render. Shared by the page (initial props) and GET /api/b/[id]/state. */
 export type OfficeTeammate = {
@@ -71,7 +71,7 @@ export function queryOfficeState(businessId: string): OfficeState {
     managerId,
     deliverableCount,
     pendingApprovals,
-    rest: readRest(),
+    rest: restFor(businessId),
     runningTasks: taskRows.find((t) => t.status === "running")?.n ?? 0,
     queuedTasks: taskRows.find((t) => t.status === "queued")?.n ?? 0,
   };

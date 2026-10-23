@@ -18,8 +18,7 @@ import { logEvent } from "@/lib/events";
 import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, needsClaude, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
-import { backendOf } from "@/lib/backend";
-import { readRest, startRest, UsageLimitError } from "@/lib/rest";
+import { onClaude, readRest, startRest, UsageLimitError } from "@/lib/rest";
 import { ensureContextWorkspace } from "@/lib/context";
 import { HEARTBEAT_MS, removeHeartbeat, writeHeartbeat } from "@/lib/worker-heartbeat";
 import { acquireWorkerLock, folderWorker, releaseWorkerLock } from "@/lib/worker-lock";
@@ -246,7 +245,8 @@ function tick() {
   if (!folder) return;
   abortCancelledRuns();
   noticeRest();
-  const waiting = resting && onClaude();
+  // The rest is the shared Claude login's; a business on OpenRouter or Ollama keeps working through it.
+  const waiting = resting && claudeBusinesses().length > 0;
   for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY], ["studio", 1]] as const) {
     while (running[lane] < max) {
       const job = claimJob(lane, waiting ? (j) => !needsClaude(j) : undefined);
@@ -261,18 +261,18 @@ function tick() {
   }
 }
 
-/** The rest is the shared Claude login's; a business on OpenRouter or Ollama keeps working through it. */
-function onClaude() {
-  return db.select({ b: schema.businesses.aiBackend }).from(schema.businesses).all().some((r) => backendOf(r.b).provider === "claude");
+/** This folder's businesses on Claude: the only ones the rest holds back. */
+function claudeBusinesses() {
+  return db.select({ id: schema.businesses.id }).from(schema.businesses).all().filter((b) => onClaude(b.id));
 }
 
-/** Tell the office when the team starts or stops resting (the rest is shared by every worker). */
+/** Tell the office when a Claude team starts or stops resting (the rest is shared by every worker). */
 function noticeRest() {
   const rest = readRest();
   if (Boolean(rest) === resting) return;
   resting = Boolean(rest);
   const until = rest?.known ? new Date(rest.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
-  for (const b of db.select({ id: schema.businesses.id }).from(schema.businesses).all()) {
+  for (const b of claudeBusinesses()) {
     logEvent(
       rest
         ? { businessId: b.id, type: "team_resting", message: `The team is out of Claude usage and resting${until ? ` until ${until}` : ""}. Their work waits in the queue.`, data: { until: rest.until } }

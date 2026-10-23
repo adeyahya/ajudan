@@ -9,6 +9,7 @@ const { db, schema } = await import("@/db");
 const sup = await import("@/lib/supervision");
 const edits = await import("@/lib/team-edits");
 const { backendOf } = await import("@/lib/backend");
+const { onClaude, restFor } = await import("@/lib/rest");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -50,5 +51,15 @@ describe("AI backend", () => {
     expect(backendOf({ provider: "ollama", baseUrl: "http://box:11434/v1/", mainModel: "m" }).baseUrl).toBe("http://box:11434");
     const b = backendOf({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1/", mainModel: "a/main", fastModel: "a/fast" });
     expect(b).toEqual({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", mainModel: "a/main", fastModel: "a/fast" });
+  });
+});
+
+describe("the Claude rest", () => {
+  it("only applies to businesses on Claude", () => {
+    const local = db.insert(schema.businesses).values({ name: "Local", status: "active", aiBackend: { provider: "ollama" } }).returning().get();
+    expect(onClaude(biz.id)).toBe(true);
+    expect(onClaude(local.id)).toBe(false);
+    // Never reads the shared rest file for a business on another backend.
+    expect(restFor(local.id)).toBeNull();
   });
 });

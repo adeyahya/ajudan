@@ -6,7 +6,7 @@ import { Button, EmptyState, ListSkeleton, PageBody, Skeleton } from "@/componen
 import { getBusiness } from "@/lib/data";
 import { deskScore, deskSummaries } from "@/lib/desk";
 import { t } from "@/lib/i18n";
-import { readRest } from "@/lib/rest";
+import { restFor } from "@/lib/rest";
 import { isLinked } from "@/lib/whatsapp";
 import { Desk } from "./desk";
 
@@ -60,7 +60,7 @@ async function Content({ params }: { params: PageProps<"/b/[id]/desk">["params"]
   const chats = await deskSummaries(id).catch(() => []);
   return (
     <PageBody width="full" className={FILL}>
-      <Desk businessId={id} language={business.language} initial={{ chats, score: deskScore(id), rest: readRest() }} />
+      <Desk businessId={id} language={business.language} initial={{ chats, score: deskScore(id), rest: restFor(id) }} />
     </PageBody>
   );
 }

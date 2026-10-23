@@ -1,5 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { backendOf } from "@/lib/backend";
 import { CONFIG_DIR } from "@/lib/folders";
 
 /**
@@ -8,6 +11,8 @@ import { CONFIG_DIR } from "@/lib/folders";
  * (~/.ajudan/rest.json), not in a business database. While it holds, workers leave AI
  * jobs queued instead of failing them; the office shows the team asleep and the owner
  * can still work things that cost no tokens (the Customer Desk, approvals, planning).
+ * Only businesses on Claude rest: one on OpenRouter or Ollama (src/lib/backend.ts)
+ * doesn't use the login and keeps working (restFor).
  */
 
 const REST_PATH = path.join(CONFIG_DIR, "rest.json");
@@ -31,6 +36,17 @@ export function readRest(now = Date.now()): RestState | null {
   } catch {
     return null;
   }
+}
+
+/** Whether this business is on Claude, the only backend the shared rest applies to. */
+export function onClaude(businessId: string) {
+  const row = db.select({ b: schema.businesses.aiBackend }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  return backendOf(row?.b).provider === "claude";
+}
+
+/** The rest as this business sees it: null when it runs on another backend. */
+export function restFor(businessId: string, now = Date.now()): RestState | null {
+  return onClaude(businessId) ? readRest(now) : null;
 }
 
 /** Start (or extend) a rest. Returns the new state and whether it just began. */
