@@ -156,7 +156,7 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
       if (!onClaude && (limited || (rejected && m.subtype !== "success"))) {
         return { text: textParts.join("\n"), structured: undefined, sessionId, costUsd, ok: false, error: `${providerName(backend)}: rate limit or credits used up` };
       }
-      if (limited || (rejected && m.subtype !== "success") || (m.subtype === "success" && m.num_turns <= 1 && LIMIT_TEXT.test(said) && said.length < 300)) {
+      if (onClaude && (limited || (rejected && m.subtype !== "success") || (m.subtype === "success" && m.num_turns <= 1 && LIMIT_TEXT.test(said) && said.length < 300))) {
         throw new UsageLimitError(resetsAt ?? toMs(Number(said.match(/\|(\d{10,13})\b/)?.[1])));
       }
       if (m.subtype === "success") {
