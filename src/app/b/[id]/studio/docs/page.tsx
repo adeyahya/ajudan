@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import { StudioSkeleton } from "../_components/studio-skeleton";
@@ -16,9 +16,15 @@ export default function DocsPage(props: PageProps<"/b/[id]/studio/docs">) {
   );
 }
 
-async function loadDocs(businessId: string) {
+/** The latest 500, plus the one asked for (?doc=, e.g. "Open as page" from Work) when it's older. */
+async function loadDocs(businessId: string, docId?: string) {
   await connection();
-  return db.select().from(schema.deliverables).where(eq(schema.deliverables.businessId, businessId)).orderBy(desc(schema.deliverables.createdAt)).limit(500).all();
+  const docs = db.select().from(schema.deliverables).where(eq(schema.deliverables.businessId, businessId)).orderBy(desc(schema.deliverables.createdAt)).limit(500).all();
+  if (docId && !docs.some((d) => d.id === docId)) {
+    const doc = db.select().from(schema.deliverables).where(and(eq(schema.deliverables.id, docId), eq(schema.deliverables.businessId, businessId))).get();
+    if (doc) docs.push(doc);
+  }
+  return docs;
 }
 
 async function Content({ params, searchParams }: PageProps<"/b/[id]/studio/docs">) {
@@ -26,11 +32,11 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/studio/docs"
   const sp = await searchParams;
   const business = await getBusiness(id);
   if (!business) notFound();
-  const [docs, mates] = await Promise.all([loadDocs(id), listTeammates(id)]);
+  const docId = typeof sp.doc === "string" ? sp.doc : undefined;
+  const [docs, mates] = await Promise.all([loadDocs(id, docId), listTeammates(id)]);
   const media = listLibrary(id)
     .filter((i) => i.kind !== "audio")
     .map((i) => ({ path: i.path, name: i.title || i.name, kind: i.kind }));
-  const docId = typeof sp.doc === "string" ? sp.doc : undefined;
   const filter: DocsFilter = sp.who === "mine" || sp.who === "team" ? sp.who : "all";
   return (
     <Docs

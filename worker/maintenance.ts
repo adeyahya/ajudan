@@ -10,7 +10,7 @@ import path from "node:path";
 import { and, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { backupsDir } from "@/lib/paths";
-import { dueReorganizeBusinesses, requestReorganize } from "@/lib/reorganize";
+import { dueReorganizeBusinesses, reorganizeState, requestReorganize } from "@/lib/reorganize";
 
 const DAY = 24 * 60 * 60 * 1000;
 const KEEP_EVENTS_DAYS = 30;
@@ -44,7 +44,11 @@ export function runMaintenance(dir: string) {
     console.error("[maintenance] pruning failed", err);
   }
   try {
-    for (const id of dueReorganizeBusinesses()) if (requestReorganize(id, true)) console.log(`[maintenance] queued the weekly Context review for ${id}`);
+    for (const id of dueReorganizeBusinesses()) {
+      // The owner hasn't looked at the last proposals yet: a new review would replace them.
+      if (reorganizeState(id).pending > 0) continue;
+      if (requestReorganize(id, true)) console.log(`[maintenance] queued the weekly Context review for ${id}`);
+    }
   } catch (err) {
     console.error("[maintenance] couldn't queue the Context review", err);
   }

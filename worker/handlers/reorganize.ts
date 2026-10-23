@@ -141,6 +141,8 @@ Return your plan.`,
     if (ac.signal.aborted) throw new PausedError();
     // Out of usage: the worker requeues the job until the team is back.
     if (err instanceof UsageLimitError) throw err;
+    // Counts as this week's review, so a failing one isn't retried (and paid for) every day.
+    db.update(schema.businesses).set({ contextTidiedAt: new Date() }).where(eq(schema.businesses.id, businessId)).run();
     logEvent({ businessId, type: "context_reorganize_failed", message: `The Context review failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500) });
     throw err;
   }

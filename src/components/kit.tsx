@@ -395,7 +395,8 @@ const PAGE_W = {
 
 /**
  * The page column under the top bar: centered, 708px (default, reading pages), 1100px
- * (wide, tables/databases) or full width; 48px side padding on desktop, 16px on a phone,
+ * (wide, tables/databases), 860px or the whole page (doc: documents, see
+ * src/components/doc-layout.tsx) or full width; 48px side padding on desktop, 16px on a phone,
  * 40px of air on top. Chat and editor routes that fill the viewport skip it.
  * (Pages that don't render a PageBody yet get the old padded frame from the layout.)
  */
