@@ -292,6 +292,13 @@ ipcMain.handle("ajudan:open-folder", (_e, dir) => {
   void openFolder(dir);
   return true;
 });
+// A folder chosen in the system dialog (connecting a code repository), or null when cancelled.
+ipcMain.handle("ajudan:pick-folder", async (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const opts = { properties: ["openDirectory"], defaultPath: path.join(os.homedir(), "dev") };
+  const r = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts));
+  return r.canceled ? null : (r.filePaths[0] ?? null);
+});
 ipcMain.handle("ajudan:show-home", () => {
   void openHome();
   return true;

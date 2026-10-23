@@ -7,7 +7,8 @@ import { getLanguage, languageInstruction } from "@/lib/language";
 import { businessWorkspace } from "@/lib/paths";
 import { PausedError, runAbortController } from "../session";
 import { UsageLimitError } from "@/lib/rest";
-import { getRole, MANAGER_ROLE, ROLE_TEMPLATES } from "@/lib/roles";
+import { getRole, isTechRole, MANAGER_ROLE, ROLE_TEMPLATES } from "@/lib/roles";
+import { listRepos } from "@/lib/repos";
 import { defaultPersona, MAX_TEAM, mergeProposal, normalizeTeam, renderCurrentTeam, type CurrentTeammate } from "@/lib/team";
 import { renderProfileMarkdown } from "@/lib/profile-markdown";
 import type { BusinessProfile } from "@/lib/types";
@@ -25,7 +26,9 @@ export async function designTeam({ businessId }: JobPayloads["design_team"]) {
     if (!biz) throw new Error(`Business ${businessId} not found`);
     if (!biz.profile) throw new Error("Business profile is missing; finish the interview first");
 
-    const roles = ROLE_TEMPLATES.map(
+    // Technical roles only make sense once the owner has connected code.
+    const hasRepos = listRepos(businessId).length > 0;
+    const roles = ROLE_TEMPLATES.filter((r) => hasRepos || !isTechRole(r.key)).map(
       (r) => `- key: ${r.key}\n  title: ${r.title}\n  summary: ${r.summary}\n  instructions: ${r.instructions}`,
     ).join("\n");
 
@@ -120,6 +123,7 @@ Requirements:
             browserAccess: t.browserAccess,
             whatsappAccess: t.whatsappAccess,
             shellAccess: t.shellAccess,
+            repoAccess: isTechRole(t.roleKey),
             status: "proposed",
             deskIndex: base + i,
           })

@@ -9,7 +9,7 @@ import { isAutonomy, validCron } from "@/lib/onboarding/schedule";
 import { HUMAN_ROLE_KEY, normalizePhone } from "@/lib/humans";
 import { ensureManager } from "@/lib/manager";
 import { isOnWhatsapp } from "@/lib/whatsapp";
-import { getRole } from "@/lib/roles";
+import { getRole, isTechRole } from "@/lib/roles";
 import { defaultPersona, parseLines } from "@/lib/team";
 import { initTeammateWorkspace } from "@/lib/workspace";
 import { t } from "@/lib/i18n";
@@ -43,6 +43,7 @@ export async function updateTeammate(
   const browserAccess = formData.get("browserAccess") === "on";
   const whatsappAccess = formData.get("whatsappAccess") === "on";
   const shellAccess = formData.get("shellAccess") === "on";
+  const repoAccess = formData.get("repoAccess") === "on";
   const persona = String(formData.get("persona") ?? "").trim();
   const responsibilities = parseLines(String(formData.get("responsibilities") ?? ""));
   const lang = langOf(businessId);
@@ -62,6 +63,7 @@ export async function updateTeammate(
       browserAccess,
       whatsappAccess,
       shellAccess,
+      repoAccess,
       persona,
       responsibilities,
     })
@@ -145,6 +147,7 @@ export async function addTeammate(businessId: string, _prev: FormState, formData
       kpis: role.defaultKpis,
       autonomy: "ask",
       status: "active",
+      repoAccess: isTechRole(role.key),
       deskIndex: (top?.m ?? -1) + 1,
     })
     .returning()
@@ -232,7 +235,7 @@ export async function setOwnerHuman(businessId: string, humanId: string | null) 
   refresh();
 }
 
-const ACCESS = { browser: "browserAccess", whatsapp: "whatsappAccess", shell: "shellAccess" } as const;
+const ACCESS = { browser: "browserAccess", whatsapp: "whatsappAccess", shell: "shellAccess", repos: "repoAccess" } as const;
 export type AccessKind = keyof typeof ACCESS;
 
 /** Turn one of a teammate's abilities (business browser, WhatsApp, sandboxed shell) on or off. */

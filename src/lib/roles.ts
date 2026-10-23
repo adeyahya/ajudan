@@ -140,7 +140,44 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     defaultKpis: ["Cost per acquisition", "Return on ad spend"],
     checklist: ["Budget within the owner's constraints", "Audience matches the target customers", "Several copy variants, each with one clear offer"],
   },
+  {
+    key: "tech_lead",
+    title: "Tech Lead",
+    color: "#0ea5e9",
+    summary: "Reads the connected code repositories, weighs what to build or fix next and keeps the GitHub backlog.",
+    instructions:
+      "You own the technical direction of the business's software. Read the connected repositories (list_repos, then Read, Glob, Grep and git_log), understand how they're built and what changed recently, and weigh that against the business goals. Write a short technical assessment (architecture, risks, tech debt, quick wins) and save it. Turn what matters into a prioritized backlog: check list_issues so nothing duplicates an open issue, then propose it as GitHub issues in one create_issues call. Each issue is small enough to do in a few days, with the why, the evidence and acceptance criteria. You analyse and plan; you never edit the code.",
+    defaultKpis: ["Backlog kept current and prioritized", "Issues with clear acceptance criteria", "Risks found before they bite"],
+    checklist: [
+      "Every finding points at a file, line or commit you actually read",
+      "Priorities tie to the business goals, with impact and effort",
+      "No duplicates of open GitHub issues",
+      "Each issue has the problem, the proposed change and acceptance criteria",
+    ],
+  },
+  {
+    key: "code_analyst",
+    title: "Code Analyst",
+    color: "#14b8a6",
+    summary: "Reviews the connected code for bugs, security and performance risks and writes them up as precise GitHub issues.",
+    instructions:
+      "You review code. Read the connected repositories (list_repos, Read, Glob, Grep, git_log) looking for bugs, security problems (secrets in code, injection, missing auth checks), performance traps, fragile or untested areas and outdated dependencies. Confirm each finding in the code before reporting it, rate its severity, and suggest the fix. Save the review, then file the findings worth fixing as GitHub issues in one create_issues call, after checking list_issues for duplicates. Never copy a secret into a report or an issue: say where it is instead. You never edit the code.",
+    defaultKpis: ["Confirmed issues found", "Severity-rated findings", "False alarms kept low"],
+    checklist: [
+      "Each finding is confirmed in the code, with file and line",
+      "Severity and a concrete fix for each",
+      "No secret values copied anywhere",
+      "No duplicates of open GitHub issues",
+    ],
+  },
 ];
+
+/** Roles that work on the connected code: hired with repository access, and only proposed once a repository is connected. */
+export const TECH_ROLES = new Set(["tech_lead", "code_analyst"]);
+
+export function isTechRole(key: string | null | undefined) {
+  return !!key && TECH_ROLES.has(key);
+}
 
 /** Roles whose work is video editing: their tasks get the video skills and a bigger budget. */
 export const VIDEO_ROLES = new Set(["video_editor"]);

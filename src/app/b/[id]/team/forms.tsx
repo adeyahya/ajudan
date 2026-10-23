@@ -126,6 +126,7 @@ export type TeammateInitial = {
   browserAccess?: boolean;
   whatsappAccess?: boolean;
   shellAccess?: boolean;
+  repoAccess?: boolean;
 };
 
 export function TeammateEditor({ action, initial, onSaved, footer }: { action: Action; initial: TeammateInitial; onSaved?: () => void; footer?: ReactNode }) {
@@ -157,6 +158,7 @@ export function TeammateEditor({ action, initial, onSaved, footer }: { action: A
           <SwitchRow name="browserAccess" defaultChecked={initial.browserAccess} label={t("team.form.browser")} help={t("team.form.browserHelp")} />
           <SwitchRow name="whatsappAccess" defaultChecked={initial.whatsappAccess} label={t("team.form.whatsapp")} help={t("team.form.whatsappHelp")} />
           <SwitchRow name="shellAccess" defaultChecked={initial.shellAccess} label={t("team.form.shell")} help={t("team.form.shellHelp")} />
+          <SwitchRow name="repoAccess" defaultChecked={initial.repoAccess} label={t("team.form.repos")} help={t("team.form.reposHelp")} />
         </div>
       </div>
       <SchedulePicker value={schedule} onChange={setSchedule} />

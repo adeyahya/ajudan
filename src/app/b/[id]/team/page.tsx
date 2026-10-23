@@ -439,6 +439,7 @@ const editorInitial = (t: Teammate) => ({
   browserAccess: t.browserAccess,
   whatsappAccess: t.whatsappAccess,
   shellAccess: t.shellAccess,
+  repoAccess: t.repoAccess,
 });
 
 function PeekSection({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
@@ -484,8 +485,8 @@ function PeekHeader({ t, businessId, lang, sub }: { t: Teammate; businessId: str
 
 function TeammatePeek({ t, businessId, schedule, lang }: { t: Teammate; businessId: string; schedule?: ScheduleStatus; lang: UiLang }) {
   const autonomy = autonomyOptions(lang).find((o) => o.value === t.autonomy);
-  const labels = { browser: tr(lang, "team.access.browser"), whatsapp: tr(lang, "team.access.whatsapp"), shell: tr(lang, "team.access.shell") };
-  const help = { browser: tr(lang, "team.form.browserHelp"), whatsapp: tr(lang, "team.form.whatsappHelp"), shell: tr(lang, "team.form.shellHelp") };
+  const labels = { browser: tr(lang, "team.access.browser"), whatsapp: tr(lang, "team.access.whatsapp"), shell: tr(lang, "team.access.shell"), repos: tr(lang, "team.access.repos") };
+  const help = { browser: tr(lang, "team.form.browserHelp"), whatsapp: tr(lang, "team.form.whatsappHelp"), shell: tr(lang, "team.form.shellHelp"), repos: tr(lang, "team.form.reposHelp") };
   return (
     <div>
       <PeekHeader t={t} businessId={businessId} lang={lang} />
@@ -540,7 +541,7 @@ function TeammatePeek({ t, businessId, schedule, lang }: { t: Teammate; business
 
       <PeekSection title={tr(lang, "team.peek.access")}>
         <AccessSwitches
-          values={{ browser: t.browserAccess, whatsapp: t.whatsappAccess, shell: t.shellAccess }}
+          values={{ browser: t.browserAccess, whatsapp: t.whatsappAccess, shell: t.shellAccess, repos: t.repoAccess }}
           toggle={setTeammateAccess.bind(null, businessId, t.id)}
           labels={labels}
           help={help}

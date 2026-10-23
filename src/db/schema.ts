@@ -107,6 +107,8 @@ export const teammates = sqliteTable("teammates", {
   whatsappAccess: integer("whatsapp_access", { mode: "boolean" }).notNull().default(false),
   /** May run shell commands (sandboxed: own folder only, allowed domains only). Off by default. */
   shellAccess: integer("shell_access", { mode: "boolean" }).notNull().default(false),
+  /** May read the connected code repositories and use GitHub issues through the owner's gh login. Off by default. */
+  repoAccess: integer("repo_access", { mode: "boolean" }).notNull().default(false),
   kind: text("kind").$type<TeammateKind>().notNull().default("ai"),
   /** Human teammates: WhatsApp number in international format, digits only ("6281234567890"). */
   phone: text("phone"),
@@ -350,6 +352,24 @@ export const assets = sqliteTable("assets", {
   createdAt: createdAt(),
 });
 
+/**
+ * Local git repositories the owner connected (src/lib/repos.ts). Teammates with
+ * repoAccess read them (never write) and file GitHub issues through the owner's gh login.
+ */
+export const repositories = sqliteTable("repositories", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  /** What teammates call it ("ajudan"); unique per business. */
+  name: text("name").notNull(),
+  /** Absolute path of the working tree's top folder. */
+  path: text("path").notNull(),
+  /** "owner/name" on github.com from the origin remote, or null when it isn't on GitHub. */
+  githubRepo: text("github_repo"),
+  createdAt: createdAt(),
+});
+
 export type ContactKind = "customer" | "supplier" | "partner" | "team" | "other";
 
 /** The business's address book, kept by the owner (src/lib/contacts.ts); teammates can look people up. */
@@ -527,6 +547,7 @@ export type HumanMessage = typeof humanMessages.$inferSelect;
 export type Secret = typeof secrets.$inferSelect;
 export type WaWatch = typeof waWatches.$inferSelect;
 export type Asset = typeof assets.$inferSelect;
+export type Repository = typeof repositories.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type Edit = typeof edits.$inferSelect;
 export type ContextPage = typeof contextPages.$inferSelect;

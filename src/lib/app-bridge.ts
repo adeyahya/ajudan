@@ -3,6 +3,8 @@ type AjudanBridge = {
   app: true;
   openFolder: (dir: string) => Promise<boolean>;
   showHome: () => Promise<boolean>;
+  /** The system folder dialog; missing in app builds from before it existed. */
+  pickFolder?: () => Promise<string | null>;
 };
 
 declare global {

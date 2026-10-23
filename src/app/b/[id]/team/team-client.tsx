@@ -188,7 +188,7 @@ export function TeamPeek({ title, openHref, actions, children }: { title?: strin
   );
 }
 
-/** Browser / WhatsApp / Shell switches that save as you flip them. */
+/** Browser / WhatsApp / Shell / Repositories switches that save as you flip them. */
 export function AccessSwitches({
   values,
   toggle,
@@ -203,7 +203,7 @@ export function AccessSwitches({
   const t = useT();
   const [state, setState] = useState(values);
   const { run } = useAction();
-  const kinds: AccessKind[] = ["browser", "whatsapp", "shell"];
+  const kinds: AccessKind[] = ["browser", "whatsapp", "shell", "repos"];
   return (
     <div className="divide-y divide-border">
       {kinds.map((k) => (

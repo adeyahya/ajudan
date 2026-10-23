@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CanUseTool, McpServerConfig, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Approval, Business, Task, Teammate } from "@/db/schema";
+import type { Approval, Business, Repository, Task, Teammate } from "@/db/schema";
 import { sameAction } from "@/lib/approvals";
 import { describeToolUse, MODELS, runAgent } from "@/lib/claude";
 import { taskHistory } from "@/lib/history";
@@ -31,6 +31,8 @@ import { UsageLimitError } from "@/lib/rest";
 import { OUTWARD_WA_TOOLS, SAFE_WA_TOOLS, WA_SEND_TOOLS, WA_SERVER, createWhatsappServer, resolveTarget, whatsappRules } from "../whatsapp-tools";
 import { runHumanRequest } from "../humans";
 import { notifyOwner } from "../owner-approvals";
+import { listRepos } from "@/lib/repos";
+import { createGithubServer, GH_SERVER, githubRules, OUTWARD_GH_TOOLS, SAFE_GH_TOOLS, sameBacklog } from "../github-tools";
 import { BIZ_SERVER, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
@@ -146,7 +148,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
 
     const useBrowser = teammate.browserAccess;
     const useWhatsapp = teammate.whatsappAccess;
-    const outward = [...OUTWARD_BIZ_TOOLS, ...(useWhatsapp ? OUTWARD_WA_TOOLS : [])];
+    // Connected code repositories: read-only for the file tools, issues through the worker's gh.
+    const repos = teammate.repoAccess ? listRepos(business.id) : null;
+    const repoDirs = repos?.map((r) => r.path) ?? [];
+    const outward = [...OUTWARD_BIZ_TOOLS, ...(useWhatsapp ? OUTWARD_WA_TOOLS : []), ...(repos ? OUTWARD_GH_TOOLS : [])];
     const biz = createBizServer({
       businessId: business.id,
       teammate,
@@ -178,7 +183,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         if (teammate.autonomy === "ask") return requestApproval(toolName, input);
         return { behavior: "deny", message: "You're draft-only: you can read APIs (GET) but not change anything through them." };
       }
-      if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR]);
+      if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR, ...repoDirs]);
       if (useBrowser && toolName.startsWith(`mcp__${browserProvider.server}__`)) {
         const url = browserProvider.targetUrl(toolName, input);
         if (url && !isAllowedUrl(url, business.browserSites)) {
@@ -245,6 +250,13 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         grant = undefined;
         return { behavior: "allow", updatedInput: input };
       }
+      // A backlog sent again with reworded bodies: post exactly what the owner approved.
+      if (grant && sameBacklog(grant, toolName, input)) {
+        ev("approval_used", `${teammate.name} does what the owner approved: ${grant.summary}`, { approvalId: grant.id });
+        const approved = grant.input;
+        grant = undefined;
+        return { behavior: "allow", updatedInput: approved };
+      }
       if (ac.signal.aborted) return { behavior: "deny", message: "This run is stopping." };
       const approval = db
         .insert(schema.approvals)
@@ -288,6 +300,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd, approvedTargets });
         allowedTools.push(...SAFE_WA_TOOLS);
       }
+      if (repos) {
+        mcpServers[GH_SERVER] = createGithubServer({ business, teammate, taskId: task.id });
+        allowedTools.push(...SAFE_GH_TOOLS);
+      }
       if (useBrowser) {
         setMate({ currentActivity: "Opening the business browser" });
         const cdpEndpoint = await ensureBrowser(business.id, business.name);
@@ -311,10 +327,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         runAgent({
           cwd,
           model: quickWork ? MODELS.fast : undefined,
-          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt),
+          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt, repos),
           prompt: resume ? (decided ? decisionPrompt(decided) : buildPrompt(task, "", files, true)) : fresh,
           tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
-          sandbox: teammate.shellAccess ? sandboxFor(cwd, business) : undefined,
+          sandbox: teammate.shellAccess ? sandboxFor(cwd, business, repoDirs) : undefined,
           plugins: videoWork ? [PLUGIN_DIR] : undefined,
           skills: videoWork ? SKILLS : undefined,
           allowedTools,
@@ -488,7 +504,7 @@ function scheduleMemoryConsolidation(teammate: Teammate, cwd: string) {
  * media and work (never the database, other businesses or the rest of your home
  * folder), and reach only the business's allowed domains.
  */
-function sandboxFor(cwd: string, business: Business): Options["sandbox"] {
+function sandboxFor(cwd: string, business: Business, repoDirs: string[] = []): Options["sandbox"] {
   const home = os.homedir();
   return {
     enabled: true,
@@ -498,7 +514,7 @@ function sandboxFor(cwd: string, business: Business): Options["sandbox"] {
     filesystem: {
       allowWrite: [cwd],
       denyRead: [home],
-      allowRead: [cwd, path.join(dataDir(), "media"), path.join(dataDir(), "work"), path.join(home, ".volta")],
+      allowRead: [cwd, path.join(dataDir(), "media"), path.join(dataDir(), "work"), path.join(home, ".volta"), ...repoDirs],
     },
     credentials: {
       envVars: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "AJUDAN_DATA_DIR"].map((name) => ({ name, mode: "deny" as const })),
@@ -545,11 +561,27 @@ export function checkFileAccess(
   if (!candidates.length) candidates.push(cwd); // Glob/Grep default to cwd
   for (const c of candidates) {
     const real = resolveReal(path.resolve(cwd, c));
-    if (!isInside(real, cwd) && !readable.some((d) => isInside(real, d))) {
-      return { behavior: "deny", message: `Access outside your workspace is not allowed (${c}).` };
+    if (isInside(real, cwd)) continue;
+    const dir = readable.find((d) => isInside(real, d));
+    if (!dir) return { behavior: "deny", message: `Access outside your workspace is not allowed (${c}).` };
+    if (isSecretPath(path.relative(dir, real))) {
+      return { behavior: "deny", message: `${c} may hold credentials (git config, .env, keys), so it can't be read. Say in your report that it exists if that matters.` };
     }
   }
   return { behavior: "allow", updatedInput: input };
+}
+
+/** Inside a read-only folder (a connected repository): git internals, env files and private keys stay closed. */
+export function isSecretPath(rel: string) {
+  const parts = rel.split(path.sep);
+  const base = parts[parts.length - 1] ?? "";
+  return (
+    parts[0] === ".git" ||
+    (/^\.env($|\.)/i.test(base) && !/\.(example|sample|template|dist)$/i.test(base)) ||
+    /\.(pem|key|p12|pfx|keystore|jks)$/i.test(base) ||
+    /^id_(rsa|dsa|ecdsa|ed25519)/i.test(base) ||
+    /^(\.npmrc|\.pypirc|\.netrc|credentials(\.json)?)$/i.test(base)
+  );
 }
 
 function summarizeOutward(toolName: string, input: Record<string, unknown>, who: string) {
@@ -580,6 +612,14 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
       // keep the raw text
     }
     return `${who} wants to ${String(input.method ?? "POST").toUpperCase()} to ${where}${input.body ? `: ${s(input.body, 80)}` : ""}`;
+  }
+  if (toolName === `mcp__${GH_SERVER}__create_issues`) {
+    const issues = (input.issues as { title?: string }[] | undefined) ?? [];
+    const titles = issues.slice(0, 5).map((i) => `"${s(i.title, 60)}"`).join(", ");
+    return `${who} wants to open ${issues.length} GitHub issue${issues.length === 1 ? "" : "s"} in ${s(input.repo, 40)}: ${titles}${issues.length > 5 ? ", …" : ""}`;
+  }
+  if (toolName === `mcp__${GH_SERVER}__comment_issue`) {
+    return `${who} wants to comment on ${s(input.repo, 40)} issue #${s(input.number, 8)}: "${s(input.body, 100)}"`;
   }
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;
@@ -663,6 +703,7 @@ function buildSystemPrompt(
   humans: Teammate[] = [],
   videoWork = false,
   context = "",
+  repos: Repository[] | null = null,
 ) {
   const role = getRole(teammate.roleKey);
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none)");
@@ -672,7 +713,7 @@ function buildSystemPrompt(
         .join("\n")
     : "- (you're the only teammate right now)";
   // What really leaves the machine: the browser and WhatsApp, when the teammate has them.
-  const channels = [useWhatsapp && "WhatsApp", useBrowser && "the business browser"].filter(Boolean).join(" and ");
+  const channels = [useWhatsapp && "WhatsApp", useBrowser && "the business browser", repos && "GitHub issues"].filter(Boolean).join(" and ");
   const outward = !channels
     ? "You have no channel that reaches outside (no WhatsApp, no browser), so everything you make is for the owner to post."
     : teammate.autonomy === "auto"
@@ -733,11 +774,12 @@ ${[
   teammate.shellAccess ? null : "- a sandboxed shell to run commands such as python, jq or curl (kind \"shell\")",
   useBrowser ? "- another site in the business browser (kind \"browser_site\")" : "- the business browser, the owner's logged-in Chrome for Shopee, TikTok and so on (kind \"browser\")",
   useWhatsapp ? null : "- WhatsApp (kind \"whatsapp\"); the owner also chooses which chats on Business → WhatsApp",
+  repos ? null : "- the connected code repositories and their GitHub issues (kind \"repos\"), for analysing code or filing a backlog",
 ]
   .filter(Boolean)
   .join("\n")}
 - A permission given in chat ("I give you access") doesn't change your tools; only an approved request or the owner's switches on the Team page do.
-${humans.length ? `\n${humanRules(humans)}\n` : ""}${waitingFor(business, teammate)}${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}
+${humans.length ? `\n${humanRules(humans)}\n` : ""}${waitingFor(business, teammate)}${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}${repos ? `\n${githubRules(repos, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }
 

@@ -1,4 +1,4 @@
-import { Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, Store, UserRound } from "lucide-react";
+import { FolderGit2, Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, Store, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
@@ -11,13 +11,14 @@ import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { saveProfile } from "./actions";
 import { BrowserPanel } from "./browser-panel";
 import { EditProfileDialog } from "./profile-form";
+import { ReposPanel } from "./repos-panel";
 import { SecretsPanel } from "./secrets-panel";
 import { SpendPanel } from "./spend-panel";
 import { WhatsappPanel } from "./whatsapp-panel";
 
 /**
  * Business settings, as line tabs (`?tab=`): the profile every teammate reads, WhatsApp,
- * the business browser, credentials, and usage & language.
+ * the business browser, code repositories, credentials, and usage & language.
  */
 export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   return (
@@ -36,7 +37,7 @@ export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   );
 }
 
-const TABS = ["profile", "whatsapp", "browser", "credentials", "budget"] as const;
+const TABS = ["profile", "whatsapp", "browser", "repos", "credentials", "budget"] as const;
 type Tab = (typeof TABS)[number];
 
 function List({ items, lang }: { items: string[]; lang: UiLang }) {
@@ -65,6 +66,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
     { key: "profile", label: t(lang, "profile.tab.profile"), icon: <Store /> },
     { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
     { key: "browser", label: t(lang, "profile.tab.browser"), icon: <MonitorSmartphone /> },
+    { key: "repos", label: t(lang, "profile.tab.repos"), icon: <FolderGit2 /> },
     { key: "credentials", label: t(lang, "profile.tab.credentials"), icon: <KeyRound /> },
     { key: "budget", label: t(lang, "profile.tab.budget"), icon: <Gauge /> },
   ];
@@ -185,6 +187,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
         <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={names((m) => m.whatsappAccess)} lang={lang} />
       )}
       {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
+      {tab === "repos" && <ReposPanel businessId={id} teammatesWithAccess={names((m) => m.repoAccess)} lang={lang} />}
       {tab === "credentials" && <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={names((m) => m.shellAccess)} lang={lang} />}
       {tab === "budget" && <SpendPanel businessId={id} spend={await getSpendRollup(id)} language={biz.language} lang={lang} />}
     </PageBody>

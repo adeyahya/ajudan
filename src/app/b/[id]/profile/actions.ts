@@ -13,6 +13,7 @@ import fs from "node:fs";
 import { lines, textToGoals } from "@/lib/onboarding/profile-form";
 import { BusinessProfileSchema } from "@/lib/types";
 import { refreshWorkspaces } from "@/lib/workspace";
+import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -166,5 +167,19 @@ export async function saveNetworkDomains(businessId: string, fd: FormData) {
     ),
   ];
   db.update(schema.businesses).set({ networkDomains }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/** Connect a local git repository (its folder path). Returns the problem instead of throwing, so the owner sees it. */
+export async function connectRepository(businessId: string, dir: string): Promise<{ error: RepoError } | { name: string }> {
+  if (!db.select({ id: schema.businesses.id }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()) throw new Error("Business not found");
+  const r = await connectRepo(businessId, dir);
+  if ("error" in r) return r;
+  refresh();
+  return { name: r.repo.name };
+}
+
+export async function disconnectRepository(businessId: string, repoId: string) {
+  disconnectRepo(businessId, repoId);
   refresh();
 }

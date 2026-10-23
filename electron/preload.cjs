@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld("ajudan", {
   app: true,
   openFolder: (dir) => ipcRenderer.invoke("ajudan:open-folder", dir),
   showHome: () => ipcRenderer.invoke("ajudan:show-home"),
+  pickFolder: () => ipcRenderer.invoke("ajudan:pick-folder"),
 });

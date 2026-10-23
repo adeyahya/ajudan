@@ -306,6 +306,39 @@ function ApprovalPreview({
       </Box>
     );
   }
+  if (a.toolName === "mcp__github__create_issues") {
+    const issues = (Array.isArray(i.issues) ? i.issues : []) as { title?: string; body?: string; labels?: string[] }[];
+    return (
+      <Box>
+        <BoxLabel>
+          {t(lang, "approvals.gh.issuesIn")} <span className="font-medium text-foreground">{str(i.repo)}</span> · {issues.length}
+        </BoxLabel>
+        <ol className="max-h-[28rem] space-y-3 overflow-y-auto">
+          {issues.map((x, n) => (
+            <li key={n} className="rounded-md border border-border bg-background p-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold">{str(x.title)}</span>
+                {(x.labels ?? []).map((l) => (
+                  <Badge key={l}>{l}</Badge>
+                ))}
+              </div>
+              {x.body ? <Prose className={`mt-1 ${compact}`}>{str(x.body)}</Prose> : null}
+            </li>
+          ))}
+        </ol>
+      </Box>
+    );
+  }
+  if (a.toolName === "mcp__github__comment_issue") {
+    return (
+      <Box>
+        <BoxLabel>
+          {t(lang, "approvals.gh.commentOn")} <span className="font-medium text-foreground">{str(i.repo)} #{str(i.number)}</span>
+        </BoxLabel>
+        <Prose className={compact}>{str(i.body)}</Prose>
+      </Box>
+    );
+  }
   // Check WhatsApp first: its send_message would also match the old biz send_message rule below.
   if (a.toolName === "mcp__whatsapp__update_group") {
     return (

@@ -719,9 +719,9 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "request_capability",
-      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, or WhatsApp. The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
+      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, or the connected code repositories and their GitHub issues. The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
       {
-        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp"]),
+        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos"]),
         why: z.string().describe("One sentence for the owner: what you'll do with it"),
         name: z.string().optional().describe('secret: a name like "ORUCRAFT_API"'),
         hosts: z.array(z.string()).optional().describe('secret: the hosts it may be sent to, e.g. ["orucraft.com"]'),
@@ -938,7 +938,7 @@ export function createBizServer(ctx: BizContext) {
           if (m.kind === "human") {
             return `- ${m.name}, ${m.title}: HUMAN teammate, reached on WhatsApp with ask_human${mine.length ? `; open requests: ${mine.join("; ")}` : ""}`;
           }
-          const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp"].filter(Boolean).join(", ") || "no browser/WhatsApp";
+          const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp", m.repoAccess && "code repositories/GitHub"].filter(Boolean).join(", ") || "no browser/WhatsApp/code";
           return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
         });
         const waits = activeWatches(businessId);

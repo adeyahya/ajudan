@@ -101,6 +101,7 @@ export const en = {
   "team.access.browser": "Business browser",
   "team.access.whatsapp": "WhatsApp",
   "team.access.shell": "Commands",
+  "team.access.repos": "Code repositories",
   "team.thisIsMeShort": "This is me",
   "team.removePersonShort": "Remove from team",
   "team.removePersonBody": "The team stops asking them for help. Their messages stay in the history.",
@@ -133,6 +134,8 @@ export const en = {
   "team.form.browserHelp": "Drives your logged-in Chrome (Shopee, TikTok…). Changes on a site still follow the freedom setting above.",
   "team.form.whatsapp": "Can use WhatsApp",
   "team.form.whatsappHelp": "Reads and posts in the WhatsApp groups you allowed on the Business page. Posting follows the freedom setting above.",
+  "team.form.repos": "Can read code repositories",
+  "team.form.reposHelp": "Reads the repositories connected on Business → Repositories (never changes them) and files GitHub issues with your gh login.",
   "team.form.shell": "Can run commands",
   "team.form.shellHelp":
     "A sandboxed shell for working with data (python, jq, curl): it only writes in this teammate's folder and only reaches the domains listed under Business → API keys & access.",
@@ -350,6 +353,7 @@ export const id: Record<keyof typeof en, string> = {
   "team.access.browser": "Browser bisnis",
   "team.access.whatsapp": "WhatsApp",
   "team.access.shell": "Perintah",
+  "team.access.repos": "Repositori kode",
   "team.thisIsMeShort": "Ini saya",
   "team.removePersonShort": "Keluarkan dari tim",
   "team.removePersonBody": "Tim tidak akan minta tolong lagi ke orang ini. Pesan-pesannya tetap ada di riwayat.",
@@ -381,6 +385,8 @@ export const id: Record<keyof typeof en, string> = {
   "team.form.browserHelp": "Mengendalikan Chrome kamu yang sudah login (Shopee, TikTok…). Perubahan di situs tetap mengikuti pengaturan kebebasan di atas.",
   "team.form.whatsapp": "Boleh pakai WhatsApp",
   "team.form.whatsappHelp": "Membaca dan mengirim pesan di grup WhatsApp yang kamu izinkan di halaman Bisnis. Mengirim pesan mengikuti pengaturan kebebasan di atas.",
+  "team.form.repos": "Boleh membaca repositori kode",
+  "team.form.reposHelp": "Membaca repositori yang terhubung di Bisnis → Repositori (tanpa mengubahnya) dan membuat issue GitHub dengan login gh kamu.",
   "team.form.shell": "Boleh menjalankan perintah",
   "team.form.shellHelp":
     "Shell terbatas untuk mengolah data (python, jq, curl): hanya bisa menulis di folder anggota tim ini dan hanya bisa mengakses domain yang terdaftar di Bisnis → Kunci API & akses.",

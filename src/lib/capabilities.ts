@@ -20,7 +20,8 @@ export type CapabilityRequest =
   | { kind: "domain"; domain: string; why: string }
   | { kind: "browser"; why: string }
   | { kind: "browser_site"; site: string; why: string }
-  | { kind: "whatsapp"; why: string };
+  | { kind: "whatsapp"; why: string }
+  | { kind: "repos"; why: string };
 
 export function describeCapability(who: string, r: CapabilityRequest) {
   switch (r.kind) {
@@ -36,6 +37,8 @@ export function describeCapability(who: string, r: CapabilityRequest) {
       return `${who} wants to open ${r.site} in the business browser`;
     case "whatsapp":
       return `${who} wants to use WhatsApp`;
+    case "repos":
+      return `${who} wants to read the connected code repositories and use their GitHub issues`;
   }
 }
 
@@ -107,6 +110,10 @@ export async function grantCapability(approval: Approval, opts: { secretValue?: 
     case "whatsapp":
       setMate({ whatsappAccess: true });
       granted = "WhatsApp";
+      break;
+    case "repos":
+      setMate({ repoAccess: true });
+      granted = "the connected code repositories (read-only) and their GitHub issues (list_repos)";
       break;
   }
 

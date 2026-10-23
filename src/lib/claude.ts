@@ -271,6 +271,20 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
     case "mcp__whatsapp__send_message":
     case "mcp__whatsapp__send_file":
       return `Posting in WhatsApp: ${short(input.chat, 40)}`;
+    // Code repositories and GitHub issues (worker/github-tools.ts)
+    case "mcp__github__list_repos":
+      return "Checking the code repositories";
+    case "mcp__github__git_log":
+      return `Reading the history of ${short(input.repo, 30)}`;
+    case "mcp__github__list_issues":
+    case "mcp__github__view_issue":
+      return `Reading GitHub issues of ${short(input.repo, 30)}`;
+    case "mcp__github__list_labels":
+      return `Checking labels of ${short(input.repo, 30)}`;
+    case "mcp__github__create_issues":
+      return `Opening ${(input.issues as unknown[] | undefined)?.length ?? "some"} GitHub issues in ${short(input.repo, 30)}`;
+    case "mcp__github__comment_issue":
+      return `Commenting on ${short(input.repo, 30)} #${short(input.number, 8)}`;
     // Business browser (Playwright MCP)
     case "mcp__browser__browser_navigate":
       return `Opening ${hostOf(input.url)}`;
