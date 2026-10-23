@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   AudioLines,
   Clapperboard,
+  Copy,
   Download,
   FileIcon,
   FolderIcon,
@@ -31,10 +32,10 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import type { LibraryItem } from "@/lib/assets";
+import type { DuplicateGroup, LibraryItem } from "@/lib/assets";
 import type { MessageKey } from "@/lib/i18n";
 import { MEDIA_ACCEPT, type MediaKind } from "@/lib/media-types";
-import { deleteAssets, organizeAssets } from "./actions";
+import { deleteAssets, findDuplicateAssets, organizeAssets, removeDuplicateAssets } from "./actions";
 import { PlanTask, type MateOption } from "./_components/plan-task";
 import { DeleteDialog, MoreMenu, PropRow, StudioShell } from "./_components/studio-shell";
 
@@ -87,6 +88,20 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   const [deleting, setDeleting] = useState<string[] | null>(null);
   const [, startDelete] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+  const [dupView, setDupView] = useState(false);
+  const [dupes, setDupes] = useState<DuplicateGroup[] | null>(null);
+  const [removing, setRemoving] = useState<DuplicateGroup[] | null>(null);
+  const [removePending, startRemove] = useTransition();
+
+  // Only files that share a size get read, so checking on every change stays cheap.
+  useEffect(() => {
+    let live = true;
+    void findDuplicateAssets(businessId).then((g) => live && setDupes(g));
+    return () => {
+      live = false;
+    };
+  }, [businessId, items]);
+  const dupCount = dupes?.reduce((n, g) => n + g.copies.length, 0) ?? 0;
 
   const setSelected = (next: string[] | ((s: string[]) => string[])) =>
     setSelectedState((s) => {
@@ -120,14 +135,16 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     if (!list.length) return;
     setUploading({ done: 0, total: list.length });
     const added: string[] = [];
+    let already = 0;
     for (const [n, f] of list.entries()) {
       const res = await fetch(`/api/b/${businessId}/media`, { method: "POST", headers: { "X-File-Name": encodeURIComponent(f.name) }, body: f });
-      const j = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+      const j = (await res.json().catch(() => ({}))) as { path?: string; error?: string; existing?: boolean };
       if (!res.ok || !j.path) {
         setUploading({ done: n, total: list.length, error: `${f.name}: ${j.error ?? res.statusText}` });
         router.refresh();
         return;
       }
+      if (j.existing) already++;
       added.push(j.path);
       setUploading({ done: n + 1, total: list.length });
     }
@@ -135,7 +152,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     if (album) await organizeAssets(businessId, added, { album });
     setUploading(null);
     setSelected(added);
-    toast(tn("studio.lib.uploaded", added.length));
+    toast(already ? tn("studio.lib.alreadyHere", already) : tn("studio.lib.uploaded", added.length));
     router.refresh();
   };
 
@@ -145,9 +162,10 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   };
   const toggle = (path: string) => setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
 
-  const showAll = () => (setAlbum(null), setStarredOnly(false));
-  const showStarred = () => (setStarredOnly(!starredOnly), setAlbum(null));
-  const showAlbum = (a: string) => (setAlbum(album === a ? null : a), setStarredOnly(false));
+  const showAll = () => (setAlbum(null), setStarredOnly(false), setDupView(false));
+  const showStarred = () => (setStarredOnly(!starredOnly), setAlbum(null), setDupView(false));
+  const showAlbum = (a: string) => (setAlbum(album === a ? null : a), setStarredOnly(false), setDupView(false));
+  const showDupes = () => (setDupView(!dupView), setAlbum(null), setStarredOnly(false), setSelected([]));
 
   const kindHref = (k: string) => {
     const next = new URLSearchParams(params.toString());
@@ -156,6 +174,16 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     next.delete("f");
     const s = next.toString();
     return s ? `${pathname}?${s}` : pathname;
+  };
+
+  const confirmRemove = () => {
+    const groups = removing;
+    setRemoving(null);
+    if (!groups) return;
+    startRemove(async () => {
+      const n = await removeDuplicateAssets(businessId, groups);
+      toast(tn("studio.lib.dupRemoved", n));
+    });
   };
 
   const confirmDelete = () => {
@@ -224,12 +252,17 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
 
           {/* Phone: one scrolling row of chips */}
           <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] @3xl:hidden">
-            <Chip active={!album && !starredOnly} onClick={showAll}>
+            <Chip active={!album && !starredOnly && !dupView} onClick={showAll}>
               {t("studio.lib.everything")}
             </Chip>
             <Chip active={starredOnly} onClick={showStarred}>
               <StarIcon className="size-3.5" /> {t("studio.lib.starred")}
             </Chip>
+            {(dupCount > 0 || dupView) && (
+              <Chip active={dupView} onClick={showDupes}>
+                <Copy className="size-3.5" /> {t("studio.lib.duplicates")} {dupCount > 0 && <span className="tabular-nums">{dupCount}</span>}
+              </Chip>
+            )}
             {albums.map(([a]) => (
               <Chip key={a} active={album === a} onClick={() => showAlbum(a)}>
                 <FolderIcon className="size-3.5" /> {a}
@@ -244,8 +277,9 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
 
           {/* Desktop: a Notion-like list */}
           <nav aria-label={t("studio.lib.albums")} className="hidden space-y-0.5 @3xl:block">
-            <SideItem active={!album && !starredOnly} onClick={showAll} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
+            <SideItem active={!album && !starredOnly && !dupView} onClick={showAll} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
             <SideItem active={starredOnly} onClick={showStarred} icon={<StarIcon />} label={t("studio.lib.starred")} count={starredCount} />
+            <SideItem active={dupView} onClick={showDupes} icon={<Copy />} label={t("studio.lib.duplicates")} count={dupes ? dupCount : undefined} />
             <div className="px-2 pt-4 pb-1 text-xs font-medium text-tertiary">{t("studio.lib.albums")}</div>
             {albums.length === 0 && <p className="px-2 text-xs text-tertiary">{t("studio.lib.noAlbums")}</p>}
             {albums.map(([a, n]) => (
@@ -276,6 +310,16 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
         </aside>
 
         {/* Gallery */}
+        {dupView ? (
+          <Duplicates
+            businessId={businessId}
+            groups={dupes}
+            byPath={new Map(items.map((i) => [i.path, i]))}
+            pending={removePending}
+            onOpen={(p) => setSelected([p])}
+            onRemove={setRemoving}
+          />
+        ) : (
         <div className="min-w-0">
           <LineTabs
             label={t("studio.lib.kinds")}
@@ -327,23 +371,12 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
                       onClick={(e) => click(i.path, e)}
                       caption={<span title={i.title || i.name}>{i.title || i.name}</span>}
                       meta={
-                        <span className="inline-flex items-center gap-1">
+                        <span className="flex min-w-0 items-center gap-1" title={i.note || undefined}>
                           <Icon className="size-3 shrink-0" />
-                          {i.album ?? size(i.bytes)}
+                          <span className="truncate">{[i.album, ...i.tags.map((tg) => `#${tg}`)].filter(Boolean).join(" · ") || size(i.bytes)}</span>
                         </span>
                       }
-                      thumb={
-                        i.kind === "image" ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-                          <img src={fileUrl(businessId, i.path)} alt={i.title || i.name} loading={n < 30 ? "eager" : "lazy"} />
-                        ) : i.kind === "video" ? (
-                          <video src={`${fileUrl(businessId, i.path)}#t=0.5`} preload="metadata" muted playsInline />
-                        ) : (
-                          <span className="flex size-full items-center justify-center text-placeholder">
-                            <Icon className="size-8" strokeWidth={1.5} />
-                          </span>
-                        )
-                      }
+                      thumb={<Thumb businessId={businessId} item={i} eager={n < 30} />}
                       topLeft={
                         <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
                           <Checkbox checked={on} onCheckedChange={() => toggle(i.path)} aria-label={t("studio.lib.select", { name: i.title || i.name })} />
@@ -364,6 +397,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
           </div>
           {items.length > 0 && <p className="mt-6 text-xs text-tertiary">{t("studio.lib.tip")}</p>}
         </div>
+        )}
       </div>
 
       {picked.length > 1 && (
@@ -376,6 +410,14 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
           onDelete={() => setDeleting(picked.map((i) => i.path))}
         />
       )}
+
+      <DeleteDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={tn("studio.lib.dupConfirm", removing?.reduce((n, g) => n + g.copies.length, 0) ?? 0)}
+        body={t("studio.lib.dupConfirmBody")}
+        onConfirm={confirmRemove}
+      />
 
       <DeleteDialog
         open={!!deleting}
@@ -392,7 +434,96 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   );
 }
 
-function SideItem({ active, onClick, icon, label, count }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count: number }) {
+function Thumb({ businessId, item: i, eager }: { businessId: string; item: LibraryItem; eager?: boolean }) {
+  const Icon = KIND_ICON[i.kind];
+  if (i.kind === "image")
+    // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+    return <img src={fileUrl(businessId, i.path)} alt={i.title || i.name} loading={eager ? "eager" : "lazy"} />;
+  if (i.kind === "video") return <video src={`${fileUrl(businessId, i.path)}#t=0.5`} preload="metadata" muted playsInline />;
+  return (
+    <span className="flex size-full items-center justify-center text-placeholder">
+      <Icon className="size-8" strokeWidth={1.5} />
+    </span>
+  );
+}
+
+/** Files with the same content, one group per row: the kept file first, then its copies. */
+function Duplicates({
+  businessId,
+  groups,
+  byPath,
+  pending,
+  onOpen,
+  onRemove,
+}: {
+  businessId: string;
+  groups: DuplicateGroup[] | null;
+  byPath: Map<string, LibraryItem>;
+  pending: boolean;
+  onOpen: (path: string) => void;
+  onRemove: (groups: DuplicateGroup[]) => void;
+}) {
+  const t = useT();
+  const tn = useTn();
+  if (!groups) return <p className="min-w-0 py-2 text-[13px] text-muted-foreground">{t("studio.lib.dupChecking")}</p>;
+  if (!groups.length) return <EmptyState compact icon={<Copy />} title={t("studio.lib.dupNone")} body={t("studio.lib.dupNoneBody")} />;
+  const freed = groups.reduce((n, g) => n + g.bytes * g.copies.length, 0);
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{tn("studio.lib.dupSummary", groups.length, { size: size(freed) })}</div>
+          <p className="mt-0.5 text-xs text-tertiary">{t("studio.lib.dupHint")}</p>
+        </div>
+        <Button size="sm" variant="danger" disabled={pending} loading={pending} onClick={() => onRemove(groups)}>
+          <Trash2 /> {t("studio.lib.dupRemoveAll")}
+        </Button>
+      </div>
+      <ul className="divide-y divide-border">
+        {groups.map((g) => {
+          const files = [g.keep, ...g.copies].map((p) => byPath.get(p)).filter((i): i is LibraryItem => !!i);
+          return (
+            <li key={g.keep} className="flex flex-col gap-3 py-4 @xl:flex-row @xl:items-center">
+              <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto [scrollbar-width:none]">
+                {files.map((i, n) => (
+                  <button key={i.path} type="button" onClick={() => onOpen(i.path)} className="w-32 shrink-0 text-left">
+                    <span
+                      className={cn(
+                        "relative block aspect-[4/3] overflow-hidden rounded-md bg-muted ring-1 ring-black/5 ring-inset [&_img]:size-full [&_img]:object-cover [&_video]:size-full [&_video]:object-cover",
+                        n === 0 && "ring-2 ring-success",
+                      )}
+                    >
+                      <Thumb businessId={businessId} item={i} />
+                      <span
+                        className={cn(
+                          "absolute top-1.5 left-1.5 rounded-sm px-1.5 text-[11px] leading-4 font-medium",
+                          n === 0 ? "bg-tag-green-bg text-tag-green-fg" : "bg-background/90 text-muted-foreground",
+                        )}
+                      >
+                        {n === 0 ? t("studio.lib.dupKeep") : t("studio.lib.dupCopy")}
+                      </span>
+                    </span>
+                    <span className="mt-1.5 block truncate text-xs font-medium" title={i.name}>
+                      {i.title || i.name}
+                    </span>
+                    <span className="block truncate text-[11px] text-tertiary">
+                      {new Date(i.mtime).toLocaleDateString()} · {size(i.bytes)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <Button size="sm" variant="secondary" className="self-start @xl:self-center" disabled={pending} onClick={() => onRemove([g])}>
+                <Trash2 /> {tn("studio.lib.dupRemove", g.copies.length)}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function SideItem({ active, onClick, icon, label, count }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count?: number }) {
   return (
     <button
       type="button"

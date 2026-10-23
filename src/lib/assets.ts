@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Asset } from "@/db/schema";
 import { mediaKind, type MediaKind } from "@/lib/media-types";
@@ -111,6 +112,135 @@ export function deleteFromLibrary(businessId: string, paths: string[]) {
     n++;
   }
   return n;
+}
+
+/** Content hash of a file, streamed (videos can be gigabytes). */
+export function hashFile(abs: string) {
+  return new Promise<string>((resolve, reject) => {
+    const h = createHash("sha1");
+    fs.createReadStream(abs)
+      .on("data", (chunk) => h.update(chunk))
+      .on("end", () => resolve(h.digest("hex")))
+      .on("error", reject);
+  });
+}
+
+/** An existing library file with exactly these bytes, if there is one (only same-size files are read). */
+export async function findSameFile(abs: string, except?: string) {
+  const bytes = fs.statSync(abs).size;
+  const dir = path.join(dataDir(), "media");
+  if (!bytes || !fs.existsSync(dir)) return null;
+  const same = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && !d.name.startsWith(".") && `media/${d.name}` !== except)
+    .filter((d) => fs.statSync(path.join(dir, d.name)).size === bytes);
+  if (!same.length) return null;
+  const hash = await hashFile(abs);
+  for (const d of same) if ((await hashFile(path.join(dir, d.name))) === hash) return `media/${d.name}`;
+  return null;
+}
+
+/** One file kept, and copies with exactly the same bytes. */
+export type DuplicateGroup = { keep: string; copies: string[]; bytes: number };
+
+/** The copy worth keeping: starred, then organized (title, note, album, tags), then the oldest. */
+function keeperFirst(a: LibraryItem, b: LibraryItem) {
+  const score = (i: LibraryItem) => (i.starred ? 1000 : 0) + (i.title ? 100 : 0) + (i.note ? 100 : 0) + (i.album ? 100 : 0) + i.tags.length;
+  return score(b) - score(a) || a.mtime - b.mtime;
+}
+
+/**
+ * Files in the library with identical content (the same photo sent twice in chat).
+ * Only files that share a size are hashed, so this stays cheap with big videos.
+ */
+export async function findDuplicates(businessId: string): Promise<DuplicateGroup[]> {
+  const dir = dataDir();
+  const bySize = new Map<number, LibraryItem[]>();
+  for (const i of listLibrary(businessId)) if (i.bytes > 0) bySize.set(i.bytes, [...(bySize.get(i.bytes) ?? []), i]);
+  const groups: DuplicateGroup[] = [];
+  for (const [bytes, same] of bySize) {
+    if (same.length < 2) continue;
+    const byHash = new Map<string, LibraryItem[]>();
+    for (const i of same) {
+      const h = await hashFile(path.join(dir, i.path));
+      byHash.set(h, [...(byHash.get(h) ?? []), i]);
+    }
+    for (const g of byHash.values()) {
+      if (g.length < 2) continue;
+      const [keep, ...copies] = g.sort(keeperFirst);
+      groups.push({ keep: keep.path, copies: copies.map((c) => c.path), bytes });
+    }
+  }
+  return groups.sort((a, b) => b.bytes * b.copies.length - a.bytes * a.copies.length);
+}
+
+/** Swap one library path for another inside stored JSON (attachments, edit specs, page blocks). */
+function swapPath<T>(value: T, from: string, to: string): T {
+  return JSON.parse(JSON.stringify(value).replaceAll(JSON.stringify(from), JSON.stringify(to))) as T;
+}
+
+/**
+ * Remove copies of `keep`, after checking they really are the same bytes. Labels typed on a
+ * copy carry over to the kept file, and tasks, messages, docs, edits and page covers that
+ * pointed at a copy now point at the kept file, so nothing that used it breaks.
+ */
+export async function mergeDuplicates(businessId: string, keep: string, copies: string[]) {
+  const dir = dataDir();
+  if (!isLibraryPath(keep) || !fs.existsSync(path.join(dir, keep))) return 0;
+  const keepHash = await hashFile(path.join(dir, keep));
+  const gone: string[] = [];
+  for (const c of new Set(copies)) {
+    if (c === keep || !isLibraryPath(c) || !fs.existsSync(path.join(dir, c))) continue;
+    if ((await hashFile(path.join(dir, c))) === keepHash) gone.push(c);
+  }
+  if (!gone.length) return 0;
+
+  const rows = assetRows(businessId, [keep, ...gone]);
+  const kept = rows.get(keep);
+  const others = gone.map((c) => rows.get(c)).filter((r): r is Asset => !!r);
+  const patch: AssetPatch = {
+    title: kept?.title || others.find((r) => r.title)?.title || "",
+    note: kept?.note || others.find((r) => r.note)?.note || "",
+    album: kept?.album ?? others.find((r) => r.album)?.album ?? null,
+    starred: !!kept?.starred || others.some((r) => r.starred),
+    tags: [...(kept?.tags ?? []), ...others.flatMap((r) => r.tags)],
+  };
+  if (kept || others.length) organize(businessId, [keep], patch);
+
+  const has = (col: Parameters<typeof sql>[1], p: string) => sql`instr(${col}, ${JSON.stringify(p)}) > 0`;
+  db.transaction((tx) => {
+    for (const from of gone) {
+      for (const table of [schema.tasks, schema.deliverables, schema.humanMessages] as const) {
+        const hits = tx
+          .select({ id: table.id, attachments: table.attachments })
+          .from(table)
+          .where(and(eq(table.businessId, businessId), has(table.attachments, from)))
+          .all();
+        for (const r of hits) tx.update(table).set({ attachments: swapPath(r.attachments, from, keep) }).where(eq(table.id, r.id)).run();
+      }
+      const edits = tx
+        .select({ id: schema.edits.id, spec: schema.edits.spec })
+        .from(schema.edits)
+        .where(and(eq(schema.edits.businessId, businessId), has(schema.edits.spec, from)))
+        .all();
+      for (const e of edits) tx.update(schema.edits).set({ spec: swapPath(e.spec, from, keep) }).where(eq(schema.edits.id, e.id)).run();
+      tx.update(schema.edits)
+        .set({ output: keep })
+        .where(and(eq(schema.edits.businessId, businessId), eq(schema.edits.output, from)))
+        .run();
+      tx.update(schema.contextPages)
+        .set({ cover: keep })
+        .where(and(eq(schema.contextPages.businessId, businessId), eq(schema.contextPages.cover, from)))
+        .run();
+      const pages = tx
+        .select({ id: schema.contextPages.id, blocks: schema.contextPages.blocks })
+        .from(schema.contextPages)
+        .where(and(eq(schema.contextPages.businessId, businessId), has(schema.contextPages.blocks, from)))
+        .all();
+      for (const pg of pages) tx.update(schema.contextPages).set({ blocks: swapPath(pg.blocks, from, keep) }).where(eq(schema.contextPages.id, pg.id)).run();
+    }
+  });
+  return deleteFromLibrary(businessId, gone);
 }
 
 /** Organization for some files, for teammates' list_media. */

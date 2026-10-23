@@ -12,7 +12,7 @@ import { enqueueJob } from "@/lib/jobs";
 import { isServablePath } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { removeDeliverableFile, syncDeliverableFile } from "@/lib/workfiles";
-import { deleteFromLibrary, organize, type AssetPatch } from "@/lib/assets";
+import { deleteFromLibrary, findDuplicates, mergeDuplicates, organize, type AssetPatch } from "@/lib/assets";
 import { logEvent } from "@/lib/events";
 import { createTask } from "@/lib/tasks";
 
@@ -34,6 +34,21 @@ export async function organizeAssets(businessId: string, paths: string[], patch:
 export async function deleteAssets(businessId: string, paths: string[]) {
   ownBusiness(businessId);
   const n = deleteFromLibrary(businessId, paths);
+  refresh();
+  return n;
+}
+
+/** Library files with identical content, one kept per group. Reads only same-size files. */
+export async function findDuplicateAssets(businessId: string) {
+  ownBusiness(businessId);
+  return findDuplicates(businessId);
+}
+
+/** Remove extra copies, keeping one per group (labels and links move to the kept file). */
+export async function removeDuplicateAssets(businessId: string, groups: { keep: string; copies: string[] }[]) {
+  ownBusiness(businessId);
+  let n = 0;
+  for (const g of groups) n += await mergeDuplicates(businessId, g.keep, g.copies);
   refresh();
   return n;
 }

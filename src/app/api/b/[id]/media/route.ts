@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { t } from "@/lib/i18n";
+import { findSameFile } from "@/lib/assets";
 import { MEDIA_TYPES, describeMedia, mediaInfo, mediaKind, newMediaPath } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 
@@ -39,6 +40,10 @@ export async function POST(req: Request, ctx: RouteContext<"/api/b/[id]/media">)
     fs.rmSync(abs, { force: true });
     return Response.json({ error: t(lang, "chat.err.upload", { error: (err as Error).message }) }, { status: 500 });
   }
-  const info = await mediaInfo(abs);
-  return Response.json({ path: rel, name, kind: mediaKind(rel), info, label: describeMedia(rel, info) });
+  // The same file sent again (a photo re-sent in chat) reuses the one already in the library.
+  const same = await findSameFile(abs, rel).catch(() => null);
+  if (same) fs.rmSync(abs, { force: true });
+  const out = same ?? rel;
+  const info = await mediaInfo(path.join(dataDir(), out));
+  return Response.json({ path: out, name, kind: mediaKind(out), info, label: describeMedia(out, info), existing: !!same });
 }
