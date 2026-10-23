@@ -20,13 +20,14 @@ describe("budget helpers", () => {
     expect(overBudget(1000, 0)).toBe(false);
   });
 
-  it("parseBudget accepts positive dollar amounts only", () => {
+  it("parseBudget accepts dollar amounts, with 0 or blank meaning no limit", () => {
     expect(parseBudget("25")).toBe(25);
     expect(parseBudget("$12.5")).toBe(12.5);
-    expect(parseBudget("0")).toBeNull();
+    expect(parseBudget("0")).toBe(0);
     expect(parseBudget("-3")).toBeNull();
     expect(parseBudget("abc")).toBeNull();
-    expect(parseBudget("")).toBeNull();
+    expect(parseBudget("")).toBe(0);
+    expect(parseBudget("  ")).toBe(0);
     expect(parseBudget("99999")).toBe(1000);
   });
 });
