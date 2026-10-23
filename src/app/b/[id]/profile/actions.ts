@@ -16,7 +16,8 @@ import { refreshWorkspaces } from "@/lib/workspace";
 import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
 import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 import { setSupervised } from "@/lib/supervision";
-import { backendOf, isProvider, PROVIDER_DEFAULTS, type BackendSettings } from "@/lib/backend";
+import { backendOf, isProvider, PROVIDER_DEFAULTS, type BackendSettings, type ModelOption, type Provider } from "@/lib/backend";
+import { claudeModels, ollamaModels, openRouterModels } from "@/lib/model-catalog";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -216,7 +217,14 @@ export async function saveBackendAction(businessId: string, fd: FormData) {
   const key = str("apiKey");
   if (key) await setBackendKey(businessId, key);
   if (PROVIDER_DEFAULTS[provider].needsKey && !key && !(await backendKey(businessId))) throw new Error(t(biz.language, "profile.backend.err.key"));
-  const settings: BackendSettings = provider === "claude" ? { provider } : { provider, baseUrl, mainModel: str("mainModel"), fastModel: str("fastModel") };
+  const models = { mainModel: str("mainModel"), fastModel: str("fastModel") };
+  const route = String(fd.get("route") ?? "pick");
+  const settings: BackendSettings =
+    provider === "claude"
+      ? { provider, ...models }
+      : provider === "openrouter"
+        ? { provider, baseUrl, ...models, route: route === "free" || route === "auto" ? route : "pick", fallbackToFree: fd.get("fallbackToFree") === "on" }
+        : { provider, baseUrl, ...models };
   db.update(schema.businesses).set({ aiBackend: settings }).where(eq(schema.businesses.id, businessId)).run();
   refresh();
 }
@@ -244,10 +252,35 @@ export async function testBackendAction(businessId: string): Promise<{ ok: boole
       const key = await backendKey(businessId);
       if (!key) return { ok: false, message: t(lang, "profile.backend.err.key") };
       const res = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
-      return res.ok ? { ok: true, message: t(lang, "profile.backend.test.ok") } : { ok: false, message: t(lang, "profile.backend.test.http", { status: String(res.status) }) };
+      if (!res.ok) return { ok: false, message: t(lang, "profile.backend.test.http", { status: String(res.status) }) };
+      // The chosen models exist and can call tools (teammates need them).
+      const catalog = new Map((await openRouterModels()).map((m) => [m.id, m]));
+      const wanted = [...new Set([b.mainModel, b.fastModel])];
+      const unknown = wanted.filter((m) => !catalog.has(m));
+      if (unknown.length) return { ok: false, message: t(lang, "profile.backend.test.unknownModel", { models: unknown.join(", ") }) };
+      const noTools = wanted.filter((m) => !catalog.get(m)?.tools);
+      if (noTools.length) return { ok: false, message: t(lang, "profile.backend.test.noTools", { models: noTools.join(", ") }) };
+      return { ok: true, message: t(lang, "profile.backend.test.ok") };
     }
     return { ok: true, message: t(lang, "profile.backend.test.claude") };
   } catch {
     return { ok: false, message: t(lang, "profile.backend.test.unreachable", { url: b.baseUrl }) };
+  }
+}
+
+/**
+ * Models for the picker on Business → AI backend. Ollama is asked at `baseUrl` (the
+ * field as typed, so a new address works before saving). Only reads catalogs.
+ */
+export async function listModelsAction(businessId: string, provider: Provider, baseUrl?: string): Promise<{ models: ModelOption[]; error?: string }> {
+  const biz = db.select({ language: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  try {
+    if (provider === "claude") return { models: claudeModels() };
+    if (provider === "openrouter") return { models: await openRouterModels() };
+    const url = baseUrl && /^https?:\/\/[^\s]+$/.test(baseUrl) ? baseUrl : undefined;
+    return { models: await ollamaModels(backendOf({ provider: "ollama", baseUrl: url })) };
+  } catch {
+    return { models: [], error: t(biz.language, provider === "ollama" ? "profile.backend.picker.ollamaDown" : "profile.backend.picker.catalogDown") };
   }
 }

@@ -10,7 +10,9 @@ import type { Backend } from "@/lib/backend";
 export function languageModel(backend: Backend, modelId: string, key: string | null): LanguageModel {
   if (backend.provider === "openrouter") {
     // Usage accounting makes OpenRouter report each call's real cost (costOf below).
-    return createOpenRouter({ apiKey: key ?? "", baseURL: backend.baseUrl }).chat(modelId, { usage: { include: true } });
+    // `models`: OpenRouter tries them in order when one is down, rate-limited or out of credits.
+    const models = backend.fallbacks.length ? [modelId, ...backend.fallbacks.filter((m) => m !== modelId)] : undefined;
+    return createOpenRouter({ apiKey: key ?? "", baseURL: backend.baseUrl }).chat(modelId, { usage: { include: true }, models });
   }
   if (backend.provider === "ollama") {
     // Ollama's OpenAI-compatible API; it needs a key to be set, not a real one.

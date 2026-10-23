@@ -94,14 +94,14 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
     if (backend.provider === "openrouter" && !key) {
       return { text: "", structured: undefined, sessionId: undefined, costUsd: 0, ok: false, error: "No OpenRouter API key: add it in Business → AI backend." };
     }
-    return runWithAiSdk<T>(opts, backend, opts.model === MODELS.fast ? backend.fastModel : backend.mainModel, key);
+    return runWithAiSdk<T>(opts, backend, modelFor(backend, opts.model), key);
   }
 
   const q = query({
     prompt: opts.prompt,
     options: {
       cwd: opts.cwd,
-      model: opts.model ?? MODELS.main,
+      model: modelFor(backend, opts.model),
       systemPrompt: opts.systemPrompt,
       // Isolation: ignore ~/.claude and project settings, hooks, CLAUDE.md and MCP config.
       settingSources: [],
@@ -188,6 +188,16 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<RunA
 /** Where this business's sessions are kept (for resuming them): Claude Code's, or the AI SDK engine's. */
 export function claudeConfigDir(businessId: string) {
   return businessBackend(businessId).provider === "claude" ? path.join(os.homedir(), ".claude") : AGENT_SESSIONS_DIR;
+}
+
+/**
+ * The model for a run: callers ask for MODELS.main or MODELS.fast, and the business's
+ * backend says which model that is (Business → AI backend; blank on Claude = MODELS).
+ */
+function modelFor(backend: Backend, requested: string | undefined) {
+  const fast = requested === MODELS.fast;
+  if (backend.provider === "claude") return fast ? backend.fastModel || MODELS.fast : backend.mainModel || MODELS.main;
+  return fast ? backend.fastModel : backend.mainModel;
 }
 
 /** The business's backend, read per run so a switch applies to the next run. */

@@ -42,15 +42,24 @@ describe("supervised mode", () => {
 });
 
 describe("AI backend", () => {
-  it("defaults to Claude Code", () => {
-    expect(backendOf(null)).toEqual({ provider: "claude", baseUrl: "", mainModel: "", fastModel: "" });
+  it("defaults to Claude Code; Claude models can be chosen", () => {
+    expect(backendOf(null)).toEqual({ provider: "claude", baseUrl: "", mainModel: "", fastModel: "", fallbacks: [] });
+    expect(backendOf({ provider: "claude", mainModel: "claude-sonnet-5-5" })).toMatchObject({ mainModel: "claude-sonnet-5-5", fastModel: "" });
   });
 
   it("fills in the provider's defaults; the fast model falls back to the main one", () => {
-    expect(backendOf({ provider: "ollama", mainModel: "qwen3-coder:30b" })).toEqual({ provider: "ollama", baseUrl: "http://localhost:11434", mainModel: "qwen3-coder:30b", fastModel: "qwen3-coder:30b" });
+    expect(backendOf({ provider: "ollama", mainModel: "qwen3-coder:30b" })).toEqual({ provider: "ollama", baseUrl: "http://localhost:11434", mainModel: "qwen3-coder:30b", fastModel: "qwen3-coder:30b", fallbacks: [] });
     expect(backendOf({ provider: "ollama", baseUrl: "http://box:11434/v1/", mainModel: "m" }).baseUrl).toBe("http://box:11434");
     const b = backendOf({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1/", mainModel: "a/main", fastModel: "a/fast" });
-    expect(b).toEqual({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", mainModel: "a/main", fastModel: "a/fast" });
+    expect(b).toEqual({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", mainModel: "a/main", fastModel: "a/fast", fallbacks: [] });
+  });
+
+  it("routes OpenRouter to the free or auto router, with free models as a fallback", () => {
+    expect(backendOf({ provider: "openrouter", route: "free", mainModel: "a/main" })).toMatchObject({ mainModel: "openrouter/free", fastModel: "openrouter/free", fallbacks: [] });
+    expect(backendOf({ provider: "openrouter", route: "auto", fallbackToFree: true })).toMatchObject({ mainModel: "openrouter/auto", fallbacks: ["openrouter/free"] });
+    expect(backendOf({ provider: "openrouter", mainModel: "a/main", fallbackToFree: true }).fallbacks).toEqual(["openrouter/free"]);
+    // Routes are OpenRouter's: Ollama ignores them.
+    expect(backendOf({ provider: "ollama", route: "free", mainModel: "m" }).mainModel).toBe("m");
   });
 });
 
