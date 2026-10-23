@@ -148,7 +148,8 @@ export function useSidebar(): SidebarCtx {
 
 /* ------------------------------------------------------------------ shell */
 
-export type ShellFolder = { dir: string; name: string; path: string; status: string | null; isOpen: boolean };
+/** `running`: another business working in the background (desktop app). */
+export type ShellFolder = { dir: string; name: string; path: string; status: string | null; isOpen: boolean; running: boolean };
 export type ShellTeammate = { id: string; name: string; title: string; color: string; state: string };
 export type ShellSpend = { today: number; week: number; cap: number; over: boolean };
 
@@ -558,6 +559,7 @@ function WorkspaceSwitcher({ businessName, folders, inApp }: { businessName: str
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="truncate font-medium">{f.name}</span>
+                  {f.running && <span role="img" aria-label={t("nav.runningInBackground")} title={t("nav.runningInBackground")} className="size-1.5 shrink-0 rounded-full bg-success" />}
                   {tone && f.status !== "active" && <Badge tone={tone.tone}>{t(tone.label)}</Badge>}
                 </span>
                 <span className="block truncate text-xs text-tertiary">{f.path}</span>

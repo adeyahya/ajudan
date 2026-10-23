@@ -11,7 +11,7 @@ import { chromeLang } from "@/lib/i18n/server";
 import { statusTone } from "@/lib/status-tones";
 import { folderWorker } from "@/lib/worker-lock";
 import { openFolder } from "./actions";
-import { AppOpenButton, FolderMenu, NewBusinessDialog, OpenFolderDialog, SiteHeaderActions } from "./home-forms";
+import { AppOpenButton, AppStopButton, FolderMenu, NewBusinessDialog, OpenFolderDialog, SiteHeaderActions } from "./home-forms";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
 
@@ -101,7 +101,10 @@ function FolderRow({ f, isOpen, lang }: { f: FolderInfo; isOpen: boolean; lang: 
   let action: ReactNode = null;
   if (f.exists && f.businessId) {
     action = IN_APP ? (
-      <AppOpenButton dir={f.dir} label={isOpen ? t(lang, "home.showWindow") : t(lang, "home.openInWindow")} />
+      <>
+        {isOpen && <AppStopButton dir={f.dir} name={f.name} label={t(lang, "home.stop")} title={t(lang, "home.stopTitle")} />}
+        <AppOpenButton dir={f.dir} label={isOpen ? t(lang, "home.switchToRunning") : t(lang, "home.start")} />
+      </>
     ) : (
       <form action={openFolder.bind(null, f.dir)}>
         <Button type="submit" size="sm" variant={isOpen ? "primary" : "secondary"}>

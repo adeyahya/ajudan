@@ -1,7 +1,8 @@
 /**
- * Running inside the Ajudan desktop app (electron/main.cjs)? There, every business
- * has its own window, web server and worker pinned to its folder, and the
- * Businesses window opens folders in new windows instead of switching.
+ * Running inside the Ajudan desktop app (electron/main.cjs)? There, every open
+ * business has its own web server and worker pinned to its folder and keeps working
+ * in the background; the one window switches between them (window.ajudan.openFolder)
+ * instead of this server switching folders.
  */
 export const IN_APP = process.env.AJUDAN_APP === "1";
 

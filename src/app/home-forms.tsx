@@ -4,6 +4,7 @@ import { Ellipsis, FolderOpen, Plus, Trash2 } from "lucide-react";
 import { useActionState, useEffect, useId, useState, useSyncExternalStore, useTransition, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button, Field, IconButton, Input } from "@/components/kit";
 import { LangField, useT } from "@/components/i18n";
@@ -58,6 +59,34 @@ export function AppOpenButton({ dir, label }: { dir: string; label: string }) {
           await appBridge()?.openFolder(dir);
         } finally {
           setTimeout(() => setOpening(false), 1500);
+        }
+      }}
+    >
+      {label}
+    </Button>
+  );
+}
+
+/** Stop a business running in the background (desktop app); the list then shows it stopped. */
+export function AppStopButton({ dir, name, label, title }: { dir: string; name: string; label: string; title: string }) {
+  const t = useT();
+  const router = useRouter();
+  const [stopping, setStopping] = useState(false);
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      title={title}
+      loading={stopping}
+      disabled={stopping}
+      onClick={async () => {
+        setStopping(true);
+        try {
+          if (await appBridge()?.stopFolder?.(dir)) toast(t("home.stopped", { name }));
+        } finally {
+          setStopping(false);
+          router.refresh();
         }
       }}
     >

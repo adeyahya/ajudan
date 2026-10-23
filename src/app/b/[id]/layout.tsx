@@ -4,6 +4,7 @@ import { I18nProvider } from "@/components/i18n";
 import { IN_APP } from "@/lib/app-mode";
 import { getBusiness, getSpend, listTeammates, pendingApprovalCount } from "@/lib/data";
 import { knownFolders } from "@/lib/folders";
+import { folderWorker } from "@/lib/worker-lock";
 import { uiLang } from "@/lib/i18n";
 import { currentDataDir } from "@/lib/paths";
 import { AppShell, type ShellFolder } from "./nav";
@@ -52,10 +53,11 @@ async function BusinessShell({ params, children }: { params: LayoutProps<"/b/[id
   const pinnedDev = Boolean(process.env.AJUDAN_DATA_DIR) && !IN_APP;
   const folders: ShellFolder[] = (pinnedDev ? [] : knownFolders())
     .filter((f) => f.exists)
-    .map((f) => ({ dir: f.dir, name: f.name, path: tilde(f.dir), status: f.status, isOpen: f.dir === open }))
+    // In the app, other businesses may be working in the background (their worker holds the lock).
+    .map((f) => ({ dir: f.dir, name: f.name, path: tilde(f.dir), status: f.status, isOpen: f.dir === open, running: IN_APP && f.dir !== open && folderWorker(f.dir) !== null }))
     .sort((a, b) => Number(b.isOpen) - Number(a.isOpen));
   if (open && !folders.some((f) => f.isOpen)) {
-    folders.unshift({ dir: open, name: biz?.name ?? open, path: tilde(open), status: biz?.status ?? null, isOpen: true });
+    folders.unshift({ dir: open, name: biz?.name ?? open, path: tilde(open), status: biz?.status ?? null, isOpen: true, running: false });
   }
 
   return (

@@ -1,8 +1,10 @@
 /**
- * Ajudan desktop app. Every business runs in its own window with its own web server
- * and worker, pinned to that business folder (AJUDAN_DATA_DIR), so several
- * businesses work at the same time. A "Businesses" window (no worker) lists the
- * folders and opens them.
+ * Ajudan desktop app. Every open business runs its own web server and worker, pinned
+ * to that business folder (AJUDAN_DATA_DIR), so several businesses work at the same
+ * time, headless. One window shows one of them at a time; switching (like Notion's
+ * workspaces) points the window at another business's server and leaves the rest
+ * running. The Businesses list (a web server with no folder and no worker) opens,
+ * switches and stops them. Closing the window keeps them working; quitting stops all.
  *
  *   pnpm app            build the web app, then open Ajudan
  *   pnpm app:package    make Ajudan.app (a small shell that runs this repo)
@@ -41,8 +43,11 @@ process.env.PATH = [loginPath(), process.env.PATH, "/opt/homebrew/bin", "/usr/lo
   .filter(Boolean)
   .join(":");
 
-/** key (folder path or HOME_KEY) → { win, web, worker, port, dir } */
+/** key (folder path or HOME_KEY) → { web, worker, port, dir, ready } */
 const sessions = new Map();
+/** The one window, and the session it shows. */
+let mainWindow = null;
+let active = null;
 let quitting = false;
 
 function readState() {
@@ -53,11 +58,15 @@ function readState() {
   }
 }
 
-function saveOpenWindows() {
-  if (quitting) return;
+/** The running businesses (still called `windows`, so older builds read it) and the one on screen. */
+function writeState() {
   const windows = [...sessions.keys()].filter((k) => k !== HOME_KEY);
   fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(STATE_PATH, JSON.stringify({ ...readState(), windows }, null, 2));
+  fs.writeFileSync(STATE_PATH, JSON.stringify({ ...readState(), windows, active: active !== HOME_KEY ? active : null }, null, 2));
+}
+
+function saveState() {
+  if (!quitting) writeState();
 }
 
 function freePort() {
@@ -138,13 +147,15 @@ function businessName(dir) {
   return path.basename(dir);
 }
 
-function createWindow(key, title) {
+const titleFor = (key) => (key && key !== HOME_KEY ? `Ajudan · ${businessName(key)}` : "Ajudan · Businesses");
+
+function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title,
+    title: "Ajudan",
     backgroundColor: "#1f1724",
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: true },
   });
@@ -160,42 +171,96 @@ function createWindow(key, title) {
       shell.openExternal(url);
     }
   });
+  // Closing the window hides the businesses, it doesn't stop them (the Dock icon brings it back).
   win.on("closed", () => {
-    void stopSession(key);
+    if (mainWindow === win) mainWindow = null;
   });
   return win;
 }
 
-async function openSession(key, dir) {
+/** The window, made if it was closed, in front. */
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return mainWindow;
+}
+
+/** Load what `key`'s session has on screen, if it's still the one to show. */
+function present(key, url) {
+  if (active !== key || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setTitle(titleFor(key));
+  mainWindow.loadURL(url);
+}
+
+/** Start a business (or the Businesses list) in the background; returns its session. */
+function startSession(key, dir) {
   const existing = sessions.get(key);
   if (existing) {
-    if (existing.win.isMinimized()) existing.win.restore();
-    existing.win.focus();
-    return;
+    // Something stopped (a crashed server, a failed start): the next switch starts it again.
+    if (existing.dir && !existing.worker && !existing.starting) {
+      existing.worker = startWorker(existing.dir);
+      watchWorker(key, existing);
+    }
+    if (!existing.web && !existing.starting) {
+      existing.ready = startWebFor(key, existing);
+      existing.ready.catch(() => {});
+    }
+    return existing;
   }
-  const title = dir ? `Ajudan · ${businessName(dir)}` : "Ajudan · Businesses";
-  const win = createWindow(key, title);
-  const session = { win, dir, web: null, worker: null, port: null };
+  const session = { dir, web: null, worker: null, port: null, ready: null, starting: true };
   sessions.set(key, session);
-  saveOpenWindows();
-  win.loadURL(loadingPage(dir ? `Opening ${businessName(dir)}…` : "Opening…", dir ? dir : "Starting the web app"));
-  try {
-    await ensureBuild(win);
-    session.port = await freePort();
-    session.web = startWeb(dir, session.port);
+  saveState();
+  session.ready = (async () => {
+    try {
+      await ensureBuild(key);
+    } finally {
+      session.starting = false;
+    }
+    if (sessions.get(key) !== session) return;
     if (dir) {
       session.worker = startWorker(dir);
       watchWorker(key, session);
     }
-    session.web.on("exit", (code) => {
-      if (!quitting && sessions.get(key) === session && !win.isDestroyed()) {
-        win.loadURL(loadingPage("The web server stopped", `Exit code ${code}. See ${dir ? path.join(dir, "logs/web.log") : "~/.ajudan/logs/web.log"}. Close this window and open it again.`));
-      }
-    });
-    await waitForServer(session.port, session.web);
-    if (!win.isDestroyed()) win.loadURL(`http://127.0.0.1:${session.port}/`);
+    await startWebFor(key, session);
+  })();
+  // A failure shows when the session is on screen (switchTo); the next switch tries again.
+  session.ready.catch(() => {});
+  return session;
+}
+
+async function startWebFor(key, session) {
+  session.starting = true;
+  try {
+    session.port = await freePort();
+  } finally {
+    session.starting = false;
+  }
+  const web = startWeb(session.dir, session.port);
+  session.web = web;
+  web.on("exit", (code) => {
+    if (session.web === web) session.web = null;
+    if (quitting || sessions.get(key) !== session) return;
+    present(key, loadingPage("The web server stopped", `Exit code ${code}. See ${session.dir ? path.join(session.dir, "logs/web.log") : "~/.ajudan/logs/web.log"}. Open it again from the Businesses list to restart it.`));
+  });
+  await waitForServer(session.port, web);
+}
+
+/** Show `key` in the window (starting it first if needed); the others keep running. */
+async function switchTo(key, dir) {
+  const win = showWindow();
+  active = key;
+  saveState();
+  const session = startSession(key, dir);
+  win.setTitle(titleFor(key));
+  if (session.web && session.port && win.webContents.getURL().startsWith(`http://127.0.0.1:${session.port}/`)) return;
+  win.loadURL(loadingPage(dir ? `Opening ${businessName(dir)}…` : "Opening…", dir ? dir : "Starting the web app"));
+  try {
+    await session.ready;
+    present(key, `http://127.0.0.1:${session.port}/`);
   } catch (err) {
-    if (!win.isDestroyed()) win.loadURL(loadingPage("Couldn't open", String(err.message || err)));
+    present(key, loadingPage("Couldn't open", String(err.message || err)));
   }
 }
 
@@ -211,20 +276,23 @@ const WORKER_MAX_RESTARTS = 3;
 function watchWorker(key, session) {
   const child = session.worker;
   child.on("exit", (code, signal) => {
-    if (quitting || sessions.get(key) !== session || session.win.isDestroyed()) return;
+    if (quitting || sessions.get(key) !== session) return;
     const now = Date.now();
     session.workerExits = (session.workerExits ?? []).filter((t) => now - t < WORKER_RESTART_WINDOW_MS);
     session.workerExits.push(now);
     const n = session.workerExits.length;
     const log = logStream(session.dir, "worker");
     if (n > WORKER_MAX_RESTARTS) {
+      // Opening the business again (switching to it) tries once more.
+      session.worker = null;
+      session.workerExits = [];
       log.end(`--- ${new Date().toISOString()} worker stopped (${signal ?? code}) ${n - 1} times in ${WORKER_RESTART_WINDOW_MS / 60_000} min; not restarting ---\n`);
       return;
     }
     const delay = 2000 * 2 ** (n - 1);
     log.end(`--- ${new Date().toISOString()} worker stopped (${signal ?? code}); restarting in ${delay / 1000}s (${n}/${WORKER_MAX_RESTARTS}) ---\n`);
     setTimeout(() => {
-      if (quitting || sessions.get(key) !== session || session.win.isDestroyed()) return;
+      if (quitting || sessions.get(key) !== session) return;
       session.worker = startWorker(session.dir);
       watchWorker(key, session);
     }, delay);
@@ -256,7 +324,7 @@ async function stopSession(key) {
   const s = sessions.get(key);
   if (!s) return;
   sessions.delete(key);
-  saveOpenWindows();
+  saveState();
   // The worker first: it stops WhatsApp sync and puts running work back in the queue.
   await stopChild(s.worker);
   await stopChild(s.web, 3000);
@@ -264,15 +332,16 @@ async function stopSession(key) {
 
 let building;
 /** The app serves the production build; make it if it's missing. */
-function ensureBuild(win) {
+function ensureBuild(key) {
   if (fs.existsSync(path.join(REPO, ".next", "BUILD_ID"))) return Promise.resolve();
+  const say = (title, detail) => present(active ?? key, loadingPage(title, detail));
   building ??= new Promise((resolve, reject) => {
-    win.loadURL(loadingPage("Building Ajudan…", "First start: building the web app. This takes a minute."));
+    say("Building Ajudan…", "First start: building the web app. This takes a minute.");
     const child = run("build", [path.join(REPO, "node_modules/next/dist/bin/next"), "build"], {});
     child.on("exit", async (code) => {
       if (code === 0) return resolve();
       // Often another build is running (`pnpm app`, `pnpm build`): wait for its result.
-      win.loadURL(loadingPage("Waiting for the build…", "Another build of Ajudan is running. This window opens when it's done."));
+      say("Waiting for the build…", "Another build of Ajudan is running. This window opens when it's done.");
       const until = Date.now() + 5 * 60_000;
       while (Date.now() < until) {
         if (fs.existsSync(path.join(REPO, ".next", "BUILD_ID"))) return resolve();
@@ -284,8 +353,18 @@ function ensureBuild(win) {
   return building;
 }
 
-const openHome = () => openSession(HOME_KEY, null);
-const openFolder = (dir) => openSession(path.resolve(dir), path.resolve(dir));
+const openHome = () => switchTo(HOME_KEY, null);
+const openFolder = (dir) => switchTo(path.resolve(dir), path.resolve(dir));
+
+/** Stop a business's worker and server; if it was on screen, show the Businesses list. */
+async function stopFolder(dir) {
+  const key = path.resolve(dir);
+  if (!sessions.has(key)) return false;
+  if (active === key) present(key, loadingPage(`Stopping ${businessName(key)}…`, "Its team finishes what it can and puts the rest back in the queue."));
+  await stopSession(key);
+  if (active === key) await openHome();
+  return true;
+}
 
 ipcMain.handle("ajudan:open-folder", (_e, dir) => {
   if (typeof dir !== "string" || !fs.existsSync(path.join(dir, "ajudan.db"))) throw new Error("Not a business folder");
@@ -294,10 +373,14 @@ ipcMain.handle("ajudan:open-folder", (_e, dir) => {
 });
 // A folder chosen in the system dialog (connecting a code repository), or null when cancelled.
 ipcMain.handle("ajudan:pick-folder", async (e) => {
-  const win = BrowserWindow.fromWebContents(e.sender);
+  const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow;
   const opts = { properties: ["openDirectory"], defaultPath: path.join(os.homedir(), "dev") };
   const r = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts));
   return r.canceled ? null : (r.filePaths[0] ?? null);
+});
+ipcMain.handle("ajudan:stop-folder", (_e, dir) => {
+  if (typeof dir !== "string") throw new Error("Not a business folder");
+  return stopFolder(dir);
 });
 ipcMain.handle("ajudan:show-home", () => {
   void openHome();
@@ -311,6 +394,12 @@ function buildMenu() {
       label: "File",
       submenu: [
         { label: "Businesses…", accelerator: "CmdOrCtrl+N", click: () => void openHome() },
+        {
+          label: "Stop This Business",
+          click: () => {
+            if (active && active !== HOME_KEY) void stopFolder(active);
+          },
+        },
         {
           label: "Open Business Folder…",
           accelerator: "CmdOrCtrl+O",
@@ -329,7 +418,7 @@ function buildMenu() {
         {
           label: "Show Logs",
           click: () => {
-            const s = [...sessions.values()].find((x) => x.win.isFocused());
+            const s = active ? sessions.get(active) : null;
             shell.openPath(s?.dir ? path.join(s.dir, "logs") : path.join(STATE_DIR, "logs"));
           },
         },
@@ -347,27 +436,34 @@ function buildMenu() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => void openHome());
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) showWindow();
+    else void (active ? switchTo(active, active === HOME_KEY ? null : active) : openHome());
+  });
   app.whenReady().then(() => {
     buildMenu();
-    const last = (readState().windows || []).filter((d) => fs.existsSync(path.join(d, "ajudan.db")));
-    if (last.length) last.forEach((d) => void openFolder(d));
+    // Start every business that was running; show the one that was on screen.
+    const state = readState();
+    const last = (state.windows || []).filter((d) => fs.existsSync(path.join(d, "ajudan.db"))).map((d) => path.resolve(d));
+    const show = last.find((d) => d === state.active) ?? last[0];
+    for (const d of last) if (d !== show) startSession(d, d);
+    if (show) void openFolder(show);
     else void openHome();
   });
   app.on("activate", () => {
-    if (!sessions.size) void openHome();
+    if (mainWindow && !mainWindow.isDestroyed()) return showWindow();
+    if (active && sessions.has(active)) void switchTo(active, active === HOME_KEY ? null : active);
+    else void openHome();
   });
-  // macOS: closing every window keeps the app in the Dock (nothing runs).
+  // macOS: closing the window keeps the app (and every running business) going in the Dock.
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
   app.on("before-quit", (e) => {
     if (quitting) return;
     e.preventDefault();
-    // Remember which businesses were open, then stop everything.
-    const windows = [...sessions.keys()].filter((k) => k !== HOME_KEY);
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.writeFileSync(STATE_PATH, JSON.stringify({ ...readState(), windows }, null, 2));
+    // Remember which businesses were running and which was on screen, then stop everything.
+    writeState();
     quitting = true;
     Promise.allSettled([...sessions.keys()].map((k) => stopSession(k))).finally(() => app.exit(0));
   });

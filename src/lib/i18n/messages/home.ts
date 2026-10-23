@@ -2,7 +2,7 @@
 export const en = {
   "home.title": "Your businesses",
   "home.subtitleApp":
-    "Each business lives in its own folder: its team, work, history and logged-in browser. Open one per window; every open window keeps working at the same time.",
+    "Each business lives in its own folder: its team, work, history and logged-in browser. Every running business keeps working in the background; the window shows one at a time.",
   "home.subtitleWeb":
     "Each business lives in its own folder: its team, work, history and logged-in browser. Only the open business works; the others are paused until you switch back.",
   "home.newTitle": "Start a new business",
@@ -17,8 +17,11 @@ export const en = {
   "home.open": "Open",
   "home.paused": "Paused",
   "home.noWebsite": "No website",
-  "home.showWindow": "Show window",
-  "home.openInWindow": "Open in a window",
+  "home.switchToRunning": "Switch to",
+  "home.start": "Open",
+  "home.stop": "Stop",
+  "home.stopTitle": "Stop its team until you open it again",
+  "home.stopped": "{name} stopped",
   "home.removeTitle": "Remove from this list. The folder stays on disk.",
   "home.remove": "Remove from list",
   "home.continue": "Continue",
@@ -55,7 +58,7 @@ export const en = {
 export const id: Record<keyof typeof en, string> = {
   "home.title": "Bisnis kamu",
   "home.subtitleApp":
-    "Setiap bisnis punya foldernya sendiri: tim, hasil kerja, riwayat, dan browser yang sudah login. Buka satu bisnis per jendela; semua jendela yang terbuka tetap bekerja bersamaan.",
+    "Setiap bisnis punya foldernya sendiri: tim, hasil kerja, riwayat, dan browser yang sudah login. Semua bisnis yang berjalan tetap bekerja di latar belakang; jendela menampilkan satu per satu.",
   "home.subtitleWeb":
     "Setiap bisnis punya foldernya sendiri: tim, hasil kerja, riwayat, dan browser yang sudah login. Hanya bisnis yang sedang dibuka yang bekerja; yang lain berhenti dulu sampai kamu pindah lagi.",
   "home.newTitle": "Mulai bisnis baru",
@@ -70,8 +73,11 @@ export const id: Record<keyof typeof en, string> = {
   "home.open": "Dibuka",
   "home.paused": "Berhenti sementara",
   "home.noWebsite": "Tanpa website",
-  "home.showWindow": "Tampilkan jendela",
-  "home.openInWindow": "Buka di jendela",
+  "home.switchToRunning": "Pindah ke sini",
+  "home.start": "Buka",
+  "home.stop": "Hentikan",
+  "home.stopTitle": "Hentikan timnya sampai kamu membukanya lagi",
+  "home.stopped": "{name} dihentikan",
   "home.removeTitle": "Hapus dari daftar ini. Foldernya tetap ada di disk.",
   "home.remove": "Hapus dari daftar",
   "home.continue": "Lanjutkan",
