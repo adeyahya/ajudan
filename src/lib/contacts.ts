@@ -25,7 +25,7 @@ function businessLanguage(businessId: string) {
 }
 
 /** Clean one contact's fields; an error when something can't be saved. */
-export function cleanContact(input: ContactInput, language: string): { value: Omit<Contact, "id" | "businessId" | "createdAt"> } | { error: string } {
+export function cleanContact(input: ContactInput, language: string): { value: Omit<Contact, "id" | "businessId" | "createdAt" | "createdBy"> } | { error: string } {
   const name = input.name.trim().slice(0, 120);
   if (!name) return { error: "A contact needs a name." };
   let phone: string | null = null;
@@ -177,6 +177,42 @@ export function describeContact(c: Contact) {
   if (c.email) bits.push(c.email);
   if (c.tags.length) bits.push(c.tags.map((t) => `#${t}`).join(" "));
   return `- ${bits.join(" · ")}${c.notes ? `\n  Notes: ${c.notes.replace(/\s+/g, " ")}` : ""}`;
+}
+
+/**
+ * A teammate's save_contact: update the person if they're already in the address book
+ * (by id, then phone, then exact name), changing only the fields given (tags are added,
+ * notes appended), or add them. Returns whether it was new.
+ */
+export function upsertContact(businessId: string, input: Partial<ContactInput> & { id?: string }, by: string) {
+  const language = businessLanguage(businessId);
+  const all = listContacts(businessId);
+  const phone = input.phone?.trim() ? normalizePhone(input.phone, language) : null;
+  if (input.phone?.trim() && !phone) return { error: `"${input.phone}" isn't a phone number. Use the country code, e.g. +62 812…` };
+  const cur =
+    (input.id && all.find((c) => c.id === input.id)) ||
+    (phone && all.find((c) => c.phone === phone)) ||
+    (input.name?.trim() && all.find((c) => c.name.toLowerCase() === input.name!.trim().toLowerCase())) ||
+    undefined;
+  if (input.id && !cur) return { error: `No contact with id ${input.id}.` };
+  const tags = Array.isArray(input.tags) ? input.tags : (input.tags ?? "").split(/[,;]/);
+  const notes = input.notes?.trim();
+  const merged: ContactInput = {
+    name: input.name?.trim() || cur?.name || "",
+    phone: input.phone?.trim() ? input.phone : (cur?.phone ? `+${cur.phone}` : undefined),
+    email: input.email?.trim() || cur?.email || undefined,
+    company: input.company?.trim() || cur?.company || undefined,
+    kind: input.kind || cur?.kind,
+    tags: [...(cur?.tags ?? []), ...tags],
+    notes: cur?.notes && notes && !cur.notes.includes(notes) ? `${cur.notes}\n${notes}` : notes || cur?.notes,
+  };
+  const c = cleanContact(merged, language);
+  if ("error" in c) return c;
+  if (cur) {
+    const row = db.update(schema.contacts).set(c.value).where(eq(schema.contacts.id, cur.id)).returning().get();
+    return { contact: row, created: false };
+  }
+  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value, createdBy: by }).returning().get(), created: true };
 }
 
 /** An address-book entry whose name matches exactly (for WhatsApp targets). */

@@ -4,6 +4,7 @@ import type { Approval, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
 import { normalizeHost, setSecret } from "@/lib/secrets";
 import { createTask } from "@/lib/tasks";
+import { EDIT_LABELS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 
 /**
  * When a teammate hits something it can't do (no API key, no shell, a site that isn't
@@ -21,7 +22,8 @@ export type CapabilityRequest =
   | { kind: "browser"; why: string }
   | { kind: "browser_site"; site: string; why: string }
   | { kind: "whatsapp"; why: string }
-  | { kind: "repos"; why: string };
+  | { kind: "repos"; why: string }
+  | { kind: "edit"; area: EditArea; why: string };
 
 export function describeCapability(who: string, r: CapabilityRequest) {
   switch (r.kind) {
@@ -39,18 +41,20 @@ export function describeCapability(who: string, r: CapabilityRequest) {
       return `${who} wants to use WhatsApp`;
     case "repos":
       return `${who} wants to read the connected code repositories and use their GitHub issues`;
+    case "edit":
+      return `${who} wants the team to ${EDIT_LABELS[r.area]} by itself`;
   }
 }
 
 /** Same request already waiting? (Teammates retry; one card is enough.) */
 function pendingSame(teammateId: string, r: CapabilityRequest) {
-  const key = JSON.stringify(r, ["kind", "name", "domain", "site"]);
+  const key = JSON.stringify(r, ["kind", "name", "domain", "site", "area"]);
   return db
     .select()
     .from(schema.approvals)
     .where(and(eq(schema.approvals.teammateId, teammateId), eq(schema.approvals.toolName, CAPABILITY), eq(schema.approvals.status, "pending")))
     .all()
-    .find((a) => JSON.stringify(a.input, ["kind", "name", "domain", "site"]) === key);
+    .find((a) => JSON.stringify(a.input, ["kind", "name", "domain", "site", "area"]) === key);
 }
 
 export function requestCapability(p: { businessId: string; teammate: Pick<Teammate, "id" | "name">; taskId: string; request: CapabilityRequest }) {
@@ -114,6 +118,10 @@ export async function grantCapability(approval: Approval, opts: { secretValue?: 
     case "repos":
       setMate({ repoAccess: true });
       granted = "the connected code repositories (read-only) and their GitHub issues (list_repos)";
+      break;
+    case "edit":
+      setTeamEdit(business.id, r.area, true);
+      granted = `permission for the whole team to ${EDIT_LABELS[r.area]}`;
       break;
   }
 

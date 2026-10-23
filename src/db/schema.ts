@@ -53,6 +53,11 @@ export const businesses = sqliteTable("businesses", {
   contextTidy: text("context_tidy").$type<"weekly">(),
   /** When the last reorganize review finished. */
   contextTidiedAt: integer("context_tidied_at", { mode: "timestamp_ms" }),
+  /**
+   * What the AI team may change itself, per area (Business → Team permissions). Missing
+   * keys take the defaults in src/lib/team-edits.ts.
+   */
+  teamEdits: text("team_edits", { mode: "json" }).$type<Partial<Record<import("@/lib/team-edits").EditArea, boolean>>>(),
   createdAt: createdAt(),
 });
 
@@ -386,6 +391,8 @@ export const contacts = sqliteTable("contacts", {
   kind: text("kind").$type<ContactKind>().notNull().default("customer"),
   tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
   notes: text("notes").notNull().default(""),
+  /** "owner", or "teammate:<id>" for a contact a teammate added (save_contact). */
+  createdBy: text("created_by").notNull().default("owner"),
   createdAt: createdAt(),
 });
 

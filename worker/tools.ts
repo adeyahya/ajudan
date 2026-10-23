@@ -14,9 +14,9 @@ import { logEvent } from "@/lib/events";
 import { slugify } from "@/lib/folders";
 import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from "@/lib/free-assets";
 import { renderHtmlToPng } from "@/lib/images";
-import { assetRows, describeOrganization } from "@/lib/assets";
-import { describeContact, listContacts, searchAddressBook } from "@/lib/contacts";
-import { createSuggestion, findPage, listPages, pageForAgents, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
+import { assetRows, describeOrganization, organize } from "@/lib/assets";
+import { CONTACT_KINDS, describeContact, listContacts, searchAddressBook, upsertContact } from "@/lib/contacts";
+import { applyPageEdit, createSuggestion, findPage, listPages, pageForAgents, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask, delegatedInstructions, delegationDepth, deriveTaskTitle, MAX_DELEGATION_DEPTH, ownerRequest } from "@/lib/tasks";
@@ -26,6 +26,7 @@ import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
+import { canTeamEdit, EDIT_AREAS, editOffMessage } from "@/lib/team-edits";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished, REVISION } from "@/lib/manager";
 import { sendToHuman } from "./humans";
@@ -51,6 +52,8 @@ export const SAFE_BIZ_TOOLS = [
   "render_image",
   "list_media",
   "search_contacts",
+  "save_contact",
+  "organize_media",
   "inspect_media",
   "extract_frames",
   "render_video",
@@ -225,6 +228,28 @@ export function createBizServer(ctx: BizContext) {
     ),
 
     tool(
+      "organize_media",
+      "Organize files in the media library the way the owner does in Studio: a title, a note on how to use it, tags, an album, a star for the best picks. Pass only what changes (add_tags adds to the tags; tags replaces them). Only works when the owner lets the team organize the library.",
+      {
+        files: z.array(z.string()).describe('Library paths from list_media, e.g. ["media/2026-10-22-unboxing-a1b2c3.mp4"]'),
+        title: z.string().optional(),
+        note: z.string().optional().describe("How to use it, e.g. \"good opener, sound is noisy after 0:12\""),
+        add_tags: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional().describe("Replace the tags with these"),
+        album: z.string().optional().describe('Empty string takes it out of its album'),
+        starred: z.boolean().optional(),
+      },
+      async (a) => {
+        if (!canTeamEdit(businessId, "library")) return fail(editOffMessage("library"));
+        const files = a.files.map((f: string) => f.replace(/^\.?\//, ""));
+        const n = organize(businessId, files, { title: a.title, note: a.note, tags: a.tags, album: a.album, starred: a.starred }, a.add_tags ?? []);
+        if (!n) return fail(`None of these are in the media library: ${files.join(", ")}. Use paths from list_media.`);
+        ev("media_organized", `${teammate.name} organized ${n} file${n === 1 ? "" : "s"} in the library`, { files });
+        return ok(`Organized ${n} of ${files.length} file(s).`);
+      },
+    ),
+
+    tool(
       "search_contacts",
       "Look people up in the business's address book that the owner keeps: customers, suppliers, partners, with phone, email, company, tags and the owner's notes about them. Words must all match (name, company, tag, notes…); empty query lists everyone.",
       {
@@ -233,8 +258,31 @@ export function createBizServer(ctx: BizContext) {
       },
       async (a) => {
         const found = searchAddressBook(ctx.businessId, a.query, a.kind, 30);
-        if (!found.length) return ok("Nobody in the address book matches. The owner adds people in Studio → Contacts.");
+        if (!found.length) return ok(`Nobody in the address book matches.${canTeamEdit(ctx.businessId, "contacts") ? " Add someone with save_contact." : ""}`);
         return ok(found.map(describeContact).join("\n"));
+      },
+    ),
+
+    tool(
+      "save_contact",
+      "Add a person to the business's address book, or update someone already in it (matched by id, phone, then exact name). Pass only what you know or what changed: tags are added, notes appended, other fields kept. Use it when you learn a customer's, supplier's or partner's details (name, WhatsApp number, email, company, what they want). Only works when the owner lets the team manage contacts.",
+      {
+        name: z.string().optional().describe("Full name as people know them, e.g. \"Bu Rina\" (needed for someone new)"),
+        id: z.string().optional().describe("An existing contact's id, to update that one"),
+        phone: z.string().optional().describe("With country code, e.g. \"+62 812 3456 7890\""),
+        email: z.string().optional(),
+        company: z.string().optional(),
+        kind: z.enum(Object.keys(CONTACT_KINDS) as [string, ...string[]]).optional(),
+        tags: z.array(z.string()).optional().describe('e.g. ["reseller", "jakarta"]'),
+        notes: z.string().optional().describe("What's useful to remember about them, with the date if it's news"),
+      },
+      async (a) => {
+        if (!canTeamEdit(ctx.businessId, "contacts")) return fail(editOffMessage("contacts"));
+        if (!a.id && !a.name?.trim() && !a.phone?.trim()) return fail("Say who: a name (or a phone number, or the id of someone already there).");
+        const r = upsertContact(ctx.businessId, a, `teammate:${teammate.id}`);
+        if ("error" in r) return fail(r.error ?? "Couldn't save the contact.");
+        ev("contact_saved", `${teammate.name} ${r.created ? "added" : "updated"} the contact ${r.contact.name}`, { contactId: r.contact.id });
+        return ok(`${r.created ? "Added" : "Updated"} (id ${r.contact.id}):\n${describeContact(r.contact)}`);
       },
     ),
 
@@ -598,7 +646,7 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "suggest_page_edit",
-      "Propose a change to the owner's Context pages when you learn something durable that's missing or out of date there (a new price or policy, a customer preference, a lesson). You never edit pages yourself: the owner sees exactly what you propose, with your reason and source, and accepts or rejects it. Prefer a short append to the right page; replace only to fix what's wrong, keeping everything else. A mind map page is a nested bullet list: suggest ideas as \"- \" bullets, indented two spaces under the idea they branch from.",
+      "Change the owner's Context pages when you learn something durable that's missing or out of date there (a new price or policy, a customer preference, a lesson). Usually it's a proposal: the owner sees exactly what you propose, with your reason and source, and accepts or rejects it. If the owner lets the team edit pages directly, it's applied straight away (and kept in the page's history with your reason). Prefer a short append to the right page; replace only to fix what's wrong, keeping everything else. A mind map page is a nested bullet list: suggest ideas as \"- \" bullets, indented two spaces under the idea they branch from.",
       {
         page: z.string().optional().describe("Title or id of the page to change (omit for a new page)"),
         mode: z.enum(["append", "replace", "new_page"]).describe("append: add markdown at the end; replace: the whole page's new markdown; new_page: a new page"),
@@ -610,10 +658,15 @@ export function createBizServer(ctx: BizContext) {
       },
       async (a) => {
         if (!a.markdown.trim()) return fail("Nothing to suggest: markdown is empty.");
+        const direct = canTeamEdit(businessId, "context");
         if (a.mode === "new_page") {
           if (!a.title?.trim()) return fail("A new page needs a title.");
           const same = findPage(businessId, a.title);
           if (same && same.title.toLowerCase() === a.title.trim().toLowerCase()) return fail(`"${same.title}" already exists: suggest an append to it instead.`);
+          if (direct) {
+            const page = applyPageEdit({ businessId, teammate, taskId, kind: "new_page", body: a.markdown, title: a.title.trim(), section: a.section ?? "team_written", reason: a.reason, source: a.source });
+            return ok(`Added the page "${page?.title}" (the owner lets the team edit pages directly).`);
+          }
           const s = createSuggestion({ businessId, teammate, taskId, kind: "new_page", body: a.markdown, title: a.title.trim(), section: a.section ?? "team_written", reason: a.reason, source: a.source });
           return ok(`Suggested the new page "${a.title}" (suggestion ${s.id}). It exists only once the owner accepts it; they see it in Context${ctx.isManager ? " and as a card under your reply in this chat: tell them in one line what you proposed" : ""}.`);
         }
@@ -623,6 +676,10 @@ export function createBizServer(ctx: BizContext) {
         if (page.kind === "database") return fail(`"${page.title}" is the address book, not a text page. Mention the change in your summary for the owner instead.`);
         const dup = pendingSuggestions(businessId, page.id).find((s) => s.kind === a.mode && s.body.trim() === a.markdown.trim());
         if (dup) return ok(`Already suggested (suggestion ${dup.id}); the owner hasn't decided yet.`);
+        if (direct) {
+          applyPageEdit({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
+          return ok(`${a.mode === "append" ? "Added to" : "Rewrote"} "${page.title}" (the owner lets the team edit pages directly; it's in the page's history).`);
+        }
         const s = createSuggestion({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
         return ok(`Suggested ${a.mode === "append" ? "an addition to" : "a new version of"} "${page.title}" (suggestion ${s.id}). It isn't on the page until the owner accepts it${ctx.isManager ? "; they see it as a card under your reply in this chat: say in one line what you proposed to save" : ""}.`);
       },
@@ -719,14 +776,15 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "request_capability",
-      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, or the connected code repositories and their GitHub issues. The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
+      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, the connected code repositories and their GitHub issues, or letting the team change something itself (edit: contacts, Context pages, or the media library). The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
       {
-        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos"]),
+        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos", "edit"]),
         why: z.string().describe("One sentence for the owner: what you'll do with it"),
         name: z.string().optional().describe('secret: a name like "ORUCRAFT_API"'),
         hosts: z.array(z.string()).optional().describe('secret: the hosts it may be sent to, e.g. ["orucraft.com"]'),
         domain: z.string().optional().describe('domain: e.g. "api.orucraft.com"'),
         site: z.string().optional().describe('browser_site: e.g. "seller.shopee.co.id"'),
+        area: z.enum(EDIT_AREAS).optional().describe("edit: contacts, context or library"),
       },
       async (a) => {
         let request: CapabilityRequest;
@@ -746,6 +804,11 @@ export function createBizServer(ctx: BizContext) {
           case "browser_site":
             if (!a.site) return fail("Which site?");
             request = { kind: "browser_site", site: a.site, why: a.why };
+            break;
+          case "edit":
+            if (!a.area) return fail("Which area: contacts, context or library?");
+            if (canTeamEdit(businessId, a.area)) return ok("The team already has that: go ahead.");
+            request = { kind: "edit", area: a.area, why: a.why };
             break;
           default:
             request = { kind: a.kind, why: a.why };

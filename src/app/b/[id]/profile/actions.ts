@@ -14,6 +14,7 @@ import { lines, textToGoals } from "@/lib/onboarding/profile-form";
 import { BusinessProfileSchema } from "@/lib/types";
 import { refreshWorkspaces } from "@/lib/workspace";
 import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
+import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -181,5 +182,14 @@ export async function connectRepository(businessId: string, dir: string): Promis
 
 export async function disconnectRepository(businessId: string, repoId: string) {
   disconnectRepo(businessId, repoId);
+  refresh();
+}
+
+/** Business → Team permissions: let the AI team change an area by itself, or not. */
+export async function setTeamEditAction(businessId: string, area: EditArea, on: boolean) {
+  const biz = db.select({ id: schema.businesses.id }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  if (!EDIT_AREAS.includes(area)) throw new Error("Unknown area");
+  setTeamEdit(businessId, area, on === true);
   refresh();
 }

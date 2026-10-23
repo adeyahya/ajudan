@@ -8,13 +8,15 @@ import { logEvent } from "@/lib/events";
 import { t } from "@/lib/i18n";
 import { teammatesRoot } from "@/lib/paths";
 import { renderProfileMarkdown } from "@/lib/profile-markdown";
+import { canTeamEdit } from "@/lib/team-edits";
 import type { BusinessProfile } from "@/lib/types";
 
 /**
  * The Context workspace: pages about the business that the team reads (Notion-style,
  * edited on /b/[id]/context). Each page reaches a teammate "always" (in its prompt),
  * "when needed" (listed by title; read_page / search_context fetch it) or "never".
- * Teammates never write pages: they suggest_page_edit and the owner accepts or rejects.
+ * Teammates change pages with suggest_page_edit: the owner accepts or rejects, unless
+ * they let the team edit pages directly (src/lib/team-edits.ts; applyPageEdit).
  *
  * Ajudan keeps a few pages itself (by `key`): "about" (seeded from the business profile,
  * written to teammates' BUSINESS.md), "learned" (the owner's feedback, written to
@@ -318,7 +320,7 @@ export function contextPrompt(businessId: string, teammateId: string) {
   const prompt = `## Business context (the owner's Context pages)
 ${text || "(no pages are always shared with you)"}
 ${more.length ? `\nMore pages, read when the task needs them (read_page, or search_context to find facts):\n${more.join("\n")}${whenNeeded.length > 40 ? `\n- … and ${whenNeeded.length - 40} more` : ""}\n` : ""}
-When you use a fact from a page, cite it by title, e.g. (from "${always[0]?.title ?? whenNeeded[0]?.title ?? "Rules & policies"}"). Pages are the owner's; never contradict them. If you learn something durable that's missing or out of date (a new price, a policy, a customer preference the owner stated), propose it with suggest_page_edit.`;
+When you use a fact from a page, cite it by title, e.g. (from "${always[0]?.title ?? whenNeeded[0]?.title ?? "Rules & policies"}"). Pages are the owner's; never contradict them. If you learn something durable that's missing or out of date (a new price, a policy, a customer preference the owner stated), ${canTeamEdit(businessId, "context") ? "write it to the right page with suggest_page_edit (the owner lets the team edit pages directly)" : "propose it with suggest_page_edit"}.`;
   return { prompt, items };
 }
 
@@ -406,6 +408,63 @@ export function createSuggestion(v: {
     data: { suggestionId: s.id, pageId: s.pageId },
   });
   return s;
+}
+
+/**
+ * A teammate's edit when the owner lets the team edit pages itself (team-edits
+ * "context"): applied straight away, and kept as an accepted suggestion so the change
+ * and its reason stay visible in the page's history.
+ */
+export function applyPageEdit(v: {
+  businessId: string;
+  teammate: Pick<Teammate, "id" | "name">;
+  taskId?: string | null;
+  page?: ContextPage;
+  kind: "append" | "replace" | "new_page";
+  body: string;
+  title?: string;
+  section?: ContextSection;
+  reason?: string;
+  source?: string;
+}) {
+  const by = `teammate:${v.teammate.id}`;
+  let page = v.page;
+  if (v.kind === "new_page") {
+    page = createPage(v.businessId, { title: v.title ?? "Untitled", section: v.section ?? "team_written", body: v.body, createdBy: by });
+  } else if (page) {
+    db.update(schema.contextPages)
+      .set({ body: applySuggestion(page.body, { kind: v.kind, body: v.body }), blocks: null, updatedBy: by, updatedAt: now() })
+      .where(eq(schema.contextPages.id, page.id))
+      .run();
+    if (page.key === "learned") writeTeamNotesFile(v.businessId);
+  }
+  if (!page) return undefined;
+  db.insert(schema.contextSuggestions)
+    .values({
+      businessId: v.businessId,
+      pageId: page.id,
+      teammateId: v.teammate.id,
+      taskId: v.taskId ?? null,
+      kind: v.kind,
+      body: v.body.slice(0, 50_000),
+      before: v.kind === "new_page" ? null : (v.page?.body ?? null),
+      title: v.title?.slice(0, 120) ?? null,
+      section: v.section ?? null,
+      reason: (v.reason ?? "").slice(0, 1000),
+      source: (v.source ?? "").slice(0, 1000),
+      status: "accepted",
+      decidedAt: now(),
+    })
+    .run();
+  logEvent({
+    businessId: v.businessId,
+    teammateId: v.teammate.id,
+    taskId: v.taskId ?? null,
+    type: "context_decided",
+    message: v.kind === "new_page" ? `${v.teammate.name} added the page "${page.title}"` : `${v.teammate.name} edited "${page.title}"`,
+    data: { pageId: page.id },
+  });
+  return page;
 }
 
 export function pendingSuggestions(businessId: string, pageId?: string) {
