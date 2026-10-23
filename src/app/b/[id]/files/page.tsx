@@ -32,6 +32,7 @@ import { DocLayoutButtons } from "@/components/doc-layout";
 import { DataTable, Gallery, GalleryTile, type Column } from "@/components/data-table";
 import { Button, CardGridSkeleton, EmptyState, IconButton, Input, PageBody, PageHeader, PropertyList, Skeleton, cn } from "@/components/kit";
 import { FileMarkdown } from "@/components/markdown";
+import { thumbUrl } from "@/lib/file-urls";
 import { ROOTS, cleanRel, fileStat, fileType, listDir, listFolders, readText, searchFiles, withDetails, type Entry, type FileType } from "@/lib/browse";
 import { getBusiness } from "@/lib/data";
 import { dateLocale, t, tn, uiLang, type MessageKey, type UiLang } from "@/lib/i18n";
@@ -337,12 +338,8 @@ function FolderView({ businessId, rel, names, lang, page }: { businessId: string
                 ) : undefined
               }
               thumb={
-                e.type === "image" ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-                  <img src={fileUrl(businessId, e.rel)} alt={e.name} loading={i < 24 ? "eager" : "lazy"} />
-                ) : (
-                  <video src={`${fileUrl(businessId, e.rel)}#t=0.5`} preload="metadata" muted playsInline />
-                )
+                // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+                <img src={thumbUrl(businessId, e.rel, e.mtime)} alt={e.name} loading={i < 24 ? "eager" : "lazy"} />
               }
             />
           ))}

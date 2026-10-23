@@ -5,6 +5,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { useState } from "react";
 import { useT } from "@/components/i18n";
 import { IconButton } from "@/components/kit";
+import { thumbUrl } from "@/lib/file-urls";
 import { mediaKind } from "@/lib/media-types";
 import { cn } from "@/lib/utils";
 
@@ -17,16 +18,16 @@ const fileName = (rel: string) => rel.split("/").pop() ?? rel;
 /** Small preview of one file: image, first video frame, or an icon. */
 function Thumb({ businessId, file, label }: { businessId: string; file: string; label?: string }) {
   const kind = mediaKind(file);
-  const url = fileUrl(businessId, file);
   return (
     <>
       {kind === "image" && (
         // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-        <img src={url} alt={fileName(file)} className="size-full object-cover" loading="lazy" />
+        <img src={thumbUrl(businessId, file)} alt={fileName(file)} className="size-full object-cover" loading="lazy" />
       )}
       {kind === "video" && (
         <>
-          <video src={`${url}#t=0.5`} preload="metadata" muted playsInline className="size-full object-cover" />
+          {/* eslint-disable-next-line @next/next/no-img-element -- local files from the business folder */}
+          <img src={thumbUrl(businessId, file)} alt={fileName(file)} className="size-full object-cover" loading="lazy" />
           <span className="absolute inset-0 flex items-center justify-center">
             <span className="flex size-8 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm">
               <PlayIcon className="size-4 translate-x-px fill-current" />

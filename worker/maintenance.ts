@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { and, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { pruneMeta } from "@/lib/file-meta";
 import { backupsDir } from "@/lib/paths";
 import { dueReorganizeBusinesses, reorganizeState, requestReorganize } from "@/lib/reorganize";
 
@@ -46,6 +47,12 @@ export function runMaintenance(dir: string) {
     prune();
   } catch (err) {
     console.error("[maintenance] pruning failed", err);
+  }
+  try {
+    const stale = pruneMeta(dir);
+    if (stale) console.log(`[maintenance] dropped ${stale} cached file details`);
+  } catch (err) {
+    console.error("[maintenance] couldn't prune cached file details", err);
   }
   try {
     for (const id of dueReorganizeBusinesses()) {

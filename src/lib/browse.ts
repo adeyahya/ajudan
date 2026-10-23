@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { cachedTitles } from "@/lib/file-meta";
 import { MEDIA_TYPES, mediaKind } from "@/lib/media-types";
 import { currentDataDir } from "@/lib/paths";
 
@@ -144,16 +145,22 @@ export function listDir(rel: string, { details = true }: { details?: boolean } =
   return details ? withDetails(entries) : entries;
 }
 
-/** Fill in markdown titles and folder item counts (listDir with `details: false`). */
+/**
+ * Fill in markdown titles (cached in file_meta while a file is unchanged) and folder
+ * item counts (listDir with `details: false`).
+ */
 export function withDetails(entries: Entry[]): Entry[] {
   const dir = currentDataDir();
   if (!dir) return entries;
+  const titles = cachedTitles(dir, entries.filter(isMarkdown).map(stampedEntry), mdTitle);
   return entries.map((e) => {
-    const p = path.join(dir, e.rel);
-    if (e.isDir) return { ...e, children: countVisible(p) };
-    return e.name.endsWith(".md") ? { ...e, title: mdTitle(p) } : e;
+    if (e.isDir) return { ...e, children: countVisible(path.join(dir, e.rel)) };
+    return isMarkdown(e) ? { ...e, title: titles.get(e.rel) } : e;
   });
 }
+
+const isMarkdown = (e: Entry) => !e.isDir && e.name.endsWith(".md");
+const stampedEntry = (e: Entry) => ({ rel: e.rel, bytes: e.size, mtimeMs: e.mtime.getTime() });
 
 /** A folder's subfolders by name, without a stat per file (the Files tree). */
 export function listFolders(rel: string): { name: string; rel: string }[] {
@@ -183,20 +190,22 @@ export function searchFiles(q: string, limit = 200): Entry[] {
   const dir = currentDataDir();
   const needle = q.trim().toLowerCase();
   if (!dir || !needle) return [];
-  const out: Entry[] = [];
+  const files: Entry[] = [];
   const walk = (rel: string, depth: number) => {
     if (depth > 6) return;
     for (const e of listDir(rel, { details: false }) ?? []) {
       if (e.isDir) walk(e.rel, depth + 1);
-      else if (e.name.toLowerCase().includes(needle)) out.push(e);
-      else if (e.name.endsWith(".md")) {
-        const [d] = withDetails([e]);
-        if (d.title?.toLowerCase().includes(needle)) out.push(d);
-      }
+      else files.push(e);
     }
   };
   for (const r of ROOTS) if (fs.existsSync(path.join(dir, r.key))) walk(r.key, 0);
-  return withDetails(out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, limit));
+  // Titles match too: one cache lookup for every markdown file, a read only for new ones.
+  const titles = cachedTitles(dir, files.filter(isMarkdown).map(stampedEntry), mdTitle);
+  return files
+    .map((e) => (isMarkdown(e) ? { ...e, title: titles.get(e.rel) } : e))
+    .filter((e) => e.name.toLowerCase().includes(needle) || e.title?.toLowerCase().includes(needle))
+    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+    .slice(0, limit);
 }
 
 /** A text file's contents for previewing (capped). */

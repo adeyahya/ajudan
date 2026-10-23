@@ -25,6 +25,7 @@ import {
 import { useT, useTn } from "@/components/i18n";
 import { Button, cn, EmptyState, IconButton, Input, LineTabs, Textarea } from "@/components/kit";
 import { Gallery, GalleryTile } from "@/components/data-table";
+import { thumbUrl } from "@/lib/file-urls";
 import { useShortcut } from "@/components/shortcuts";
 import { SidePeek } from "@/components/side-peek";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -438,8 +439,10 @@ function Thumb({ businessId, item: i, eager }: { businessId: string; item: Libra
   const Icon = KIND_ICON[i.kind];
   if (i.kind === "image")
     // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-    return <img src={fileUrl(businessId, i.path)} alt={i.title || i.name} loading={eager ? "eager" : "lazy"} />;
-  if (i.kind === "video") return <video src={`${fileUrl(businessId, i.path)}#t=0.5`} preload="metadata" muted playsInline />;
+    return <img src={thumbUrl(businessId, i.path, i.mtime)} alt={i.title || i.name} loading={eager ? "eager" : "lazy"} />;
+  if (i.kind === "video")
+    // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
+    return <img src={thumbUrl(businessId, i.path, i.mtime)} alt={i.title || i.name} loading={eager ? "eager" : "lazy"} />;
   return (
     <span className="flex size-full items-center justify-center text-placeholder">
       <Icon className="size-8" strokeWidth={1.5} />

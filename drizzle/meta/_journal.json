@@ -134,6 +134,13 @@
       "when": 1792783043393,
       "tag": "0018_simple_titania",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792784033900,
+      "tag": "0019_supreme_wither",
+      "breakpoints": true
     }
   ]
 }

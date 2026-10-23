@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { nanoid } from "nanoid";
+import { isFresh, metaRows, relInFolder, saveMeta, stampOf } from "@/lib/file-meta";
 import { slugify } from "@/lib/folders";
 import { mediaKind, type MediaKind } from "@/lib/media-types";
-import { dataDir } from "@/lib/paths";
+import { currentDataDir, dataDir } from "@/lib/paths";
 
 /**
  * The business's media library: footage, photos and audio the owner drops into a chat,
@@ -44,25 +45,37 @@ export type MediaInfo = {
   hasAudio?: boolean;
 };
 
-/**
- * ffprobe results by path, kept while the file's size and mtime stay the same: the
- * Studio editors and list_media describe the same library over and over.
- */
+/** ffprobe results for files outside the business folder (inside it, file_meta keeps them). */
 const probed = new Map<string, { stamp: string; info: MediaInfo }>();
-const MAX_PROBED = 5000;
+const MAX_PROBED = 2000;
 
-/** Size, and for video/audio/images duration, dimensions, fps and audio (ffprobe). */
+/**
+ * Size, and for video/audio/images duration, dimensions, fps and audio (ffprobe). The
+ * Studio editors and list_media describe the same library over and over, so results are
+ * kept while the file's size and mtime stay the same (src/lib/file-meta.ts).
+ */
 export async function mediaInfo(abs: string): Promise<MediaInfo> {
   const kind = mediaKind(abs);
   const st = fs.statSync(abs);
   const info: MediaInfo = { kind, bytes: st.size };
   if (kind === "file") return info;
-  const stamp = `${st.size}:${st.mtimeMs}`;
+  const stamp = stampOf(st);
+  const dir = currentDataDir();
+  const rel = dir ? relInFolder(dir, abs) : null;
+  if (dir && rel) {
+    const row = metaRows(dir, [rel]).get(rel);
+    if (isFresh(row, stamp) && row!.probe) return { ...info, ...row!.probe };
+    await probe(abs, kind, info);
+    const { width, height, durationSec, fps, hasAudio } = info;
+    saveMeta(dir, [{ path: rel, ...stamp, title: row?.title ?? null, probe: { width, height, durationSec, fps, hasAudio } }]);
+    return info;
+  }
+  const key = `${stamp.bytes}:${stamp.mtimeMs}`;
   const hit = probed.get(abs);
-  if (hit?.stamp === stamp) return { ...hit.info };
+  if (hit?.stamp === key) return { ...hit.info };
   await probe(abs, kind, info);
   if (probed.size >= MAX_PROBED) probed.delete(probed.keys().next().value!);
-  probed.set(abs, { stamp, info: { ...info } });
+  probed.set(abs, { stamp: key, info: { ...info } });
   return info;
 }
 
@@ -104,6 +117,22 @@ export function describeMedia(rel: string, info: MediaInfo) {
   if (info.kind === "video") parts.push(info.hasAudio ? "with sound" : "no sound");
   parts.push(info.bytes > 1e6 ? `${(info.bytes / 1e6).toFixed(1)} MB` : `${Math.ceil(info.bytes / 1e3)} KB`);
   return `${rel} (${parts.join(", ")})`;
+}
+
+/**
+ * A small JPG preview (`width` wide) of an image or of a video's first moments, written to
+ * `out`. Throws when ffmpeg can't read the file.
+ */
+export async function makeThumbnail(abs: string, out: string, width = 360) {
+  const scale = `scale='min(${width},iw)':-2`;
+  const args = (seek: boolean) => ["-y", "-v", "error", ...(seek ? ["-ss", "0.5"] : []), "-i", abs, "-frames:v", "1", "-vf", scale, "-q:v", "5", out];
+  if (mediaKind(abs) === "video") {
+    // Clips shorter than half a second have no frame there: take the first one.
+    await run(FFMPEG, args(true), { timeout: 30_000 }).catch(() => run(FFMPEG, args(false), { timeout: 30_000 }));
+  } else {
+    await run(FFMPEG, args(false), { timeout: 30_000 });
+  }
+  if (!fs.existsSync(out) || !fs.statSync(out).size) throw new Error(`No thumbnail for ${abs}`);
 }
 
 /**

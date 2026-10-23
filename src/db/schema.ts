@@ -373,6 +373,24 @@ export const assets = sqliteTable("assets", {
   createdAt: createdAt(),
 }, (t) => [index("assets_business_idx").on(t.businessId)]);
 
+
+/**
+ * Details about files in the folder that are slow to work out again: a markdown file's
+ * title (read from its head) and ffprobe's results for media. Valid while the file's
+ * size and mtime match; disk stays the truth (src/lib/file-meta.ts). Rows for files that
+ * are gone are pruned by worker/maintenance.ts.
+ */
+export const fileMeta = sqliteTable("file_meta", {
+  /** Folder-relative path, "work/…", "media/…", "teammates/…". */
+  path: text("path").primaryKey(),
+  bytes: integer("bytes").notNull(),
+  /** The file's mtime in whole milliseconds. */
+  mtimeMs: integer("mtime_ms").notNull(),
+  /** Markdown: the front-matter title or first heading (null when it has none). */
+  title: text("title"),
+  /** Media: what ffprobe found (src/lib/media.ts MediaInfo, without kind and bytes). */
+  probe: text("probe", { mode: "json" }).$type<{ width?: number; height?: number; durationSec?: number; fps?: number; hasAudio?: boolean }>(),
+});
 /**
  * Local git repositories the owner connected (src/lib/repos.ts). Teammates with
  * repoAccess read them (never write) and file GitHub issues through the owner's gh login.
@@ -592,3 +610,4 @@ export type ContextReader = typeof contextReaders.$inferSelect;
 export type ContextSuggestion = typeof contextSuggestions.$inferSelect;
 export type ContextLoad = typeof contextLoads.$inferSelect;
 export type ContextAsk = typeof contextAsks.$inferSelect;
+export type FileMeta = typeof fileMeta.$inferSelect;
