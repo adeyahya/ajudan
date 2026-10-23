@@ -1,8 +1,9 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Contact, ContactKind } from "@/db/schema";
 import { cleanTags } from "@/lib/assets";
 import { normalizePhone } from "@/lib/humans";
+import { matchIds } from "@/lib/search";
 
 /**
  * The business's address book: customers, suppliers and partners the owner keeps.
@@ -162,7 +163,14 @@ export function contactsCsv(businessId: string) {
 
 export function searchAddressBook(businessId: string, query: string, kind?: ContactKind, limit = 20) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return listContacts(businessId)
+  // The index narrows it down (src/lib/search.ts); the filter below still checks every word.
+  const ids = matchIds("contacts", businessId, words.map((w) => w.replace(/^#/, "")), { all: true, limit: 2000 });
+  const candidates = ids
+    ? ids.length
+      ? db.select().from(schema.contacts).where(and(eq(schema.contacts.businessId, businessId), inArray(schema.contacts.id, ids))).orderBy(asc(schema.contacts.name)).all()
+      : []
+    : listContacts(businessId);
+  return candidates
     .filter((c) => !kind || c.kind === kind)
     .filter((c) => {
       const hay = `${c.name} ${c.company ?? ""} ${c.phone ?? ""} ${c.email ?? ""} ${c.tags.join(" ")} ${c.notes}`.toLowerCase();

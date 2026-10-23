@@ -16,7 +16,7 @@ import { describeAsset, downloadFreeAsset, readCredits, searchFreeAssets } from 
 import { renderHtmlToPng } from "@/lib/images";
 import { assetRows, describeOrganization, organize } from "@/lib/assets";
 import { CONTACT_KINDS, describeContact, listContacts, searchAddressBook, upsertContact } from "@/lib/contacts";
-import { applyPageEdit, createSuggestion, findPage, listPages, pageForAgents, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
+import { applyPageEdit, createSuggestion, findPage, listPageHeads, listPages, pageForAgents, pagesById, pendingSuggestions, readablePage, readerMode, readerRows, recordFetch, searchPages } from "@/lib/context";
 import { describeMedia, extractFrames, isServablePath, linkFile, linkIntoWorkspace, mediaDir, mediaInfo, mediaKind } from "@/lib/media";
 import { dataDir } from "@/lib/paths";
 import { createTask, delegatedInstructions, delegationDepth, deriveTaskTitle, MAX_DELEGATION_DEPTH, ownerRequest } from "@/lib/tasks";
@@ -27,6 +27,7 @@ import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
 import { canTeamEdit, EDIT_AREAS, editOffMessage } from "@/lib/team-edits";
+import { matchIds } from "@/lib/search";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished, REVISION } from "@/lib/manager";
 import { sendToHuman } from "./humans";
@@ -609,12 +610,15 @@ export function createBizServer(ctx: BizContext) {
       "Search the owner's Context pages (business facts, products, policies, how we work, what the team learned) and the address book for a fact. Returns the best matching pages with a snippet; read_page for the whole page.",
       { query: z.string().describe('e.g. "ongkir gratis jawa", "reseller discount", "Bu Rina"') },
       async (a) => {
-        const pages = listPages(businessId);
+        const heads = listPageHeads(businessId);
         const rows = readerRows(businessId);
-        const shared = pages.filter((p) => p.kind !== "database" && readerMode(p, teammate.id, rows) !== "never");
-        const hits = searchPages(shared, a.query);
+        const shared = heads.filter((p) => p.kind !== "database" && readerMode(p, teammate.id, rows) !== "never");
+        // The index finds the candidates (src/lib/search.ts); searchPages ranks them and cuts snippets.
+        const ids = matchIds("context_pages", businessId, a.query.split(/[^\p{L}\p{N}]+/u));
+        const sharedIds = new Set(shared.map((p) => p.id));
+        const hits = searchPages(pagesById(businessId, (ids ?? [...sharedIds]).filter((id) => sharedIds.has(id))), a.query);
         const people = searchAddressBook(businessId, a.query, undefined, 5);
-        const contacts = pages.find((p) => p.source === "contacts");
+        const contacts = heads.find((p) => p.source === "contacts");
         if (!hits.length && !people.length) return ok(`Nothing matches "${a.query}". Pages: ${shared.map((p) => `"${p.title}"`).join(", ") || "none"}.`);
         return ok(
           [

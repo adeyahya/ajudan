@@ -4,6 +4,7 @@ import { Calendar, Building2, Download, Ellipsis, Hash, Phone, Tag, Type, Upload
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useLang, useT } from "@/components/i18n";
+import { useGrowingList } from "@/components/use-growing-list";
 import { DataTable, DataTableToolbar, TableSearch, type Column } from "@/components/data-table";
 import { Badge, Button, EmptyState, IconButton, LineTabs, PageBody, Textarea } from "@/components/kit";
 import { useBreadcrumb } from "@/components/breadcrumb";
@@ -60,6 +61,7 @@ export function People({
   ];
   const s = q.trim().toLowerCase();
   const shown = contacts.filter((c) => inView(c, view) && (!s || `${c.name} ${c.company ?? ""} ${c.phone ?? ""} ${c.email ?? ""} ${c.notes} ${c.tags.join(" ")}`.toLowerCase().includes(s)));
+  const { visible, sentinel } = useGrowingList(shown, `${view}\0${s}`, 200);
   const creating = peek.value === "new";
   const open = creating ? undefined : contacts.find((c) => c.id === peek.value);
   useBreadcrumb([{ label: t("context.people.title"), href: base }, ...(open ? [{ label: open.name }] : [])]);
@@ -176,7 +178,7 @@ export function People({
         ) : (
           <DataTable
             label={t("context.people.title")}
-            rows={shown}
+            rows={visible}
             columns={columns}
             getRowId={(c) => c.id}
             onRowOpen={(c) => peek.open(c.id)}
@@ -185,6 +187,7 @@ export function People({
             empty={<EmptyState compact title={t("context.people.noMatch")} />}
           />
         )}
+        {sentinel}
       </PageBody>
       <ImportDialog businessId={businessId} open={importing} onOpenChange={setImporting} />
     </SidePeekLayout>

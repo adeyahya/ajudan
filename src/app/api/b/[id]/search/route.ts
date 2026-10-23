@@ -1,6 +1,7 @@
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { currentDataDir } from "@/lib/paths";
+import { matchIds } from "@/lib/search";
 
 /**
  * Search for the ⌘K palette (src/components/command-palette.tsx).
@@ -8,7 +9,8 @@ import { currentDataDir } from "@/lib/paths";
  *   GET /api/b/[id]/search?q=gift  →  { results: SearchResult[] }
  *
  * Case-insensitive substring match on Konteks page titles, contacts (name, company),
- * work (deliverable titles) and teammates (name, title); 8 per group. With an empty `q`
+ * work (title and text, through the search index when the words are long enough,
+ * src/lib/search.ts) and teammates (name, title); 8 per group. With an empty `q`
  * it returns the most recently updated pages and work, so the palette has something to show.
  */
 export type SearchGroup = "pages" | "people" | "work" | "teammates";
@@ -33,10 +35,16 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/search">)
     .limit(LIMIT)
     .all();
 
+  const workIds = q ? matchIds("deliverables", businessId, q.split(/\s+/), { all: true }) : null;
   const work = db
     .select({ id: schema.deliverables.id, title: schema.deliverables.title, kind: schema.deliverables.kind })
     .from(schema.deliverables)
-    .where(and(eq(schema.deliverables.businessId, businessId), q ? match(schema.deliverables.title) : undefined))
+    .where(
+      and(
+        eq(schema.deliverables.businessId, businessId),
+        workIds ? inArray(schema.deliverables.id, workIds) : q ? match(schema.deliverables.title) : undefined,
+      ),
+    )
     .orderBy(desc(schema.deliverables.createdAt))
     .limit(LIMIT)
     .all();

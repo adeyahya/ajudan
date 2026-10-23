@@ -304,17 +304,36 @@ export function setReaderMode(businessId: string, pageId: string, teammateId: st
   return true;
 }
 
-/** The pages a teammate gets: always (in its prompt) and when needed (by title), never left out. */
+/**
+ * The pages a teammate gets: always (in its prompt, with their text) and when needed (by
+ * title), never left out. Without `loaded`, only the always-pages' text is read.
+ */
 export function pagesFor(businessId: string, teammateId: string, loaded?: LoadedPages) {
-  const { pages, rows } = loaded ?? { pages: listPages(businessId), rows: readerRows(businessId) };
-  const order = (p: ContextPage) => SECTIONS.indexOf(p.section);
+  const pages: PageHead[] = loaded?.pages ?? listPageHeads(businessId);
+  const rows = loaded?.rows ?? readerRows(businessId);
+  const order = (p: PageHead) => SECTIONS.indexOf(p.section);
   const sorted = [...pages].sort((a, b) => order(a) - order(b) || a.sortOrder - b.sortOrder);
-  const mode = (p: ContextPage) => readerMode(p, teammateId, rows);
+  const mode = (p: PageHead) => readerMode(p, teammateId, rows);
+  const alwaysHeads = sorted.filter((p) => p.kind !== "database" && mode(p) === "always");
   return {
-    always: sorted.filter((p) => p.kind !== "database" && mode(p) === "always"),
+    always: loaded ? (alwaysHeads as ContextPage[]) : pagesById(businessId, alwaysHeads.map((p) => p.id)),
     whenNeeded: sorted.filter((p) => mode(p) === "when_needed" || (p.kind === "database" && mode(p) === "always")),
     never: sorted.filter((p) => mode(p) === "never"),
   };
+}
+
+/** Full pages by id, in the order given (missing ones left out). */
+export function pagesById(businessId: string, ids: string[]): ContextPage[] {
+  if (!ids.length) return [];
+  const full = new Map(
+    db
+      .select()
+      .from(schema.contextPages)
+      .where(and(eq(schema.contextPages.businessId, businessId), inArray(schema.contextPages.id, ids)))
+      .all()
+      .map((p) => [p.id, p]),
+  );
+  return ids.map((id) => full.get(id)).filter((p): p is ContextPage => !!p);
 }
 
 /** A page this teammate may read (not "never"). */

@@ -24,6 +24,7 @@ import {
   type LineTab,
 } from "@/components/kit";
 import { getBusiness } from "@/lib/data";
+import { matchIds } from "@/lib/search";
 import { statusTone } from "@/lib/status-tones";
 import { t, tn, uiLang, type UiLang } from "@/lib/i18n";
 import { CopyButton } from "./copy-button";
@@ -73,7 +74,11 @@ async function loadDeliverables(businessId: string, f: Filters, peekId: string |
     where.push(eq(schema.deliverables.status, f.status as DeliverableStatus));
   if (f.kinds.length) where.push(inArray(schema.deliverables.kind, f.kinds));
   if (f.teammates.length) where.push(inArray(schema.deliverables.teammateId, f.teammates));
-  if (f.q) where.push(like(schema.deliverables.title, `%${f.q}%`));
+  if (f.q) {
+    // Title and text through the search index (src/lib/search.ts); short words: titles only.
+    const ids = matchIds("deliverables", businessId, f.q.split(/\s+/), { all: true, limit: 1000 });
+    where.push(ids ? inArray(schema.deliverables.id, ids) : like(schema.deliverables.title, `%${f.q}%`));
+  }
   // Only what the table shows: content and earlier versions stay in the database.
   const rows = db
     .select({

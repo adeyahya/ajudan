@@ -27,6 +27,7 @@ import { Button, cn, EmptyState, IconButton, Input, LineTabs, Textarea } from "@
 import { Gallery, GalleryTile } from "@/components/data-table";
 import { thumbUrl } from "@/lib/file-urls";
 import { useShortcut } from "@/components/shortcuts";
+import { useGrowingList } from "@/components/use-growing-list";
 import { SidePeek } from "@/components/side-peek";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -128,6 +129,8 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     if (s && ![i.name, i.title, i.note, i.album ?? "", ...i.tags].some((x) => x.toLowerCase().includes(s))) return false;
     return true;
   });
+  // Thousands of files: tiles render a slice at a time as you scroll.
+  const { visible, sentinel } = useGrowingList(shown, [kind, album, tag, starredOnly, q].join("\0"));
   const picked = items.filter((i) => selected.includes(i.path));
   const peekItem = picked.length === 1 ? picked[0] : null;
 
@@ -362,7 +365,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
               <EmptyState compact icon={<LayoutGrid />} title={t("studio.lib.noMatch")} body={t("studio.lib.noMatchBody")} />
             ) : (
               <Gallery className="grid-cols-2 gap-3 @xl:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] @xl:gap-4">
-                {shown.map((i, n) => {
+                {visible.map((i, n) => {
                   const Icon = KIND_ICON[i.kind];
                   const on = selected.includes(i.path);
                   return (
@@ -395,6 +398,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
                 })}
               </Gallery>
             )}
+            {sentinel}
           </div>
           {items.length > 0 && <p className="mt-6 text-xs text-tertiary">{t("studio.lib.tip")}</p>}
         </div>
