@@ -59,6 +59,7 @@ The owner has already seen this team and may have edited it (names, freedom, sch
       : "";
 
     const res = await runAgent<TeamProposal>({
+      businessId,
       prompt: `Design the AI team for this business.
 
 <business_profile>

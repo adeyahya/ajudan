@@ -5,7 +5,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Business, Repository, Task, Teammate } from "@/db/schema";
 import { sameAction } from "@/lib/approvals";
-import { describeToolUse, MODELS, runAgent } from "@/lib/claude";
+import { claudeConfigDir, describeToolUse, MODELS, runAgent } from "@/lib/claude";
 import { taskHistory } from "@/lib/history";
 import { logEvent } from "@/lib/events";
 import { enqueueJob, type JobPayloads } from "@/lib/jobs";
@@ -33,10 +33,14 @@ import { runHumanRequest } from "../humans";
 import { notifyOwner } from "../owner-approvals";
 import { listRepos } from "@/lib/repos";
 import { createGithubServer, GH_SERVER, githubRules, OUTWARD_GH_TOOLS, SAFE_GH_TOOLS, sameBacklog } from "../github-tools";
-import { BIZ_SERVER, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
+import { BIZ_SERVER, EDIT_BIZ_TOOLS, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
+import { effectiveAutonomy, editGate, isSupervised } from "@/lib/supervision";
+import { canTeamEdit } from "@/lib/team-edits";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "Glob", "Grep"]);
+/** Human-teammate tools that message someone (the others only read or close a request). */
+const HUMAN_SEND_TOOLS = new Set(HUMAN_TOOLS.filter((t) => /__(ask|message)_human$/.test(t)));
 const BUDGET_USD = Number(process.env.AJUDAN_TASK_BUDGET_USD ?? 3) || 3;
 /** Video work takes more rounds (edit, render, look, fix). */
 const VIDEO_BUDGET_USD = Number(process.env.AJUDAN_VIDEO_BUDGET_USD ?? 6) || 6;
@@ -168,6 +172,9 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       // Stopping (an approval request, a cancel): nothing else starts.
       if (ac.signal.aborted) return { behavior: "deny", message: "This run is stopping." };
+      // Read per call: switching supervised mode on or off applies straight away.
+      const supervised = isSupervised(business.id);
+      const freedom = effectiveAutonomy(teammate.autonomy, supervised);
       if (toolName === "Skill") return { behavior: "allow", updatedInput: input };
       // The sandbox (sandboxFor) limits files and network; outside it nothing runs.
       if (toolName === "Bash") {
@@ -179,8 +186,8 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       if (toolName === HTTP_TOOL) {
         const method = String(input.method ?? "GET").toUpperCase();
         if (method === "GET" || method === "HEAD") return { behavior: "allow", updatedInput: input };
-        if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
-        if (teammate.autonomy === "ask") return requestApproval(toolName, input);
+        if (freedom === "auto") return { behavior: "allow", updatedInput: input };
+        if (freedom === "ask") return requestApproval(toolName, input);
         return { behavior: "deny", message: "You're draft-only: you can read APIs (GET) but not change anything through them." };
       }
       if (FILE_TOOLS.has(toolName)) return checkFileAccess(toolName, input, cwd, options.blockedPath, [PLUGIN_DIR, ...repoDirs]);
@@ -211,14 +218,14 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         const updated = toolName.endsWith("send_to_people") ? { ...input, recipients: jids } : { ...input, chat: jids[0] };
         const outside = resolved.filter((t) => !t.allowed);
         if (!outside.length) {
-          if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: updated };
-          if (teammate.autonomy === "ask") {
+          if (freedom === "auto") return { behavior: "allow", updatedInput: updated };
+          if (freedom === "ask") {
             const d = await requestApproval(toolName, { ...input, recipientNames: resolved.map((t) => t.name) });
             return d.behavior === "allow" ? { behavior: "allow", updatedInput: updated } : d;
           }
           return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
         }
-        if (teammate.autonomy === "draft") return { behavior: "deny", message: "You're draft-only: save the message as a draft for the owner." };
+        if (freedom === "draft") return { behavior: "deny", message: "You're draft-only: save the message as a draft for the owner." };
         const text = String(input.message ?? input.caption ?? input.file ?? "").replace(/\s+/g, " ").slice(0, 100);
         const who = resolved.map((t) => t.name);
         const summary = `${teammate.name} wants to WhatsApp ${who.length === 1 ? who[0] : `${who.length} people (${who.slice(0, 4).join(", ")}${who.length > 4 ? ", …" : ""})`}: "${text}"`;
@@ -227,9 +234,18 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         resolved.forEach((t) => approvedTargets.set(t.jid, t.name));
         return { behavior: "allow", updatedInput: updated };
       }
+      // Team edits: the tool itself refuses areas that are off; supervised, the owner approves each one.
+      const area = EDIT_BIZ_TOOLS[toolName];
+      if (area) {
+        return editGate(canTeamEdit(business.id, area), supervised) === "ask" ? requestApproval(toolName, input) : { behavior: "allow", updatedInput: input };
+      }
+      // Human teammates: supervised, messages to them wait for the owner too.
+      if (humans.length && HUMAN_TOOLS.includes(toolName)) {
+        return supervised && HUMAN_SEND_TOOLS.has(toolName) ? requestApproval(toolName, input) : { behavior: "allow", updatedInput: input };
+      }
       if (outward.includes(toolName)) {
-        if (teammate.autonomy === "auto") return { behavior: "allow", updatedInput: input };
-        if (teammate.autonomy === "ask") return requestApproval(toolName, input);
+        if (freedom === "auto") return { behavior: "allow", updatedInput: input };
+        if (freedom === "ask") return requestApproval(toolName, input);
         return { behavior: "deny", message: "Outward actions are disabled for you; save a draft instead." };
       }
       return { behavior: "deny", message: `Tool ${toolName} is not available to teammates.` };
@@ -294,7 +310,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
 
     const run = async () => {
       const mcpServers: Record<string, McpServerConfig> = { [BIZ_SERVER]: biz };
-      const allowedTools = ["WebSearch", "WebFetch", "Skill", ...SAFE_BIZ_TOOLS, ...(humans.length ? HUMAN_TOOLS : [])];
+      const allowedTools = ["WebSearch", "WebFetch", "Skill", ...SAFE_BIZ_TOOLS];
       const disallowedTools = [...(teammate.shellAccess ? [] : ["Bash"]), ...(teammate.autonomy === "draft" ? outward : [])];
       if (useWhatsapp) {
         mcpServers[WA_SERVER] = createWhatsappServer({ business, teammate, taskId: task.id, cwd, approvedTargets });
@@ -320,14 +336,17 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         disallowedTools.push(...browserToolNames(browserProvider, browserProvider.blockedTools));
       }
       const files = await describeAttachments(attachments);
+      // The prompt describes the freedom this run has; canUseTool checks it again per call.
+      const promptMate = { ...teammate, autonomy: effectiveAutonomy(teammate.autonomy, business.supervised) };
       const context = runContext(business, teammate, task, cwd);
       const fresh = `${buildPrompt(task, taskHistory(teammate.id, task), files)}${decided ? `\n\n${decisionRecap(decided)}` : ""}`;
       context.record(fresh.length);
       const attempt = (resume: string | undefined) =>
         runAgent({
+          businessId: business.id,
           cwd,
           model: quickWork ? MODELS.fast : undefined,
-          systemPrompt: buildSystemPrompt(teammate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt, repos),
+          systemPrompt: buildSystemPrompt(promptMate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt, repos),
           prompt: resume ? (decided ? decisionPrompt(decided) : buildPrompt(task, "", files, true)) : fresh,
           tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
           sandbox: teammate.shellAccess ? sandboxFor(cwd, business, repoDirs) : undefined,
@@ -350,7 +369,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       // The conversation to continue: this task's own run (after an approval) or the one
       // that led to this follow-up. Gone from ~/.claude, or refusing to load: start
       // fresh with the history in the prompt instead.
-      const resume = task.sessionId && sessionExists(cwd, task.sessionId) ? task.sessionId : undefined;
+      const resume = task.sessionId && sessionExists(cwd, task.sessionId, claudeConfigDir(business.id)) ? task.sessionId : undefined;
       if (task.sessionId && !resume) ev("text", "Earlier conversation not found; continuing from the task history.");
       let r = await attempt(resume);
       if (!r.ok && resume && r.costUsd === 0 && !ac.signal.aborted) {
@@ -624,6 +643,17 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   if (toolName.endsWith("__confirm_browser_action")) {
     return `${who} wants to, on ${s(input.site, 40)}: ${s(input.action, 120)}`;
   }
+  // Supervised mode: team edits and messages to human teammates.
+  if (toolName === `mcp__${BIZ_SERVER}__save_contact`) {
+    return `${who} wants to save the contact ${s(input.name ?? input.phone ?? input.id, 50)}${input.notes ? `: "${s(input.notes, 80)}"` : ""}`;
+  }
+  if (toolName === `mcp__${BIZ_SERVER}__organize_media`) {
+    const files = (input.files as string[] | undefined) ?? [];
+    return `${who} wants to organize ${files.length} file${files.length === 1 ? "" : "s"} in the media library`;
+  }
+  if (toolName === `mcp__${BIZ_SERVER}__ask_human` || toolName === `mcp__${BIZ_SERVER}__message_human`) {
+    return `${who} wants to WhatsApp ${s(input.name, 40)}: "${s(input.message, 100)}"`;
+  }
   return `${who} wants to use ${toolName}`;
 }
 
@@ -750,7 +780,7 @@ ${list(roleChecklist(teammate.roleKey))}
 
 ## Rules
 - Save every piece of work (posts, articles, emails, plans, reports) with save_deliverable. Work that isn't saved is lost. To change a piece that's already saved (a revision), use read_deliverable and update_deliverable instead of saving a new one.
-- Ajudan can't post to Instagram, blogs, email, DMs or any other channel for you. When a piece is finished, call mark_ready_to_post(deliverable_id, channel); write emails, DMs and outreach with draft_outbound_message. Both only prepare the text for the owner, who posts or sends it from the Work page. Never claim you posted or sent something. ${outward}
+- Ajudan can't post to Instagram, blogs, email, DMs or any other channel for you. When a piece is finished, call mark_ready_to_post(deliverable_id, channel); write emails, DMs and outreach with draft_outbound_message. Both only prepare the text for the owner, who posts or sends it from the Work page. Never claim you posted or sent something. ${outward}${business.supervised ? "\nThe owner is supervising the team right now: every change you make (messages, posts, API writes, contacts, the media library; page edits become suggestions) waits for their approval first. Do everything else first and ask last." : ""}
 - Use set_status to keep a short, current status line for the office.
 - You can only read and write files inside your working folder. Keep scratch files under work/.
 - Be concrete and specific to ${business.name}; use the brand voice. Don't invent facts about the business.

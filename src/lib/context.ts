@@ -8,6 +8,7 @@ import { logEvent } from "@/lib/events";
 import { t } from "@/lib/i18n";
 import { teammatesRoot } from "@/lib/paths";
 import { renderProfileMarkdown } from "@/lib/profile-markdown";
+import { isSupervised } from "@/lib/supervision";
 import { canTeamEdit } from "@/lib/team-edits";
 import type { BusinessProfile } from "@/lib/types";
 
@@ -356,7 +357,7 @@ export function contextPrompt(businessId: string, teammateId: string, loaded?: L
   const prompt = `## Business context (the owner's Context pages)
 ${text || "(no pages are always shared with you)"}
 ${more.length ? `\nMore pages, read when the task needs them (read_page, or search_context to find facts):\n${more.join("\n")}${whenNeeded.length > 40 ? `\n- … and ${whenNeeded.length - 40} more` : ""}\n` : ""}
-When you use a fact from a page, cite it by title, e.g. (from "${always[0]?.title ?? whenNeeded[0]?.title ?? "Rules & policies"}"). Pages are the owner's; never contradict them. If you learn something durable that's missing or out of date (a new price, a policy, a customer preference the owner stated), ${canTeamEdit(businessId, "context") ? "write it to the right page with suggest_page_edit (the owner lets the team edit pages directly)" : "propose it with suggest_page_edit"}.`;
+When you use a fact from a page, cite it by title, e.g. (from "${always[0]?.title ?? whenNeeded[0]?.title ?? "Rules & policies"}"). Pages are the owner's; never contradict them. If you learn something durable that's missing or out of date (a new price, a policy, a customer preference the owner stated), ${canTeamEdit(businessId, "context") && !isSupervised(businessId) ? "write it to the right page with suggest_page_edit (the owner lets the team edit pages directly)" : "propose it with suggest_page_edit"}.`;
   return { prompt, items };
 }
 

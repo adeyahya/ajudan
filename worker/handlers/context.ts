@@ -44,6 +44,7 @@ export async function contextTestAsk({ askId }: JobPayloads["context_test_ask"])
   };
   try {
     const r = await runAgent<z.infer<typeof Output>>({
+      businessId: business.id,
       cwd: path.join(dir, "work"),
       model: MODELS.fast,
       systemPrompt: `You are ${teammate.name}, the ${teammate.title} on ${business.name}'s AI team. The owner is testing what you know: answer their question only from the context and notes below, briefly, as you would at work. If they don't say, answer that you don't know from the pages (and which page should say it). You have no tools in this test. List the titles of the pages you used in cited_pages.

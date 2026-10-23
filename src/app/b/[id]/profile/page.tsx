@@ -1,4 +1,4 @@
-import { FolderGit2, Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, ShieldCheck, Store, UserRound } from "lucide-react";
+import { Cpu, FolderGit2, Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, ShieldCheck, Store, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
@@ -7,9 +7,11 @@ import { getBusiness, listTeammates } from "@/lib/data";
 import { getSpendRollup } from "@/lib/health";
 import { t, uiLang, type UiLang } from "@/lib/i18n";
 import { languageName } from "@/lib/language";
+import { backendKey } from "@/lib/secrets";
 import { teamEdits } from "@/lib/team-edits";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { saveProfile } from "./actions";
+import { BackendPanel } from "./backend-panel";
 import { BrowserPanel } from "./browser-panel";
 import { EditProfileDialog } from "./profile-form";
 import { PermissionsPanel } from "./permissions-panel";
@@ -20,7 +22,7 @@ import { WhatsappPanel } from "./whatsapp-panel";
 
 /**
  * Business settings, as line tabs (`?tab=`): the profile every teammate reads, what the
- * team may change by itself (permissions), WhatsApp,
+ * team may change by itself (permissions), the AI backend that runs it, WhatsApp,
  * the business browser, code repositories, credentials, and usage & language.
  */
 export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
@@ -40,7 +42,7 @@ export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   );
 }
 
-const TABS = ["profile", "permissions", "whatsapp", "browser", "repos", "credentials", "budget"] as const;
+const TABS = ["profile", "permissions", "backend", "whatsapp", "browser", "repos", "credentials", "budget"] as const;
 type Tab = (typeof TABS)[number];
 
 function List({ items, lang }: { items: string[]; lang: UiLang }) {
@@ -68,6 +70,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
   const tabs: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: "profile", label: t(lang, "profile.tab.profile"), icon: <Store /> },
     { key: "permissions", label: t(lang, "profile.tab.permissions"), icon: <ShieldCheck /> },
+    { key: "backend", label: t(lang, "profile.tab.backend"), icon: <Cpu /> },
     { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
     { key: "browser", label: t(lang, "profile.tab.browser"), icon: <MonitorSmartphone /> },
     { key: "repos", label: t(lang, "profile.tab.repos"), icon: <FolderGit2 /> },
@@ -190,7 +193,8 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
       {tab === "whatsapp" && (
         <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={names((m) => m.whatsappAccess)} lang={lang} />
       )}
-      {tab === "permissions" && <PermissionsPanel businessId={id} edits={teamEdits(biz.teamEdits)} />}
+      {tab === "permissions" && <PermissionsPanel businessId={id} edits={teamEdits(biz.teamEdits)} supervised={biz.supervised} />}
+      {tab === "backend" && <BackendPanel key={JSON.stringify(biz.aiBackend)} businessId={id} stored={biz.aiBackend} hasKey={Boolean(await backendKey(id))} />}
       {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
       {tab === "repos" && <ReposPanel businessId={id} teammatesWithAccess={names((m) => m.repoAccess)} lang={lang} />}
       {tab === "credentials" && <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={names((m) => m.shellAccess)} lang={lang} />}

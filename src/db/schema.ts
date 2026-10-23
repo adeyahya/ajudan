@@ -58,6 +58,13 @@ export const businesses = sqliteTable("businesses", {
    * keys take the defaults in src/lib/team-edits.ts.
    */
   teamEdits: text("team_edits", { mode: "json" }).$type<Partial<Record<import("@/lib/team-edits").EditArea, boolean>>>(),
+  /**
+   * Supervised: every change the team makes (outward actions, team edits) waits for the
+   * owner's approval, whatever each teammate's freedom and Team permissions say. Off, those apply.
+   */
+  supervised: integer("supervised", { mode: "boolean" }).notNull().default(false),
+  /** Which model provider runs the team (src/lib/backend.ts). Null: Claude Code with the local login. */
+  aiBackend: text("ai_backend", { mode: "json" }).$type<import("@/lib/backend").BackendSettings>(),
   createdAt: createdAt(),
 });
 

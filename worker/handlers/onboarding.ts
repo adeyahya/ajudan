@@ -76,6 +76,7 @@ export async function onboardingTurn({ businessId }: JobPayloads["onboarding_tur
     }
 
     const res = await runAgent({
+      businessId,
       prompt,
       systemPrompt: interviewerSystemPrompt(biz.name, biz.website, biz.language),
       cwd: businessWorkspace(),
@@ -130,6 +131,7 @@ export async function onboardingFinalize({ businessId }: JobPayloads["onboarding
     const transcript = messages.map((m) => `${m.role === "user" ? "OWNER" : "INTERVIEWER"}: ${m.content}`).join("\n\n");
 
     const res = await runAgent<BusinessProfile>({
+      businessId,
       prompt: `Business name: ${biz.name}
 Website: ${biz.website ?? "(none)"}
 

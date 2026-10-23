@@ -18,6 +18,7 @@ import { logEvent } from "@/lib/events";
 import { folderInfo, readConfig } from "@/lib/folders";
 import { claimJob, finishJob, needsClaude, requeueJob, requeueStaleJobs, type Lane } from "@/lib/jobs";
 import { pinDataDir } from "@/lib/paths";
+import { backendOf } from "@/lib/backend";
 import { readRest, startRest, UsageLimitError } from "@/lib/rest";
 import { ensureContextWorkspace } from "@/lib/context";
 import { HEARTBEAT_MS, removeHeartbeat, writeHeartbeat } from "@/lib/worker-heartbeat";
@@ -245,9 +246,10 @@ function tick() {
   if (!folder) return;
   abortCancelledRuns();
   noticeRest();
+  const waiting = resting && onClaude();
   for (const [lane, max] of [["owner", OWNER_CONCURRENCY], ["live", LIVE_CONCURRENCY], ["team", CONCURRENCY], ["studio", 1]] as const) {
     while (running[lane] < max) {
-      const job = claimJob(lane, resting ? (j) => !needsClaude(j) : undefined);
+      const job = claimJob(lane, waiting ? (j) => !needsClaude(j) : undefined);
       if (!job) break;
       running[lane]++;
       const p = runJob(job).finally(() => {
@@ -257,6 +259,11 @@ function tick() {
       inflight.add(p);
     }
   }
+}
+
+/** The rest is the shared Claude login's; a business on OpenRouter or Ollama keeps working through it. */
+function onClaude() {
+  return db.select({ b: schema.businesses.aiBackend }).from(schema.businesses).all().some((r) => backendOf(r.b).provider === "claude");
 }
 
 /** Tell the office when the team starts or stops resting (the rest is shared by every worker). */

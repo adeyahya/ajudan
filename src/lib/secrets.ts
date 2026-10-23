@@ -113,3 +113,23 @@ export function redact(text: string, values: Map<string, string>) {
   for (const [name, v] of values) if (v.length >= 4) out = out.split(v).join(`[secret ${name}]`);
   return out;
 }
+
+/**
+ * The AI backend's API key (src/lib/backend.ts), stored like a secret but outside the
+ * secrets table: teammates can't list it, and its lowercase name never matches {{secret.NAME}}.
+ */
+export const BACKEND_KEY = "ajudan-backend-key";
+
+export async function setBackendKey(businessId: string, value: string) {
+  const v = value.trim();
+  if (!v) return;
+  if (KEYCHAIN) {
+    await run("/usr/bin/security", ["add-generic-password", "-U", "-s", service(businessId), "-a", BACKEND_KEY, "-l", "Ajudan: AI backend key", "-w", v]);
+  } else {
+    const store = readFileStore();
+    store[BACKEND_KEY] = v;
+    fs.writeFileSync(fileStore(), JSON.stringify(store, null, 2), { mode: 0o600 });
+  }
+}
+
+export const backendKey = (businessId: string) => secretValue(businessId, BACKEND_KEY);

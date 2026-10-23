@@ -26,7 +26,8 @@ import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
-import { canTeamEdit, EDIT_AREAS, editOffMessage } from "@/lib/team-edits";
+import { canTeamEdit, EDIT_AREAS, editOffMessage, type EditArea } from "@/lib/team-edits";
+import { isSupervised } from "@/lib/supervision";
 import { matchIds } from "@/lib/search";
 import { PLACEHOLDER, findSecret, hostAllowed, listSecrets, normalizeHost, redact, secretValue } from "@/lib/secrets";
 import { onTaskFinished, REVISION } from "@/lib/manager";
@@ -53,8 +54,6 @@ export const SAFE_BIZ_TOOLS = [
   "render_image",
   "list_media",
   "search_contacts",
-  "save_contact",
-  "organize_media",
   "inspect_media",
   "extract_frames",
   "render_video",
@@ -72,6 +71,15 @@ export const SAFE_BIZ_TOOLS = [
 ].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
+/**
+ * Team edits (src/lib/team-edits.ts) by tool, with their area. The tools refuse when the
+ * area is off; when it's on they run, except in supervised mode, where the owner
+ * approves each call first (worker/handlers/task.ts).
+ */
+export const EDIT_BIZ_TOOLS: Record<string, EditArea> = {
+  [`mcp__${BIZ_SERVER}__save_contact`]: "contacts",
+  [`mcp__${BIZ_SERVER}__organize_media`]: "library",
+};
 /** Talking to the team's human teammates on WhatsApp (not for draft-only teammates). */
 export const HUMAN_TOOLS = ["ask_human", "message_human", "close_human_request", "human_conversation"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
 /** Allowed for GET/HEAD; other methods change things and are gated like publishing (worker/handlers/task.ts). */
@@ -662,7 +670,8 @@ export function createBizServer(ctx: BizContext) {
       },
       async (a) => {
         if (!a.markdown.trim()) return fail("Nothing to suggest: markdown is empty.");
-        const direct = canTeamEdit(businessId, "context");
+        // Supervised: even a team that may edit pages proposes, and the owner accepts.
+        const direct = canTeamEdit(businessId, "context") && !isSupervised(businessId);
         if (a.mode === "new_page") {
           if (!a.title?.trim()) return fail("A new page needs a title.");
           const same = findPage(businessId, a.title);

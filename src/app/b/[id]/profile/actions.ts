@@ -1,6 +1,6 @@
 "use server";
 
-import { deleteSecret, normalizeHost, setSecret } from "@/lib/secrets";
+import { backendKey, deleteSecret, normalizeHost, setBackendKey, setSecret } from "@/lib/secrets";
 import { eq } from "drizzle-orm";
 import { refresh, revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
@@ -15,6 +15,8 @@ import { BusinessProfileSchema } from "@/lib/types";
 import { refreshWorkspaces } from "@/lib/workspace";
 import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
 import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
+import { setSupervised } from "@/lib/supervision";
+import { backendOf, isProvider, PROVIDER_DEFAULTS, type BackendSettings } from "@/lib/backend";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -192,4 +194,60 @@ export async function setTeamEditAction(businessId: string, area: EditArea, on: 
   if (!EDIT_AREAS.includes(area)) throw new Error("Unknown area");
   setTeamEdit(businessId, area, on === true);
   refresh();
+}
+
+/** Supervised mode: every change the team makes waits for the owner (src/lib/supervision.ts). */
+export async function setSupervisedAction(businessId: string, on: boolean) {
+  const biz = db.select({ id: schema.businesses.id }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  setSupervised(businessId, on === true);
+  refresh();
+}
+
+/** Business → AI backend: provider, endpoint and models; the key goes to the Keychain. */
+export async function saveBackendAction(businessId: string, fd: FormData) {
+  const biz = db.select({ id: schema.businesses.id, language: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  const provider = fd.get("provider");
+  if (!isProvider(provider)) throw new Error(t(biz.language, "profile.backend.err.provider"));
+  const str = (k: string) => String(fd.get(k) ?? "").trim() || undefined;
+  const baseUrl = str("baseUrl");
+  if (baseUrl && !/^https?:\/\/[^\s]+$/.test(baseUrl)) throw new Error(t(biz.language, "profile.backend.err.url"));
+  const key = str("apiKey");
+  if (key) await setBackendKey(businessId, key);
+  if (PROVIDER_DEFAULTS[provider].needsKey && !key && !(await backendKey(businessId))) throw new Error(t(biz.language, "profile.backend.err.key"));
+  const settings: BackendSettings = provider === "claude" ? { provider } : { provider, baseUrl, mainModel: str("mainModel"), fastModel: str("fastModel") };
+  db.update(schema.businesses).set({ aiBackend: settings }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/**
+ * Check the saved backend answers: Ollama is running and has the models, OpenRouter
+ * accepts the key. Only reads; no tokens spent.
+ */
+export async function testBackendAction(businessId: string): Promise<{ ok: boolean; message: string }> {
+  const biz = db.select().from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  const lang = biz.language;
+  const b = backendOf(biz.aiBackend);
+  try {
+    if (b.provider === "ollama") {
+      const res = await fetch(`${b.baseUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return { ok: false, message: t(lang, "profile.backend.test.http", { status: String(res.status) }) };
+      const have = ((await res.json()) as { models?: { name: string }[] }).models?.map((m) => m.name) ?? [];
+      const missing = [...new Set([b.mainModel, b.fastModel])].filter((m) => !have.includes(m) && !have.includes(`${m}:latest`));
+      return missing.length
+        ? { ok: false, message: t(lang, "profile.backend.test.missing", { models: missing.join(", "), cmd: `ollama pull ${missing[0]}` }) }
+        : { ok: true, message: t(lang, "profile.backend.test.ok") };
+    }
+    if (b.provider === "openrouter") {
+      const key = await backendKey(businessId);
+      if (!key) return { ok: false, message: t(lang, "profile.backend.err.key") };
+      const res = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+      return res.ok ? { ok: true, message: t(lang, "profile.backend.test.ok") } : { ok: false, message: t(lang, "profile.backend.test.http", { status: String(res.status) }) };
+    }
+    return { ok: true, message: t(lang, "profile.backend.test.claude") };
+  } catch {
+    return { ok: false, message: t(lang, "profile.backend.test.unreachable", { url: b.baseUrl }) };
+  }
 }

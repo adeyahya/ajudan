@@ -90,6 +90,7 @@ export async function reorganizeContext({ businessId }: JobPayloads["context_reo
   const ac = runAbortController();
   try {
     const res = await runAgent<z.infer<typeof Output>>({
+      businessId,
       cwd: dataDir(),
       model: MODELS.main,
       systemPrompt: `You are the editor of ${business.name}'s Context workspace: the pages the owner keeps about the business, which the AI team reads before working. Your job is to propose a tidier, more useful layout. The owner reviews every step and accepts or rejects it, so each step must stand on its own and be easy to judge.

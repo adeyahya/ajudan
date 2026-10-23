@@ -33,6 +33,7 @@ export async function consolidateMemory({ teammateId, force }: JobPayloads["cons
   const ac = runAbortController();
   try {
     const res = await runAgent<z.infer<typeof Output>>({
+      businessId: business.id,
       cwd: path.join(dir, "work"),
       model: MODELS.fast,
       systemPrompt: `You tidy the long-term notes of ${teammate.name}, the ${teammate.title} on ${business.name}'s AI team. The notes are read in full before every piece of work, so they must stay short and useful. You never invent anything that isn't in the notes.\n\n${languageInstruction(business.language)}`,
