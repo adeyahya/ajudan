@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { ContextPage, ContextSection, ReaderMode, Teammate } from "@/db/schema";
-import { applySuggestion, budgetPages, DEFAULT_ICONS, defaultReaderMode, forAgents, readerMode, SECTIONS } from "@/lib/context-text";
+import type { ContextPage, ContextSection, ReaderMode, SuggestionKind, Teammate } from "@/db/schema";
+import { applySuggestion, budgetPages, DEFAULT_ICONS, defaultReaderMode, forAgents, normalizeMarkdown, readerMode, SECTIONS } from "@/lib/context-text";
 import { logEvent } from "@/lib/events";
 import { t } from "@/lib/i18n";
 import { teammatesRoot } from "@/lib/paths";
@@ -372,7 +372,7 @@ export function createSuggestion(v: {
   teammate: Pick<Teammate, "id" | "name">;
   taskId?: string | null;
   page?: ContextPage;
-  kind: "append" | "replace" | "new_page";
+  kind: SuggestionKind;
   body: string;
   title?: string;
   section?: ContextSection;
@@ -401,7 +401,7 @@ export function createSuggestion(v: {
     teammateId: v.teammate.id,
     taskId: v.taskId ?? null,
     type: "context_suggested",
-    message: `${v.teammate.name} suggested ${v.kind === "new_page" ? `a new page "${v.title}"` : `an edit to "${v.page?.title}"`}`,
+    message: `${v.teammate.name} suggested ${v.kind === "new_page" ? `a new page "${v.title}"` : v.kind === "delete" ? `removing "${v.page?.title}"` : `an edit to "${v.page?.title}"`}`,
     data: { suggestionId: s.id, pageId: s.pageId },
   });
   return s;
@@ -419,6 +419,8 @@ export function pendingSuggestions(businessId: string, pageId?: string) {
 /**
  * The owner's answer. Accepting applies it to the page as it is now (an append still
  * lands at the end even if the page changed since); `body` is the owner's edited text.
+ * A "replace" whose text is what the page said when proposed only renames or moves it
+ * (so a rename doesn't undo the owner's edits since); "delete" removes the page.
  */
 export function decideSuggestion(businessId: string, id: string, accept: boolean, body?: string) {
   const s = db.select().from(schema.contextSuggestions).where(and(eq(schema.contextSuggestions.id, id), eq(schema.contextSuggestions.businessId, businessId))).get();
@@ -432,10 +434,20 @@ export function decideSuggestion(businessId: string, id: string, accept: boolean
     } else {
       const page = s.pageId ? getPage(businessId, s.pageId) : undefined;
       if (!page) return { error: "page_gone" as const };
-      db.update(schema.contextPages)
-        .set({ body: applySuggestion(page.body, { kind: s.kind, body: text }), blocks: null, updatedBy: by, updatedAt: now() })
-        .where(eq(schema.contextPages.id, page.id))
-        .run();
+      if (s.kind === "delete") {
+        if (page.key || page.kind === "database") return { error: "cant_delete" as const };
+        // The suggestion outlives the page (its page_id would cascade it away).
+        db.update(schema.contextSuggestions).set({ status: "accepted", decidedAt: now(), pageId: null }).where(eq(schema.contextSuggestions.id, s.id)).run();
+        deletePage(businessId, page.id);
+        logEvent({ businessId, teammateId: s.teammateId, taskId: s.taskId, type: "context_decided", message: `Owner removed the page "${page.title}"`, data: { suggestionId: s.id, pageId: null } });
+        return { ok: true as const, pageId: null };
+      }
+      const sameText = s.kind === "replace" && s.before !== null && normalizeMarkdown(text) === normalizeMarkdown(s.before);
+      const set: Partial<ContextPage> = { updatedBy: by, updatedAt: now() };
+      if (!sameText) Object.assign(set, { body: applySuggestion(page.body, { kind: s.kind, body: text }), blocks: null });
+      if (s.kind === "replace" && s.title?.trim()) set.title = s.title.trim().slice(0, 120);
+      db.update(schema.contextPages).set(set).where(eq(schema.contextPages.id, page.id)).run();
+      if (s.kind === "replace" && s.section && s.section !== page.section && SECTIONS.includes(s.section)) movePage(businessId, page.id, { parentId: null, section: s.section });
       if (page.key === "learned") writeTeamNotesFile(businessId);
     }
   }

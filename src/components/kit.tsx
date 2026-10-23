@@ -389,6 +389,8 @@ const PAGE_W = {
   default: "max-w-[var(--content-w)]",
   wide: "max-w-[var(--content-w-wide)]",
   full: "max-w-[1480px]",
+  /** Documents: 860px, or the whole page in full-width mode (src/components/doc-layout.tsx). */
+  doc: "max-w-[var(--doc-w)]",
 } as const;
 
 /**

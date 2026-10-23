@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { TopBarActions, useBreadcrumb } from "@/components/breadcrumb";
+import { DocLayoutButtons } from "@/components/doc-layout";
 import { useLang, useT, useTn } from "@/components/i18n";
 import { Avatar, Button, cn, CountPill, EditorSkeleton, IconButton, PageBody, PropertyList } from "@/components/kit";
 import { SidePeek, SidePeekLayout, useUrlPeek } from "@/components/side-peek";
@@ -48,8 +49,8 @@ const PEEK_TABS: PeekTab[] = ["suggestions", "readers", "usage"];
 
 /**
  * One Konteks page, like a Notion page: optional cover (full width), icon, a 40px title,
- * properties (who reads it, owner, last checked, section), then the editor in the 708px
- * column. The top bar carries the save state, "Suggestions (n)" and a "…" menu; the
+ * properties (who reads it, owner, last checked, section), then the editor in the doc
+ * column (860px, or full width / focus mode from the top bar: src/components/doc-layout.tsx). The top bar carries the save state, "Suggestions (n)" and a "…" menu; the
  * suggestions, readers and usage open in a side peek (?peek=…).
  */
 export function PageView(p: {
@@ -231,6 +232,7 @@ export function PageView(p: {
         <span aria-live="polite" className={cn("hidden px-1 text-xs whitespace-nowrap sm:inline", status === "failed" ? "text-destructive" : "text-tertiary")} title={status === "failed" ? t("context.saveFailed") : undefined}>
           {status === "saving" ? t("context.saving") : status === "saved" ? t("context.saved") : status === "failed" ? t("context.saveFailedShort") : ""}
         </span>
+        <DocLayoutButtons />
         <Button size="sm" variant="ghost" onClick={() => (peek.value ? peek.close() : peek.open("suggestions"))} aria-pressed={!!peek.value}>
           <BookmarkPlus />
           <span className="hidden sm:inline">{t("context.peek.tabSuggestions")}</span>
@@ -282,7 +284,7 @@ export function PageView(p: {
 
       {cover && <Cover businessId={businessId} cover={cover} covers={p.covers} onPick={pickCover} />}
 
-      <PageBody width="default" className={cn(cover ? "pt-0 sm:pt-0" : "sm:pt-16")}>
+      <PageBody width="doc" className={cn(cover ? "pt-0 sm:pt-0" : "sm:pt-16")}>
         <div className="group/head">
           {icon ? (
             <IconPicker open={iconOpen} onOpenChange={setIconOpen} onPick={pickIcon}>

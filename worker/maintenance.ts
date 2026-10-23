@@ -1,14 +1,16 @@
 /**
  * Housekeeping for the open business folder: a daily database backup
  * (backups/daily-YYYY-MM-DD.db, the last 7 kept) and pruning of old activity
- * events and finished jobs, which otherwise grow without bound. Runs once when a
- * folder is opened and then once a day.
+ * events and finished jobs, which otherwise grow without bound, and the weekly Context
+ * review when the owner turned it on (src/lib/reorganize.ts). Runs once when a folder is
+ * opened and then once a day.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { and, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { backupsDir } from "@/lib/paths";
+import { dueReorganizeBusinesses, requestReorganize } from "@/lib/reorganize";
 
 const DAY = 24 * 60 * 60 * 1000;
 const KEEP_EVENTS_DAYS = 30;
@@ -40,6 +42,11 @@ export function runMaintenance(dir: string) {
     prune();
   } catch (err) {
     console.error("[maintenance] pruning failed", err);
+  }
+  try {
+    for (const id of dueReorganizeBusinesses()) if (requestReorganize(id, true)) console.log(`[maintenance] queued the weekly Context review for ${id}`);
+  } catch (err) {
+    console.error("[maintenance] couldn't queue the Context review", err);
   }
 }
 

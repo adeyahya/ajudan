@@ -39,24 +39,27 @@ export function StudioShell({ peek, children }: { peek?: ReactNode; children: Re
   ];
   const body = (
     <PageBody width="full">
-      <PageHeader
-        className="mb-5"
-        title={
-          <span className="inline-flex items-center gap-1.5">
-            {t("nav.studio")}
-            <IconButton label={t("studio.noUsage")} side="right" className="size-6">
-              <Info />
-            </IconButton>
-          </span>
-        }
-      />
-      <LineTabs
-        label={t("nav.studio")}
-        items={tabs.map((tab) => {
-          const href = base + tab.href;
-          return { href, label: tab.label, icon: tab.icon, active: tab.href === "" ? pathname === base : pathname.startsWith(href) };
-        })}
-      />
+      {/* Focus mode (src/components/doc-layout.tsx) hides the Studio's title and tabs. */}
+      <div data-focus-hide>
+        <PageHeader
+          className="mb-5"
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              {t("nav.studio")}
+              <IconButton label={t("studio.noUsage")} side="right" className="size-6">
+                <Info />
+              </IconButton>
+            </span>
+          }
+        />
+        <LineTabs
+          label={t("nav.studio")}
+          items={tabs.map((tab) => {
+            const href = base + tab.href;
+            return { href, label: tab.label, icon: tab.icon, active: tab.href === "" ? pathname === base : pathname.startsWith(href) };
+          })}
+        />
+      </div>
       <div className="@container mt-6">{children}</div>
     </PageBody>
   );

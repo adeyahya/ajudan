@@ -27,7 +27,8 @@ import {
 } from "lucide-react";
 import { db, schema } from "@/db";
 import { LiveRefresh } from "@/components/live";
-import { SetBreadcrumb, type Crumb } from "@/components/breadcrumb";
+import { SetBreadcrumb, TopBarActions, type Crumb } from "@/components/breadcrumb";
+import { DocLayoutButtons } from "@/components/doc-layout";
 import { DataTable, Gallery, GalleryTile, type Column } from "@/components/data-table";
 import { Button, CardGridSkeleton, EmptyState, IconButton, Input, PageBody, PageHeader, PropertyList, Skeleton, cn } from "@/components/kit";
 import { FileMarkdown } from "@/components/markdown";
@@ -146,11 +147,12 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/files">) {
   );
 
   return (
-    <PageBody width="wide">
+    // A file gets the whole page (documents, PDFs, sheets); folders and search stay at table width.
+    <PageBody width={q || stat.isDir ? "wide" : "full"}>
       <LiveRefresh businessId={id} types={LIVE} />
       <SetBreadcrumb items={crumbs} />
-      <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="hidden lg:block">
+      <div data-focus-grid className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <aside data-focus-hide className="hidden lg:block">
           <div className="sticky top-[calc(var(--topbar-h)+16px)] space-y-3">
             {search}
             <nav aria-label={t(lang, "files.tree")} className="space-y-px">
@@ -460,7 +462,8 @@ function FileView({ businessId, rel, size: bytes, mtime, lang }: { businessId: s
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      {/* Markdown reads as a document, without a frame. */}
+      <div className={cn("overflow-hidden rounded-lg border border-border", type === "markdown" && "-mx-6 rounded-none border-0 sm:-mx-10")}>
         {type === "image" && (
           <div className="flex justify-center bg-muted p-6">
             {/* eslint-disable-next-line @next/next/no-img-element -- local files from the business folder */}
@@ -475,7 +478,14 @@ function FileView({ businessId, rel, size: bytes, mtime, lang }: { businessId: s
           </div>
         )}
         {type === "pdf" && <iframe src={url} title={name} className="h-[75vh] w-full bg-background" />}
-        {type === "markdown" && text && <MarkdownPreview businessId={businessId} rel={rel} text={text.text} />}
+        {type === "markdown" && text && (
+          <>
+            <TopBarActions>
+              <DocLayoutButtons />
+            </TopBarActions>
+            <MarkdownPreview businessId={businessId} rel={rel} text={text.text} />
+          </>
+        )}
         {type === "csv" && text && <CsvPreview text={text.text} lang={lang} />}
         {type === "json" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-5">{prettyJson(text.text)}</pre>}
         {type === "text" && text && <pre className="max-h-[75vh] overflow-auto p-4 font-mono text-xs leading-5 whitespace-pre-wrap">{text.text}</pre>}
@@ -503,7 +513,8 @@ function FileView({ businessId, rel, size: bytes, mtime, lang }: { businessId: s
 function MarkdownPreview({ businessId, rel, text }: { businessId: string; rel: string; text: string }) {
   const { meta, body } = frontMatter(text);
   return (
-    <div className="max-h-[75vh] overflow-auto px-6 py-5">
+    // The page scrolls (no box inside it); the text keeps a reading width unless full width is on.
+    <div className="mx-auto w-full max-w-[var(--doc-w)] px-6 py-8 sm:px-10">
       {meta.length > 0 && (
         <PropertyList
           className="mb-5 border-b border-border pb-4"

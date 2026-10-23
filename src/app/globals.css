@@ -114,6 +114,8 @@
   /* Layout */
   --content-w: 708px;
   --content-w-wide: 1100px;
+  /* Documents (Context pages, Studio docs, markdown files); full width: see doc-layout.tsx */
+  --doc-w: 860px;
   --topbar-h: 44px;
   --bottombar-h: 0px;
   --sidebar-w-open: 240px;
@@ -392,6 +394,21 @@ html[data-sidebar="collapsed"] .app-sidebar {
 }
 html[data-sidebar="collapsed"] .sidebar-resize {
   display: none;
+}
+/* Documents: full width and focus mode (src/components/doc-layout.tsx). */
+html[data-doc-wide] {
+  --doc-w: 1480px;
+}
+html[data-doc-focus] {
+  --sidebar-w: 0px;
+}
+html[data-doc-focus] [data-focus-grid] {
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-doc-focus] .app-sidebar,
+html[data-doc-focus] .sidebar-resize,
+html[data-doc-focus] [data-focus-hide] {
+  display: none !important;
 }
 /* Collapsible sidebar sections (state on <html data-sec-<name>="closed">). */
 html[data-sec-workspace="closed"] [data-sec-body="workspace"],

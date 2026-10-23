@@ -144,7 +144,8 @@ export function SuggestionDiff({ s }: { s: SuggestionView }) {
   );
 }
 
-function SuggestionItem({ businessId, s, mate, onDecided }: { businessId: string; s: SuggestionView; mate?: Mate; onDecided: (id: string) => void }) {
+/** One suggestion with Accept / Edit / Reject. `showPage`: name the page it changes (the Organize list). */
+export function SuggestionItem({ businessId, s, mate, onDecided, showPage = false }: { businessId: string; s: SuggestionView; mate?: Mate; onDecided: (id: string) => void; showPage?: boolean }) {
   const t = useT();
   const lang = useLang();
   const [editing, setEditing] = useState(false);
@@ -166,6 +167,17 @@ function SuggestionItem({ businessId, s, mate, onDecided }: { businessId: string
         <span className="ml-auto shrink-0 text-xs text-tertiary">{new Date(s.createdAt).toLocaleDateString(dateLocale(lang), { day: "numeric", month: "short" })}</span>
       </header>
       {s.kind === "new_page" && <p className="text-[13px] font-medium">{t("context.suggest.newPage", { title: s.title ?? "", section: s.section ? t(`context.section.${s.section}`) : "" })}</p>}
+      {showPage && s.kind !== "new_page" && s.pageId && (
+        <p className="text-[13px] font-medium">
+          {t(s.kind === "delete" ? "context.suggest.removePage" : "context.suggest.onPage")}{" "}
+          <Link href={`/b/${businessId}/context?page=${s.pageId}`} className="underline decoration-border-strong underline-offset-2 hover:decoration-foreground">
+            {s.pageTitle}
+          </Link>
+        </p>
+      )}
+      {!showPage && s.kind === "delete" && <p className="text-[13px] font-medium">{t("context.suggest.removeThis")}</p>}
+      {s.kind === "replace" && s.title && <p className="text-[13px]">{t("context.suggest.rename", { title: s.title })}</p>}
+      {s.kind === "replace" && s.section && <p className="text-[13px]">{t("context.suggest.move", { section: t(`context.section.${s.section}`) })}</p>}
       {s.reason && <p className="text-[13px] leading-[18px] text-foreground">{s.reason}</p>}
       {s.source && (
         <p className="text-xs text-muted-foreground">
@@ -173,14 +185,20 @@ function SuggestionItem({ businessId, s, mate, onDecided }: { businessId: string
         </p>
       )}
       {s.changedSince && <p className="rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-tag-yellow-fg">{t("context.suggest.changedSince")}</p>}
-      {editing ? <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} className="font-mono text-xs" aria-label={t("context.edit")} /> : <SuggestionDiff s={s} />}
+      {editing ? (
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} className="font-mono text-xs" aria-label={t("context.edit")} />
+      ) : (
+        s.diff.some((l) => l.op === "add" || l.op === "del") && <SuggestionDiff s={s} />
+      )}
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" loading={pending} onClick={() => decide(true, editing ? text : undefined)}>
           {t("context.accept")}
         </Button>
-        <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing(!editing)}>
-          {editing ? t("context.cancel") : t("context.edit")}
-        </Button>
+        {s.kind !== "delete" && (
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing(!editing)}>
+            {editing ? t("context.cancel") : t("context.edit")}
+          </Button>
+        )}
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => decide(false)}>
           {t("context.reject")}
         </Button>

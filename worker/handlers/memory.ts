@@ -7,7 +7,7 @@ import { MODELS, runAgent } from "@/lib/claude";
 import { logEvent } from "@/lib/events";
 import type { JobPayloads } from "@/lib/jobs";
 import { languageInstruction } from "@/lib/language";
-import { MEMORY_SECTIONS, memoryNeedsConsolidation, memoryTitle, rejectConsolidated } from "@/lib/memory";
+import { MEMORY_FORCE_MIN_BYTES, MEMORY_SECTIONS, memoryNeedsConsolidation, memoryTitle, rejectConsolidated } from "@/lib/memory";
 import { resolveWorkspace } from "@/lib/paths";
 import { PausedError, runAbortController } from "../session";
 
@@ -18,7 +18,7 @@ const Output = z.object({ memory: z.string() });
  * on the fast model, keeping the previous version next to it as memory.prev.md.
  * Queued by the task handler after a run; nothing waits on it.
  */
-export async function consolidateMemory({ teammateId }: JobPayloads["consolidate_memory"]) {
+export async function consolidateMemory({ teammateId, force }: JobPayloads["consolidate_memory"]) {
   const teammate = db.select().from(schema.teammates).where(eq(schema.teammates.id, teammateId)).get();
   if (!teammate?.workspaceDir) return;
   const business = db.select().from(schema.businesses).where(eq(schema.businesses.id, teammate.businessId)).get();
@@ -27,7 +27,7 @@ export async function consolidateMemory({ teammateId }: JobPayloads["consolidate
   const file = path.join(dir, "memory.md");
   if (!fs.existsSync(file)) return;
   const before = fs.statSync(file);
-  if (!memoryNeedsConsolidation(before.size)) return;
+  if (!memoryNeedsConsolidation(before.size) && !(force && before.size > MEMORY_FORCE_MIN_BYTES)) return;
   const original = fs.readFileSync(file, "utf8");
 
   const ac = runAbortController();
@@ -66,6 +66,8 @@ ${original}
     if (!res.ok || !res.structured) throw new Error(res.error ?? "No rewrite returned");
     const rewritten = `${res.structured.memory.trim()}\n`;
     const why = rejectConsolidated(original, rewritten);
+    // Already tidy (a forced run on short notes): nothing to change.
+    if (why === "not smaller" && force) return;
     if (why) throw new Error(`Rewrite rejected (${why})`);
 
     // Another run may have appended meanwhile: don't lose what it wrote.

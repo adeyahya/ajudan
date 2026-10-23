@@ -144,7 +144,7 @@ export function ContextSidebar({ businessId, pages }: { businessId: string; page
   }
   return (
     <>
-      <aside aria-label={t("context.title")} className="sticky top-(--topbar-h) hidden h-[calc(100dvh-var(--topbar-h))] w-[260px] shrink-0 flex-col border-r border-border bg-background lg:flex">
+      <aside data-focus-hide aria-label={t("context.title")} className="sticky top-(--topbar-h) hidden h-[calc(100dvh-var(--topbar-h))] w-[260px] shrink-0 flex-col border-r border-border bg-background lg:flex">
         <TreeBody businessId={businessId} pages={pages} shortcuts />
       </aside>
       <TopBarActions>
@@ -362,6 +362,7 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
     { href: base, label: t("context.tab.pages"), active: pathname === base },
     { href: `${base}/people`, label: t("context.tab.people"), active: pathname.startsWith(`${base}/people`) },
     { href: `${base}/readers`, label: t("context.tab.readers"), active: pathname.startsWith(`${base}/readers`) },
+    { href: `${base}/organize`, label: t("context.tab.organize"), active: pathname.startsWith(`${base}/organize`) },
   ];
 
   const row = (p: TreePage, depth: number) => (

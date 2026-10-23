@@ -1,11 +1,16 @@
 "use server";
 
+import fs from "node:fs";
+import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import type { ContextSection, ReaderMode } from "@/db/schema";
 import { deleteContact, saveContact, type ContactInput } from "@/lib/contacts";
 import { createPage, decideSuggestion, deletePage, movePage, SECTIONS, setReaderMode, updatePage } from "@/lib/context";
+import { MEMORY_FORCE_MIN_BYTES } from "@/lib/memory";
+import { resolveWorkspace } from "@/lib/paths";
+import { pendingReorganize, requestReorganize, setReorganizeSchedule } from "@/lib/reorganize";
 import { t } from "@/lib/i18n";
 import { enqueueJob } from "@/lib/jobs";
 import { ensureManager } from "@/lib/manager";
@@ -141,4 +146,48 @@ export async function testAskAction(businessId: string, teammateId: string, ques
   const ask = db.insert(schema.contextAsks).values({ businessId, teammateId, question: q }).returning().get();
   enqueueJob("context_test_ask", { askId: ask.id });
   refresh();
+}
+
+/** "Reorganize with AI": queue the review (the worker runs it). False when one is already waiting or running. */
+export async function reorganizeAction(businessId: string) {
+  ownBusiness(businessId);
+  const queued = requestReorganize(businessId) !== null;
+  refresh();
+  return queued;
+}
+
+export async function setReorganizeWeeklyAction(businessId: string, weekly: boolean) {
+  ownBusiness(businessId);
+  setReorganizeSchedule(businessId, weekly);
+  refresh();
+}
+
+/** Accept or reject every pending suggestion from the review, in order. Returns how many went through. */
+export async function decideAllReorganizeAction(businessId: string, accept: boolean) {
+  ownBusiness(businessId);
+  let done = 0;
+  let failed = 0;
+  for (const s of pendingReorganize(businessId)) {
+    // An earlier step may have removed this page (a merge): its suggestion went with it.
+    const r = decideSuggestion(businessId, s.id, accept);
+    if ("ok" in r) done++;
+    else if (r.error !== "already_decided") failed++;
+  }
+  refresh();
+  return { done, failed };
+}
+
+/** "Tidy memory now": rewrite each AI teammate's memory.md into sections (worker/handlers/memory.ts). */
+export async function tidyMemoryAction(businessId: string) {
+  ownBusiness(businessId);
+  const mates = db.select().from(schema.teammates).where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active"), eq(schema.teammates.kind, "ai"))).all();
+  let count = 0;
+  for (const m of mates) {
+    if (!m.workspaceDir) continue;
+    const size = fs.statSync(path.join(resolveWorkspace(m.workspaceDir), "memory.md"), { throwIfNoEntry: false })?.size ?? 0;
+    if (size <= MEMORY_FORCE_MIN_BYTES) continue;
+    enqueueJob("consolidate_memory", { teammateId: m.id, force: true });
+    count++;
+  }
+  return count;
 }

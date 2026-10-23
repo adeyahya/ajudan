@@ -65,6 +65,10 @@ export const en = {
   "shortcuts.then": "then",
 
   "peek.openAsPage": "Open as page",
+  "doc.wide": "Full width",
+  "doc.narrow": "Reading width",
+  "doc.focus": "Focus mode",
+  "doc.exitFocus": "Leave focus mode",
   "peek.resize": "Drag to resize",
 
   "table.open": "Open",
@@ -202,6 +206,10 @@ export const id: Record<keyof typeof en, string> = {
   "shortcuts.then": "lalu",
 
   "peek.openAsPage": "Buka sebagai halaman",
+  "doc.wide": "Lebar penuh",
+  "doc.narrow": "Lebar baca",
+  "doc.focus": "Mode fokus",
+  "doc.exitFocus": "Keluar dari mode fokus",
   "peek.resize": "Seret untuk mengubah lebar",
 
   "table.open": "Buka",

@@ -11,11 +11,12 @@ import { markPosted } from "./actions";
 /**
  * The Work page's side peek (`?d=<deliverableId>`; search results link here). The body is
  * rendered on the server and passed in; this only owns open/close (Esc, X, the phone sheet).
+ * "Open as page" opens it in the Studio's doc editor, with the whole page to read and edit.
  */
-export function DeliverablePeek({ open, title, children }: { open: boolean; title?: string; children: ReactNode }) {
+export function DeliverablePeek({ open, title, openHref, children }: { open: boolean; title?: string; openHref?: string; children: ReactNode }) {
   const peek = useUrlPeek("d");
   return (
-    <SidePeek open={open} onClose={peek.close} title={title}>
+    <SidePeek open={open} onClose={peek.close} title={title} openHref={openHref}>
       {children}
     </SidePeek>
   );

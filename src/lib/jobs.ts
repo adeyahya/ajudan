@@ -15,12 +15,14 @@ export type JobPayloads = {
   design_team: { businessId: string };
   /** `approvalId`: continue a task that waited for this (now decided) approval. */
   run_task: { taskId: string; approvalId?: string };
-  /** Rewrite a teammate's grown memory.md into sections (worker/handlers/memory.ts). */
-  consolidate_memory: { teammateId: string };
+  /** Rewrite a teammate's grown memory.md into sections (worker/handlers/memory.ts). `force`: the owner asked, whatever its size. */
+  consolidate_memory: { teammateId: string; force?: boolean };
   /** A Studio edit rendered with ffmpeg (worker/edits.ts). */
   render_edit: { editId: string };
   /** The inspector's "Test-ask": a dry run on a teammate's context (worker/handlers/context.ts). */
   context_test_ask: { askId: string };
+  /** An agent reviews the Context pages and proposes a tidier layout as suggestions (worker/handlers/reorganize.ts). */
+  context_reorganize: { businessId: string; auto?: boolean };
 };
 
 /** Queue work for the worker process (`pnpm worker`). All Claude calls happen there. */
@@ -39,7 +41,7 @@ export type Lane = "owner" | "live" | "team" | "studio";
 export function laneOf(job: Pick<Job, "kind" | "payload">): Lane {
   // Studio renders (ffmpeg) are long and need no Claude: their own slot, never in the way of chats.
   if (job.kind === "render_edit") return "studio";
-  if (job.kind === "consolidate_memory") return "team";
+  if (job.kind === "consolidate_memory" || job.kind === "context_reorganize") return "team";
   if (job.kind !== "run_task") return "owner";
   const row = taskOf(job);
   if (row?.urgent) return "live";

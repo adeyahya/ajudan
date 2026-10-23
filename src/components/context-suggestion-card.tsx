@@ -7,10 +7,11 @@ import { toast } from "sonner";
 import { useT } from "@/components/i18n";
 import { Button, Prose, Textarea } from "@/components/kit";
 import { decideSuggestionAction } from "@/app/b/[id]/context/actions";
+import type { SuggestionKind } from "@/db/schema";
 
 export type SuggestionCardData = {
   id: string;
-  kind: "append" | "replace" | "new_page";
+  kind: SuggestionKind;
   body: string;
   status: "pending" | "accepted" | "rejected";
   pageId: string | null;

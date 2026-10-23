@@ -6,6 +6,8 @@
  */
 
 export const MEMORY_CONSOLIDATE_BYTES = 8 * 1024;
+/** Below this, "Tidy memory now" leaves a memory.md alone (there's nothing to tidy). */
+export const MEMORY_FORCE_MIN_BYTES = 1024;
 export const MEMORY_SECTIONS = ["Preferences", "Decisions", "Lessons", "Facts"] as const;
 
 export function memoryNeedsConsolidation(bytes: number) {

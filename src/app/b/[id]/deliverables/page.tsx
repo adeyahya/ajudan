@@ -153,7 +153,7 @@ async function Content({ params, searchParams }: Pick<Props, "params" | "searchP
   return (
     <SidePeekLayout
       peek={
-        <DeliverablePeek open={!!peek} title={peek ? kindLabel(peek.kind) : undefined}>
+        <DeliverablePeek open={!!peek} title={peek ? kindLabel(peek.kind) : undefined} openHref={peek ? `/b/${id}/studio/docs?doc=${peek.id}` : undefined}>
           {peek && (
             <DeliverableDetail
               d={peek}

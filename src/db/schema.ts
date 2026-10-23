@@ -49,6 +49,10 @@ export const businesses = sqliteTable("businesses", {
     .notNull()
     .default(20) // the SQL default from an earlier design; changing it would rebuild the table
     .$defaultFn(() => 0),
+  /** "weekly": the worker has an agent review the Context pages and propose a tidier layout (worker/handlers/reorganize.ts). Null: only when the owner asks. */
+  contextTidy: text("context_tidy").$type<"weekly">(),
+  /** When the last reorganize review finished. */
+  contextTidiedAt: integer("context_tidied_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
 });
 
@@ -312,7 +316,7 @@ export const waWatches = sqliteTable("wa_watches", {
   createdAt: createdAt(),
 });
 
-export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit" | "context_test_ask";
+export type JobKind = "onboarding_turn" | "onboarding_finalize" | "design_team" | "run_task" | "consolidate_memory" | "render_edit" | "context_test_ask" | "context_reorganize";
 
 export const jobs = sqliteTable("jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -441,11 +445,14 @@ export const contextReaders = sqliteTable("context_readers", {
 }, (t) => [index("context_readers_page_idx").on(t.pageId, t.teammateId)]);
 
 export type SuggestionStatus = "pending" | "accepted" | "rejected";
+export type SuggestionKind = "append" | "replace" | "new_page" | "delete";
 
 /**
  * A change a teammate (or the manager, from the owner's chat) proposes to a page.
  * Teammates never write pages; the owner accepts or rejects. "append" adds `body` at
- * the end, "replace" swaps the whole page for `body`, "new_page" creates `title`.
+ * the end, "replace" swaps the whole page for `body`, "new_page" creates `title`, "delete"
+ * removes the page. A "replace" may also carry `title` (rename) and `section` (move): the
+ * reorganize review uses that to retitle, move and merge pages.
  */
 export const contextSuggestions = sqliteTable("context_suggestions", {
   id: id(),
@@ -455,11 +462,11 @@ export const contextSuggestions = sqliteTable("context_suggestions", {
   pageId: text("page_id").references(() => contextPages.id, { onDelete: "cascade" }),
   teammateId: text("teammate_id").references(() => teammates.id, { onDelete: "set null" }),
   taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
-  kind: text("kind").$type<"append" | "replace" | "new_page">().notNull(),
+  kind: text("kind").$type<SuggestionKind>().notNull(),
   body: text("body").notNull(),
   /** The page as it was when proposed (to show what changed since). */
   before: text("before"),
-  /** new_page only. */
+  /** new_page: its title; replace: a new title for the page (reorganize). */
   title: text("title"),
   section: text("section").$type<ContextSection>(),
   reason: text("reason").notNull().default(""),

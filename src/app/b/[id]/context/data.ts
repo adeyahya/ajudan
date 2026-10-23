@@ -5,6 +5,7 @@ import type { ContextPage, ContextSuggestion } from "@/db/schema";
 import { listLibrary } from "@/lib/assets";
 import { listContacts } from "@/lib/contacts";
 import { compactDiff, diffLines, ensureContextWorkspace, listPages, normalizeMarkdown, pageIcon, pendingSuggestions, readerMode, readerRows, SECTIONS } from "@/lib/context";
+import { isReorganizeSource } from "@/lib/reorganize";
 import { MANAGER_ROLE } from "@/lib/roles";
 import type { CoverImage, Mate, SuggestionView, TreePage } from "./types";
 
@@ -66,20 +67,25 @@ export function readersFor(page: ContextPage, mates: { id: string }[], rows: Ret
 
 export function suggestionView(s: ContextSuggestion, page: ContextPage | undefined, names: Map<string, string>, managerId: string | null): SuggestionView {
   const current = page?.body ?? "";
-  const after = s.kind === "new_page" ? s.body : s.kind === "append" ? `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${s.body.trim()}` : s.body;
+  const after = s.kind === "new_page" ? s.body : s.kind === "delete" ? "" : s.kind === "append" ? `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${s.body.trim()}` : s.body;
+  const reorganize = isReorganizeSource(s.source);
   return {
     id: s.id,
     kind: s.kind,
+    pageId: s.pageId,
+    pageTitle: page?.title ?? null,
+    reorganize,
     author: s.teammateId ? (names.get(s.teammateId) ?? null) : null,
     authorId: s.teammateId,
     fromChat: !!managerId && s.teammateId === managerId && !!s.taskId,
     reason: s.reason,
-    source: s.source,
+    // A review's marker isn't a source to show.
+    source: reorganize ? "" : s.source,
     createdAt: s.createdAt.toISOString(),
     body: s.body,
     title: s.title,
     section: s.section,
-    changedSince: s.kind === "replace" && s.before !== null && page !== undefined && normalizeMarkdown(s.before) !== normalizeMarkdown(page.body),
+    changedSince: (s.kind === "replace" || s.kind === "delete") && s.before !== null && page !== undefined && normalizeMarkdown(s.before) !== normalizeMarkdown(page.body),
     diff: compactDiff(diffLines(s.kind === "new_page" ? "" : normalizeMarkdown(current), normalizeMarkdown(after))),
   };
 }

@@ -1,4 +1,4 @@
-import type { ContextSection, ReaderMode } from "@/db/schema";
+import type { ContextSection, ReaderMode, SuggestionKind } from "@/db/schema";
 import type { DiffLine } from "@/lib/context-text";
 
 /** Shapes the Konteks server pages hand to their client components. */
@@ -28,7 +28,12 @@ export type Mate = { id: string; name: string; color: string; title: string };
 export type ReaderView = { teammateId: string; mode: ReaderMode };
 export type SuggestionView = {
   id: string;
-  kind: "append" | "replace" | "new_page";
+  kind: SuggestionKind;
+  /** The page it changes (null for a new page). */
+  pageId: string | null;
+  pageTitle: string | null;
+  /** From a "Reorganize with AI" review (src/lib/reorganize.ts). */
+  reorganize: boolean;
   author: string | null;
   authorId: string | null;
   fromChat: boolean;

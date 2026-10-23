@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ChevronLeft, FileTextIcon, ImageIcon, Info, Paperclip, PlusIcon, Trash2, UserRoundPlus, VideoIcon, XIcon } from "lucide-react";
+import { DocLayoutButtons, useDocLayout } from "@/components/doc-layout";
+import { TopBarActions } from "@/components/breadcrumb";
 import { useT, useTn } from "@/components/i18n";
 import { Badge, Button, cn, EmptyState, IconButton, Input, Kbd, LineTabs, Textarea } from "@/components/kit";
 import { Markdown } from "@/components/markdown";
@@ -56,6 +58,8 @@ export function Docs({
   const [q, setQ] = useState("");
   const [hand, setHand] = useState<{ key: string; text: string; attachments: string[] } | null>(null);
   const doc = docs.find((d) => d.id === docId);
+  // Focus mode hides the list: the doc takes the whole width.
+  const { focus } = useDocLayout();
   const names = useMemo(() => new Map(teammates.map((m) => [m.id, m.name])), [teammates]);
   const shown = docs.filter((d) => {
     if (filter === "mine" && d.teammateId) return false;
@@ -91,8 +95,11 @@ export function Docs({
 
   return (
     <StudioShell peek={peek}>
-      <div className="grid gap-8 @3xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className={cn("min-w-0 space-y-3", doc && "hidden @3xl:block")}>
+      <TopBarActions>
+        <DocLayoutButtons />
+      </TopBarActions>
+      <div className={cn("grid gap-8", !focus && "@3xl:grid-cols-[260px_minmax(0,1fr)]")}>
+        <aside className={cn("min-w-0 space-y-3", doc && "hidden @3xl:block", focus && "hidden @3xl:hidden")}>
           <div className="flex items-center gap-2">
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.docs.search")} aria-label={t("studio.docs.search")} className="h-7 min-w-0 flex-1 text-[13px]" />
             <Button asChild size="sm">
@@ -141,7 +148,7 @@ export function Docs({
         </aside>
         <div className="min-w-0">
           {doc && (
-            <Button asChild size="sm" variant="ghost" className="mb-3 -ml-2 text-muted-foreground @3xl:hidden">
+            <Button asChild size="sm" variant="ghost" className={cn("mb-3 -ml-2 text-muted-foreground", !focus && "@3xl:hidden")}>
               <Link href={href(filter)}>
                 <ChevronLeft /> {t("studio.docs.allDocs")}
               </Link>
@@ -187,7 +194,7 @@ function Editor({
   const [content, setContent] = useState(doc?.content ?? "");
   const [status, setStatus] = useState<DeliverableStatus>(doc?.status ?? "draft");
   const [attachments, setAttachments] = useState<string[]>(doc?.attachments ?? []);
-  const [tab, setTab] = useState<"write" | "preview">("write");
+  const [tab, setTab] = useState<"write" | "split" | "preview">("write");
   const [picking, setPicking] = useState(false);
   const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -214,7 +221,7 @@ function Editor({
   const handOver = `Work from this ${label(kind).toLowerCase()} (saved as "${title}"):\n\n${content}`.slice(0, 20000);
 
   return (
-    <div className="mx-auto w-full max-w-[var(--content-w)] @3xl:mx-0">
+    <div className={cn("mx-auto w-full", tab === "split" ? "max-w-none" : "max-w-[var(--doc-w)]")}>
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -277,6 +284,7 @@ function Editor({
           onChange={setTab}
           options={[
             { value: "write", label: t("studio.docs.write") },
+            { value: "split", label: t("studio.docs.split") },
             { value: "preview", label: t("studio.docs.preview") },
           ]}
         />
@@ -324,24 +332,33 @@ function Editor({
         </div>
       )}
 
-      {tab === "write" ? (
-        <Textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          rows={20}
-          aria-label={t("studio.docs.body")}
-          placeholder={t("studio.docs.bodyPlaceholder")}
-          className="mt-3 min-h-[50vh] resize-y border-0 px-0 text-[15px] leading-[26px] shadow-none hover:border-0 focus-visible:ring-0"
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-              e.preventDefault();
-              save();
-            }
-          }}
-        />
-      ) : (
-        <div className="mt-3 min-h-[50vh]">{content.trim() ? <Markdown>{content}</Markdown> : <p className="text-sm text-tertiary">{t("studio.docs.nothingToPreview")}</p>}</div>
-      )}
+      <div className={cn("mt-3", tab === "split" && "grid gap-6 @5xl:grid-cols-2")}>
+        {tab !== "preview" && (
+          <Textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={20}
+            aria-label={t("studio.docs.body")}
+            placeholder={t("studio.docs.bodyPlaceholder")}
+            // Grows with the text: the page scrolls, not a box inside it.
+            className={cn(
+              "min-h-[60vh] resize-none border-0 px-0 text-[15px] leading-[26px] shadow-none [field-sizing:content] hover:border-0 focus-visible:ring-0",
+              tab === "split" && "font-mono text-[13px] leading-[22px]",
+            )}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+                e.preventDefault();
+                save();
+              }
+            }}
+          />
+        )}
+        {tab !== "write" && (
+          <div className={cn("min-h-[60vh] min-w-0", tab === "split" && "border-t border-border pt-6 @5xl:border-t-0 @5xl:border-l @5xl:pt-0 @5xl:pl-6")}>
+            {content.trim() ? <Markdown className="text-[15px] leading-[26px]">{content}</Markdown> : <p className="text-sm text-tertiary">{t("studio.docs.nothingToPreview")}</p>}
+          </div>
+        )}
+      </div>
 
       <div className="sticky bottom-[calc(var(--bottombar-h)+env(safe-area-inset-bottom))] mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
         <Tooltip>

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 /**
  * Notion's side peek (UI-PLAN §2.5): a record opens on the right without leaving the list.
  *
- * ≥1024px: an inline, non-modal pane (420px, resizable 360–640, remembered in
+ * ≥1024px: an inline, non-modal pane (420px, resizable 360–960, remembered in
  * localStorage `ajudan:peek:w`), sticky under the top bar, sliding in over 220ms; the main
  * column keeps its own width. <1024px: a right Sheet (92vw, max 480px). Esc closes.
  *
@@ -35,7 +35,7 @@ import { cn } from "@/lib/utils";
 const W_KEY = "ajudan:peek:w";
 const W_DEFAULT = 420;
 const W_MIN = 360;
-const W_MAX = 640;
+const W_MAX = 960;
 
 const subscribeDesktop = (cb: () => void) => {
   const mq = window.matchMedia("(min-width: 1024px)");
@@ -175,7 +175,8 @@ function InlinePeek({ header, className, children }: { header: ReactNode; classN
         }}
         onPointerMove={(e) => {
           if (!drag.current) return;
-          setWidth(Math.min(W_MAX, Math.max(W_MIN, drag.current.w + (drag.current.x - e.clientX))));
+          // Never so wide the page beside it has no room.
+          setWidth(Math.min(W_MAX, window.innerWidth - 480, Math.max(W_MIN, drag.current.w + (drag.current.x - e.clientX))));
         }}
         onPointerUp={() => {
           drag.current = null;
