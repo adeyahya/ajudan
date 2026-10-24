@@ -43,6 +43,7 @@ import { CONTACT_TOOL_NAMES, contactTools } from "./contact-tools";
 import { canChange, canCreate, teammateBy } from "@/lib/workspace-access";
 import { deliverableCreator } from "@/lib/workspace-search";
 import { contactToChange, workspaceTools } from "./workspace-tools";
+import { describeCron, nextRunOf, validCron } from "@/lib/onboarding/schedule";
 
 export const BIZ_SERVER = "biz";
 
@@ -94,6 +95,7 @@ export const SAFE_BIZ_TOOLS = [
 export const EDIT_BIZ_TOOLS: Record<string, EditArea> = {
   [`mcp__${BIZ_SERVER}__save_contact`]: "contacts",
   [`mcp__${BIZ_SERVER}__organize_media`]: "library",
+  [`mcp__${BIZ_SERVER}__set_schedule`]: "schedule",
 };
 /** Talking to the team's human teammates on WhatsApp (not for draft-only teammates). */
 export const HUMAN_TOOLS = ["ask_human", "message_human", "close_human_request", "human_conversation"].map((t) => `mcp__${BIZ_SERVER}__${t}`);
@@ -138,6 +140,11 @@ export function createBizServer(ctx: BizContext) {
     logEvent({ businessId, teammateId: teammate.id, taskId, type, message, data });
   /** Provenance for everything this teammate writes (created_by / updated_by, object_history). */
   const by = teammateBy(teammate.id);
+  const current = db
+    .select({ schedule: schema.teammates.schedule, schedulePrompt: schema.teammates.schedulePrompt })
+    .from(schema.teammates)
+    .where(eq(schema.teammates.id, teammate.id))
+    .get();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous input shapes
   const tools: SdkMcpToolDefinition<any>[] = [
@@ -869,7 +876,7 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "request_capability",
-      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, the connected code repositories and their GitHub issues, or letting the team change something itself (edit: contacts, Context pages, or the media library). The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
+      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, the connected code repositories and their GitHub issues, or letting the team change something itself (edit: contacts, Context pages, the media library, or their own schedules). The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
       {
         kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos", "edit"]),
         why: z.string().describe("One sentence for the owner: what you'll do with it"),
@@ -877,7 +884,7 @@ export function createBizServer(ctx: BizContext) {
         hosts: z.array(z.string()).optional().describe('secret: the hosts it may be sent to, e.g. ["orucraft.com"]'),
         domain: z.string().optional().describe('domain: e.g. "api.orucraft.com"'),
         site: z.string().optional().describe('browser_site: e.g. "seller.shopee.co.id"'),
-        area: z.enum(EDIT_AREAS).optional().describe("edit: contacts, context or library"),
+        area: z.enum(EDIT_AREAS).optional().describe("edit: contacts, context, library or schedule"),
       },
       async (a) => {
         let request: CapabilityRequest;
@@ -899,7 +906,7 @@ export function createBizServer(ctx: BizContext) {
             request = { kind: "browser_site", site: a.site, why: a.why };
             break;
           case "edit":
-            if (!a.area) return fail("Which area: contacts, context or library?");
+            if (!a.area) return fail("Which area: contacts, context, library or schedule?");
             if (canTeamEdit(businessId, a.area)) return ok("The team already has that: go ahead.");
             request = { kind: "edit", area: a.area, why: a.why };
             break;
@@ -911,6 +918,33 @@ export function createBizServer(ctx: BizContext) {
         return ok(
           `${duplicate ? "That request is already waiting" : "Asked the owner"} on the Approvals page. Don't wait: finish what you can now, tell the owner what you asked for and why. If they approve, you'll get a new task to carry on.`,
         );
+      },
+    ),
+
+    tool(
+      "set_schedule",
+      `Set your own recurring work: Ajudan gives you a task with this prompt at the times of a cron expression (minute hour day-of-month month day-of-week, the business computer's local time), with what happened since the last run. At most once an hour. Pass an empty cron to stop it. Only works when the owner lets the team set schedules. ${current?.schedule ? `Your current schedule: ${describeCron(current.schedule)} (cron "${current.schedule}"): "${current.schedulePrompt}".` : "You have no schedule yet."}`,
+      {
+        cron: z.string().describe('e.g. "0 9 * * 1-5" (weekdays 09:00), "30 8 * * 1" (Mondays 08:30), "0 */4 * * *" (every 4 hours); "" to stop'),
+        prompt: z.string().optional().describe("What to do each time, written as the task you'll get (needed unless stopping)"),
+      },
+      async (a) => {
+        if (!canTeamEdit(businessId, "schedule")) return fail(editOffMessage("schedule"));
+        const raw = a.cron.trim();
+        if (!raw) {
+          db.update(schema.teammates).set({ schedule: null, schedulePrompt: null }).where(eq(schema.teammates.id, teammate.id)).run();
+          ev("schedule_cleared", `${teammate.name} stopped their recurring work`);
+          return ok("Your schedule is cleared.");
+        }
+        const cron = validCron(raw);
+        if (!cron) return fail(`"${raw}" isn't a valid cron expression, or it runs more than once an hour (each run is a paid run). Use five fields and space runs at least an hour apart.`);
+        const prompt = a.prompt?.trim();
+        if (!prompt) return fail("Say what to do each time (prompt).");
+        db.update(schema.teammates).set({ schedule: cron, schedulePrompt: prompt }).where(eq(schema.teammates.id, teammate.id)).run();
+        const when = describeCron(cron);
+        ev("schedule_set", `${teammate.name} set their recurring work: ${when}`, { schedule: cron });
+        const next = nextRunOf(cron);
+        return ok(`Scheduled: ${when}. ${next ? `First run ${next.toString()}.` : ""} The owner sees it on the Team page and can change it.`);
       },
     ),
   );
@@ -1109,7 +1143,8 @@ export function createBizServer(ctx: BizContext) {
             return `- ${m.name}, ${m.title}: HUMAN teammate, reached on WhatsApp with ask_human${mine.length ? `; open requests: ${mine.join("; ")}` : ""}`;
           }
           const can = [m.browserAccess && "browser", m.whatsappAccess && "WhatsApp", m.repoAccess && "code repositories/GitHub"].filter(Boolean).join(", ") || "no browser/WhatsApp/code";
-          return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
+          const every = m.schedule && m.schedulePrompt ? `; recurring: ${describeCron(m.schedule)} (“${m.schedulePrompt.slice(0, 80)}”)` : "";
+          return `- ${m.name}, ${m.title}: ${m.state}${m.currentActivity ? ` (“${m.currentActivity}”)` : ""}; freedom ${m.autonomy}; ${can}${every}${mine.length ? `; open: ${mine.join("; ")}` : ""}`;
         });
         const waits = activeWatches(businessId);
         const names = new Map(mates().map((m) => [m.id, m.name]));

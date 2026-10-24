@@ -263,6 +263,8 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Saving ${short(input.name, 30) || "a contact"} to the address book`;
     case "mcp__biz__organize_media":
       return "Organizing the media library";
+    case "mcp__biz__set_schedule":
+      return input.cron ? "Setting a recurring schedule" : "Clearing the recurring schedule";
     case "mcp__biz__search_context":
       return `Searching the business context for "${short(input.query, 30)}"`;
     case "mcp__biz__read_page":

@@ -316,7 +316,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/team">) {
       <PageBody width="wide">
         <LiveRefresh
           businessId={id}
-          types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done", "schedule_skipped", "task_queued", "task_done", "task_failed", "task_started"]}
+          types={[...LIVE_TYPES, "human_request_sent", "human_replied", "human_request_done", "schedule_skipped", "schedule_set", "schedule_cleared", "task_queued", "task_done", "task_failed", "task_started"]}
         />
         <PageHeader
           title={tr(lang, "team.title")}

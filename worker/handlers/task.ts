@@ -36,6 +36,7 @@ import { createGithubServer, GH_SERVER, githubRules, OUTWARD_GH_TOOLS, SAFE_GH_T
 import { BIZ_SERVER, EDIT_BIZ_TOOLS, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, SAFE_BIZ_TOOLS, createBizServer } from "../tools";
 import { effectiveAutonomy, editGate, isSupervised } from "@/lib/supervision";
 import { canTeamEdit } from "@/lib/team-edits";
+import { describeCron } from "@/lib/onboarding/schedule";
 import { voiceSettings, type VoiceMode } from "@/lib/voice-settings";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
@@ -651,6 +652,11 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   if (toolName === `mcp__${BIZ_SERVER}__organize_media`) {
     const files = (input.files as string[] | undefined) ?? [];
     return `${who} wants to organize ${files.length} file${files.length === 1 ? "" : "s"} in the media library`;
+  }
+  if (toolName === `mcp__${BIZ_SERVER}__set_schedule`) {
+    return input.cron
+      ? `${who} wants to set their recurring work (${describeCron(String(input.cron))}): "${s(input.prompt, 100)}"`
+      : `${who} wants to stop their recurring schedule`;
   }
   if (toolName === `mcp__${BIZ_SERVER}__ask_human` || toolName === `mcp__${BIZ_SERVER}__message_human`) {
     return `${who} wants to WhatsApp ${s(input.name, 40)}: "${s(input.message, 100)}"`;

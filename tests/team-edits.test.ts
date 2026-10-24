@@ -17,12 +17,12 @@ const biz = db.insert(schema.businesses).values({ name: "Oru", language: "id", s
 const mate = db.insert(schema.teammates).values({ businessId: biz.id, name: "Sinta", roleKey: "content_marketer", title: "Writer", status: "active" }).returning().get();
 
 describe("team permissions", () => {
-  it("defaults: contacts on, pages and library off; stored choices win", () => {
-    expect(edits.teamEdits(null)).toEqual({ contacts: true, context: false, library: false });
-    expect(edits.teamEdits({ contacts: false })).toEqual({ contacts: false, context: false, library: false });
+  it("defaults: contacts and schedules on, pages and library off; stored choices win", () => {
+    expect(edits.teamEdits(null)).toEqual({ contacts: true, context: false, library: false, schedule: true });
+    expect(edits.teamEdits({ contacts: false })).toEqual({ contacts: false, context: false, library: false, schedule: true });
     expect(edits.canTeamEdit(biz.id, "contacts")).toBe(true);
     edits.setTeamEdit(biz.id, "library", true);
-    expect(edits.businessTeamEdits(biz.id)).toEqual({ contacts: true, context: false, library: true });
+    expect(edits.businessTeamEdits(biz.id)).toEqual({ contacts: true, context: false, library: true, schedule: true });
     edits.setTeamEdit(biz.id, "library", false);
   });
 

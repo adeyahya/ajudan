@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Eye, Images, Users } from "lucide-react";
+import { BookOpen, CalendarClock, Eye, Images, Users } from "lucide-react";
 import { useOptimistic, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useT } from "@/components/i18n";
@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import type { EditArea } from "@/lib/team-edits";
 import { setSupervisedAction, setTeamEditAction } from "./actions";
 
-const ICONS: Record<EditArea, ReactNode> = { contacts: <Users />, context: <BookOpen />, library: <Images /> };
+const ICONS: Record<EditArea, ReactNode> = { contacts: <Users />, context: <BookOpen />, library: <Images />, schedule: <CalendarClock /> };
 
 /**
  * Business → Team permissions: what the AI team may change by itself (src/lib/team-edits.ts),

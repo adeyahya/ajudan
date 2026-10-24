@@ -9,11 +9,12 @@ import { db, schema } from "@/db";
  * - contacts: add people to the address book and update them (save_contact). Never delete.
  * - context: edit Context pages directly; off, they suggest and the owner decides.
  * - library: organize media (titles, notes, tags, albums, stars) with organize_media.
+ * - schedule: set or clear their own recurring schedule (set_schedule), hourly at most.
  */
-export const EDIT_AREAS = ["contacts", "context", "library"] as const;
+export const EDIT_AREAS = ["contacts", "context", "library", "schedule"] as const;
 export type EditArea = (typeof EDIT_AREAS)[number];
 
-export const EDIT_DEFAULTS: Record<EditArea, boolean> = { contacts: true, context: false, library: false };
+export const EDIT_DEFAULTS: Record<EditArea, boolean> = { contacts: true, context: false, library: false, schedule: true };
 
 export function teamEdits(stored: Partial<Record<EditArea, boolean>> | null | undefined): Record<EditArea, boolean> {
   return Object.fromEntries(EDIT_AREAS.map((a) => [a, typeof stored?.[a] === "boolean" ? stored[a] : EDIT_DEFAULTS[a]])) as Record<EditArea, boolean>;
@@ -33,7 +34,7 @@ export function setTeamEdit(businessId: string, area: EditArea, on: boolean) {
   return next;
 }
 
-export const EDIT_LABELS: Record<EditArea, string> = { contacts: "add and update contacts", context: "edit Context pages directly", library: "organize the media library" };
+export const EDIT_LABELS: Record<EditArea, string> = { contacts: "add and update contacts", context: "edit Context pages directly", library: "organize the media library", schedule: "set their own recurring schedules" };
 
 /** What a teammate is told when it tries something its owner hasn't allowed. */
 export function editOffMessage(area: EditArea) {
