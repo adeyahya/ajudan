@@ -1,67 +1,87 @@
 "use client";
 
-import { Calendar, Building2, Download, Ellipsis, Hash, Phone, Tag, Type, Upload, UserPlus, Users } from "lucide-react";
+import { Bookmark, Building2, Calendar, CalendarClock, Download, Ellipsis, GitMerge, Hash, Phone, Tag, Trash2, Type, Upload, UserPlus, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useLang, useT } from "@/components/i18n";
 import { useGrowingList } from "@/components/use-growing-list";
 import { DataTable, DataTableToolbar, TableSearch, type Column } from "@/components/data-table";
-import { Badge, Button, EmptyState, IconButton, LineTabs, PageBody, Textarea } from "@/components/kit";
+import { Badge, Button, EmptyState, IconButton, Input, Label, LineTabs, PageBody, Textarea } from "@/components/kit";
 import { useBreadcrumb } from "@/components/breadcrumb";
 import { SidePeek, SidePeekLayout, useUrlPeek } from "@/components/side-peek";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FOLLOW_UP_FILTERS, inSegment, isDue, type FollowUpFilter } from "@/lib/contact-filters";
+import type { TimelineItem } from "@/lib/contact-timeline";
 import { dateLocale, type MessageKey } from "@/lib/i18n";
 import type { Mate } from "@/app/b/[id]/context/types";
-import { importContactsAction } from "./actions";
+import { deleteSegmentAction, findDuplicatesAction, importContactsAction, mergeContactsAction, saveSegmentAction, type DuplicateGroupView } from "./actions";
 import { PersonPeek } from "./person-peek";
-import { FOLLOW_UP, KIND_TONE, KINDS, type HistoryItem, type PersonRow, type View } from "./shared";
+import { FOLLOW_UP, KIND_TONE, KINDS, type PersonRow, type SegmentView, type View } from "./shared";
 
 const NEW_DAYS = 30;
 
-/** Saved views: everyone, who needs a follow-up, new from WhatsApp, and each kind. */
+/** Built-in views: everyone, due follow-ups, anyone with a follow-up, new from WhatsApp, and each kind. */
 function inView(c: PersonRow, view: View) {
   if (view === "all") return true;
-  if (view === "follow_up") return c.tags.includes(FOLLOW_UP);
+  if (view === "due") return isDue(c.followUpAt);
+  if (view === "follow_up") return !!c.followUpAt || c.tags.includes(FOLLOW_UP);
   if (view === "new_wa") return c.tags.includes("whatsapp") && Date.now() - new Date(c.createdAt).getTime() < NEW_DAYS * 86_400_000;
   return c.kind === view;
 }
 
+const HELP: Partial<Record<View, MessageKey>> = { due: "contacts.view.dueHelp", follow_up: "contacts.view.followUpHelp", new_wa: "context.view.newWaHelp" };
+
 /**
- * Konteks → People: the address book as a Notion database. Views as line tabs (?view=),
- * a search box, Import/Export in the "…" menu, "New person"; a row opens the person in
- * the side peek (?c=<id>, or ?c=new to add someone).
+ * Contacts: the address book as a Notion database. Views and saved segments as line tabs
+ * (?view=, ?seg=), a search box, Import/Export/Duplicates/Segments in the "…" menu, "New
+ * person"; a row opens the person in the side peek (?c=<id>, or ?c=new to add someone).
  */
 export function People({
   businessId,
   contacts,
   view,
-  history,
+  segments,
+  segmentId,
+  timeline,
   mates,
   managerId,
 }: {
   businessId: string;
   contacts: PersonRow[];
   view: View;
-  history: { contactId: string; items: HistoryItem[] } | null;
+  segments: SegmentView[];
+  segmentId: string | null;
+  timeline: { contactId: string; items: TimelineItem[] } | null;
   mates: Mate[];
   managerId: string | null;
 }) {
   const t = useT();
   const lang = useLang();
+  const router = useRouter();
   const peek = useUrlPeek("c");
   const [q, setQ] = useState("");
   const [importing, setImporting] = useState(false);
+  const [dupes, setDupes] = useState(false);
+  const [segmentDraft, setSegmentDraft] = useState<SegmentDraft | null>(null);
+  const [, start] = useTransition();
   const base = `/b/${businessId}/contacts`;
+  const segment = segments.find((s) => s.id === segmentId);
   const views: { key: View; label: string }[] = [
     { key: "all", label: t("context.view.all") },
-    { key: "follow_up", label: t("context.view.followUp") },
+    { key: "due", label: t("contacts.view.due") },
+    { key: "follow_up", label: t("contacts.view.followUp") },
     { key: "new_wa", label: t("context.view.newWa") },
     ...KINDS.map((k) => ({ key: k, label: t(`context.kind.${k}` as MessageKey) })),
   ];
   const s = q.trim().toLowerCase();
-  const shown = contacts.filter((c) => inView(c, view) && (!s || `${c.name} ${c.company ?? ""} ${c.phone ?? ""} ${c.email ?? ""} ${c.notes} ${c.tags.join(" ")}`.toLowerCase().includes(s)));
-  const { visible, sentinel } = useGrowingList(shown, `${view}\0${s}`, 200);
+  const matches = (c: PersonRow) => (segment ? inSegment(c, segment) : inView(c, view));
+  const shown = contacts.filter(
+    (c) => matches(c) && (!s || `${c.name} ${c.company ?? ""} ${c.phone ?? ""} ${c.email ?? ""} ${c.notes} ${c.tags.join(" ")} ${Object.values(c.fields).join(" ")}`.toLowerCase().includes(s)),
+  );
+  const { visible, sentinel } = useGrowingList(shown, `${segmentId ?? view}\0${s}`, 200);
   const creating = peek.value === "new";
   const open = creating ? undefined : contacts.find((c) => c.id === peek.value);
   useBreadcrumb([{ label: t("context.people.title"), href: base }, ...(open ? [{ label: open.name }] : [])]);
@@ -88,6 +108,14 @@ export function People({
       ),
       title: (c) => c.tags.join(", "),
     },
+    {
+      key: "followUp",
+      header: t("contacts.followUp.label"),
+      icon: <CalendarClock />,
+      width: 130,
+      cell: (c) => (c.followUpAt ? <Badge tone={isDue(c.followUpAt) ? "red" : "gray"}>{date(c.followUpAt)}</Badge> : null),
+      title: (c) => c.followUpNote || undefined,
+    },
     { key: "added", header: t("context.col.added"), icon: <Calendar />, width: 110, cell: (c) => <span className="text-xs text-tertiary">{date(c.createdAt)}</span> },
   ];
 
@@ -98,7 +126,7 @@ export function People({
           key={open?.id ?? "new"}
           businessId={businessId}
           contact={open}
-          history={open && history?.contactId === open.id ? history.items : null}
+          timeline={open && timeline?.contactId === open.id ? timeline.items : null}
           mates={mates}
           managerId={managerId}
           onCreated={(id) => peek.open(id)}
@@ -107,6 +135,14 @@ export function People({
       )}
     </SidePeek>
   );
+
+  const builtInDraft = (): SegmentDraft => ({
+    name: "",
+    kind: (KINDS as string[]).includes(view) ? view : "",
+    tags: "",
+    text: q.trim(),
+    followUp: view === "due" ? "due" : view === "follow_up" ? "set" : "any",
+  });
 
   return (
     <SidePeekLayout peek={peekPane}>
@@ -122,12 +158,21 @@ export function People({
           views={
             <LineTabs
               label={t("context.people.title")}
-              items={views.map((v) => ({
-                href: v.key === "all" ? base : `${base}?view=${v.key}`,
-                label: v.label,
-                active: view === v.key,
-                count: contacts.filter((c) => inView(c, v.key)).length,
-              }))}
+              items={[
+                ...views.map((v) => ({
+                  href: v.key === "all" ? base : `${base}?view=${v.key}`,
+                  label: v.label,
+                  active: !segment && view === v.key,
+                  count: contacts.filter((c) => inView(c, v.key)).length,
+                })),
+                ...segments.map((sg) => ({
+                  href: `${base}?seg=${sg.id}`,
+                  label: sg.name,
+                  icon: <Bookmark />,
+                  active: segment?.id === sg.id,
+                  count: contacts.filter((c) => inSegment(c, sg)).length,
+                })),
+              ]}
             />
           }
         >
@@ -138,10 +183,10 @@ export function People({
                 <Ellipsis />
               </IconButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-60">
               <DropdownMenuItem onSelect={() => setImporting(true)}>
                 <Upload />
-                {t("context.people.import")}
+                {t("contacts.import.menu")}
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <a href={`/api/b/${businessId}/contacts`} download>
@@ -149,6 +194,37 @@ export function People({
                   {t("context.people.export")}
                 </a>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={`/api/b/${businessId}/contacts?format=vcf`} download>
+                  <Download />
+                  {t("contacts.export.vcf")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setDupes(true)}>
+                <GitMerge />
+                {t("contacts.dupes.menu")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setSegmentDraft(segment ? { ...segment, kind: segment.kind ?? "", tags: segment.tags.join(", ") } : builtInDraft())}>
+                <Bookmark />
+                {segment ? t("contacts.segment.edit") : t("contacts.segment.save")}
+              </DropdownMenuItem>
+              {segment && (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() =>
+                    start(async () => {
+                      await deleteSegmentAction(businessId, segment.id);
+                      toast(t("contacts.segment.deleted", { name: segment.name }));
+                      router.push(base);
+                    })
+                  }
+                >
+                  <Trash2 />
+                  {t("contacts.segment.delete")}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           <Button size="sm" onClick={() => peek.open("new")}>
@@ -156,7 +232,7 @@ export function People({
             {t("context.people.new")}
           </Button>
         </DataTableToolbar>
-        {(view === "follow_up" || view === "new_wa") && <p className="mb-2 text-xs text-tertiary">{t(view === "follow_up" ? "context.view.followUpHelp" : "context.view.newWaHelp")}</p>}
+        {!segment && HELP[view] && <p className="mb-2 text-xs text-tertiary">{t(HELP[view]!)}</p>}
         {contacts.length === 0 ? (
           <EmptyState
             icon={<Users />}
@@ -166,7 +242,7 @@ export function People({
               <>
                 <Button size="sm" variant="secondary" onClick={() => setImporting(true)}>
                   <Upload />
-                  {t("context.people.import")}
+                  {t("contacts.import.menu")}
                 </Button>
                 <Button size="sm" onClick={() => peek.open("new")}>
                   <UserPlus />
@@ -183,18 +259,28 @@ export function People({
             getRowId={(c) => c.id}
             onRowOpen={(c) => peek.open(c.id)}
             selectedId={open?.id ?? null}
-            minWidth={900}
+            minWidth={1020}
             empty={<EmptyState compact title={t("context.people.noMatch")} />}
           />
         )}
         {sentinel}
       </PageBody>
       <ImportDialog businessId={businessId} open={importing} onOpenChange={setImporting} />
+      <DuplicatesDialog businessId={businessId} open={dupes} onOpenChange={setDupes} />
+      <SegmentDialog
+        businessId={businessId}
+        draft={segmentDraft}
+        onClose={() => setSegmentDraft(null)}
+        onSaved={(id) => {
+          setSegmentDraft(null);
+          router.push(`${base}?seg=${id}`);
+        }}
+      />
     </SidePeekLayout>
   );
 }
 
-/** Import a CSV (file or pasted): Studio's import, which merges people by phone or email. */
+/** Import a CSV or vCard (file or pasted): people with the same phone or email are updated. */
 function ImportDialog({ businessId, open, onOpenChange }: { businessId: string; open: boolean; onOpenChange: (o: boolean) => void }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -206,19 +292,19 @@ function ImportDialog({ businessId, open, onOpenChange }: { businessId: string; 
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("context.import.title")}</DialogTitle>
-          <DialogDescription>{t("context.import.help")}</DialogDescription>
+          <DialogDescription>{t("contacts.import.help")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => file.current?.click()}>
               <Upload />
-              {t("context.import.choose")}
+              {t("contacts.import.choose")}
             </Button>
             <span className="text-xs text-tertiary">{t("context.import.orPaste")}</span>
             <input
               ref={file}
               type="file"
-              accept=".csv,.tsv,.txt,text/csv"
+              accept=".csv,.tsv,.txt,.vcf,text/csv,text/vcard,text/x-vcard"
               className="hidden"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
@@ -246,7 +332,7 @@ function ImportDialog({ businessId, open, onOpenChange }: { businessId: string; 
             onClick={() =>
               start(async () => {
                 const r = await importContactsAction(businessId, text);
-                if ("error" in r && r.error) return void toast.error(t("context.import.failed"), { description: t("context.import.format") });
+                if (r.error) return void toast.error(t("context.import.failed"), { description: t("contacts.import.format") });
                 toast(t("context.import.done", { added: r.added, updated: r.updated, skipped: r.skipped.length }));
                 setSkipped(r.skipped);
                 if (r.skipped.length) return;
@@ -260,5 +346,185 @@ function ImportDialog({ businessId, open, onOpenChange }: { businessId: string; 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Groups of people who look like the same person; Merge keeps the first and folds the rest into it. */
+function DuplicatesDialog({ businessId, open, onOpenChange }: { businessId: string; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
+  const [groups, setGroups] = useState<DuplicateGroupView[] | null>(null);
+  const [keep, setKeep] = useState<Record<string, string>>({});
+  const [pending, start] = useTransition();
+  const load = () =>
+    start(async () => {
+      setGroups(await findDuplicatesAction(businessId));
+      setKeep({});
+    });
+  const describe = (c: PersonRow) => [c.phone && `+${c.phone}`, c.email, c.company].filter(Boolean).join(" · ");
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o);
+        if (o) load();
+        else setGroups(null);
+      }}
+    >
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("contacts.dupes.title")}</DialogTitle>
+          <DialogDescription>{t("contacts.dupes.help")}</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+          {groups === null ? (
+            <p className="text-xs text-tertiary">{t("common.loading")}</p>
+          ) : groups.length === 0 ? (
+            <EmptyState compact title={t("contacts.dupes.none")} />
+          ) : (
+            groups.map((g) => {
+              const all = [g.keep, ...g.others];
+              const groupKey = all.map((c) => c.id).join(",");
+              const keepId = keep[groupKey] ?? g.keep.id;
+              return (
+                <div key={groupKey} className="rounded-lg border border-border p-3">
+                  <p className="mb-2 text-xs text-tertiary">{t("contacts.dupes.why", { reasons: g.reasons.map((r) => t(`contacts.dupes.reason.${r}` as MessageKey)).join(", ") })}</p>
+                  <div role="radiogroup" aria-label={t("contacts.dupes.keep")} className="space-y-1">
+                    {all.map((c) => (
+                      <label key={c.id} className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 hover:bg-hover">
+                        <input type="radio" name={groupKey} className="mt-1 accent-primary" checked={keepId === c.id} onChange={() => setKeep({ ...keep, [groupKey]: c.id })} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{describe(c) || "—"}</span>
+                        </span>
+                        {keepId === c.id && <Badge tone="green">{t("contacts.dupes.keep")}</Badge>}
+                      </label>
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2"
+                    loading={pending}
+                    onClick={() =>
+                      start(async () => {
+                        const r = await mergeContactsAction(
+                          businessId,
+                          keepId,
+                          all.map((c) => c.id).filter((id) => id !== keepId),
+                        );
+                        if ("error" in r) return void toast.error(t("contacts.dupes.failed"), { description: r.error });
+                        toast(t("contacts.dupes.merged", { count: r.merged + 1, name: all.find((c) => c.id === keepId)?.name ?? "" }));
+                        setGroups(await findDuplicatesAction(businessId));
+                      })
+                    }
+                  >
+                    <GitMerge />
+                    {t("contacts.dupes.merge", { count: all.length })}
+                  </Button>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <DialogFooter>
+          <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
+            {t("common.close")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type SegmentDraft = { id?: string; name: string; kind: string; tags: string; text: string; followUp: FollowUpFilter };
+
+const ANY = "_any";
+
+/** Save the current filters as a segment, or change a saved one. */
+function SegmentDialog({ businessId, draft, onClose, onSaved }: { businessId: string; draft: SegmentDraft | null; onClose: () => void; onSaved: (id: string) => void }) {
+  const t = useT();
+  return (
+    <Dialog open={!!draft} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{draft?.id ? t("contacts.segment.edit") : t("contacts.segment.save")}</DialogTitle>
+          <DialogDescription>{t("contacts.segment.help")}</DialogDescription>
+        </DialogHeader>
+        {draft && <SegmentForm key={draft.id ?? "new"} businessId={businessId} draft={draft} onCancel={onClose} onSaved={onSaved} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SegmentForm({ businessId, draft, onCancel, onSaved }: { businessId: string; draft: SegmentDraft; onCancel: () => void; onSaved: (id: string) => void }) {
+  const t = useT();
+  const [d, setD] = useState(draft);
+  const [pending, start] = useTransition();
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        start(async () => {
+          const r = await saveSegmentAction(businessId, { ...d, kind: d.kind || null });
+          if ("error" in r) return void toast.error(t("context.peek.saveFailed"), { description: r.error });
+          onSaved(r.id);
+        });
+      }}
+    >
+      <div className="grid gap-1.5">
+        <Label htmlFor="seg-name">{t("contacts.segment.name")}</Label>
+        <Input id="seg-name" value={d.name} autoFocus onChange={(e) => setD({ ...d, name: e.target.value })} placeholder={t("contacts.segment.namePlaceholder")} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-1.5">
+          <Label>{t("context.col.kind")}</Label>
+          <Select value={d.kind || ANY} onValueChange={(v) => setD({ ...d, kind: v === ANY ? "" : v })}>
+            <SelectTrigger size="sm" aria-label={t("context.col.kind")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY}>{t("contacts.segment.anyKind")}</SelectItem>
+              {KINDS.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {t(`context.kind.${k}` as MessageKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label>{t("contacts.followUp.label")}</Label>
+          <Select value={d.followUp} onValueChange={(v) => setD({ ...d, followUp: v as FollowUpFilter })}>
+            <SelectTrigger size="sm" aria-label={t("contacts.followUp.label")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FOLLOW_UP_FILTERS.map((f) => (
+                <SelectItem key={f} value={f}>
+                  {t(`contacts.segment.followUp.${f}` as MessageKey)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="seg-tags">{t("context.col.tags")}</Label>
+        <Input id="seg-tags" value={d.tags} onChange={(e) => setD({ ...d, tags: e.target.value })} placeholder={t("context.people.tagsPlaceholder")} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="seg-text">{t("contacts.segment.text")}</Label>
+        <Input id="seg-text" value={d.text} onChange={(e) => setD({ ...d, text: e.target.value })} placeholder={t("contacts.segment.textPlaceholder")} />
+      </div>
+      <DialogFooter>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
+        </Button>
+        <Button type="submit" size="sm" loading={pending} disabled={!d.name.trim()}>
+          {t("common.save")}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
