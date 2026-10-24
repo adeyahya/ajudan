@@ -11,11 +11,13 @@ import { listLibrary } from "@/lib/assets";
 import { backendKey } from "@/lib/secrets";
 import { voiceAvailable } from "@/lib/voice";
 import { teamEdits } from "@/lib/team-edits";
+import { getAgentAccess } from "@/lib/agent-access";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { saveProfile } from "./actions";
 import { BackendPanel } from "./backend-panel";
 import { BrowserPanel } from "./browser-panel";
 import { EditProfileDialog } from "./profile-form";
+import { AgentAccessPanel } from "./agent-access-panel";
 import { PermissionsPanel } from "./permissions-panel";
 import { ReposPanel } from "./repos-panel";
 import { SecretsPanel } from "./secrets-panel";
@@ -207,7 +209,12 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
           />
         </>
       )}
-      {tab === "permissions" && <PermissionsPanel businessId={id} edits={teamEdits(biz.teamEdits)} supervised={biz.supervised} />}
+      {tab === "permissions" && (
+        <>
+          <PermissionsPanel businessId={id} edits={teamEdits(biz.teamEdits)} supervised={biz.supervised} />
+          <AgentAccessPanel businessId={id} access={getAgentAccess(id)} />
+        </>
+      )}
       {tab === "backend" && <BackendPanel key={JSON.stringify(biz.aiBackend)} businessId={id} stored={biz.aiBackend} hasKey={Boolean(await backendKey(id))} />}
       {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
       {tab === "repos" && <ReposPanel businessId={id} teammatesWithAccess={names((m) => m.repoAccess)} lang={lang} />}

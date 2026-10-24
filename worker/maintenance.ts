@@ -12,6 +12,7 @@ import { db, schema } from "@/db";
 import { pruneMeta } from "@/lib/file-meta";
 import { backupsDir } from "@/lib/paths";
 import { dueReorganizeBusinesses, reorganizeState, requestReorganize } from "@/lib/reorganize";
+import { purgeOlderThan } from "@/lib/trash";
 
 const DAY = 24 * 60 * 60 * 1000;
 const KEEP_EVENTS_DAYS = 30;
@@ -21,6 +22,8 @@ const KEEP_STEPS_PER_TASK = 200;
 const KEEP_LOADS_DAYS = 90;
 const KEEP_JOBS_DAYS = 14;
 const KEEP_DAILY_BACKUPS = 7;
+/** Trash empties itself of anything deleted longer ago than this (src/lib/trash.ts). */
+const KEEP_TRASH_DAYS = 30;
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -53,6 +56,14 @@ export function runMaintenance(dir: string) {
     if (stale) console.log(`[maintenance] dropped ${stale} cached file details`);
   } catch (err) {
     console.error("[maintenance] couldn't prune cached file details", err);
+  }
+  try {
+    for (const { id } of db.select({ id: schema.businesses.id }).from(schema.businesses).all()) {
+      const n = purgeOlderThan(id, KEEP_TRASH_DAYS);
+      if (n) console.log(`[maintenance] emptied ${n} old items from Trash`);
+    }
+  } catch (err) {
+    console.error("[maintenance] couldn't empty old Trash items", err);
   }
   try {
     for (const id of dueReorganizeBusinesses()) {

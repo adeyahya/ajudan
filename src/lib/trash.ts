@@ -158,6 +158,23 @@ export function purge(businessId: string, type: TrashType, id: string): boolean 
   return true;
 }
 
+/** Delete for good everything in Trash for longer than `days` (worker/maintenance.ts, daily). Returns how many. */
+export function purgeOlderThan(businessId: string, days: number): number {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  let n = 0;
+  for (const item of listTrash(businessId)) {
+    if (item.deletedAt.getTime() < cutoff && purge(businessId, item.type, item.id)) n++;
+  }
+  return n;
+}
+
+/** Purge everything in Trash. Returns how many. */
+export function emptyTrash(businessId: string): number {
+  let n = 0;
+  for (const item of listTrash(businessId)) if (purge(businessId, item.type, item.id)) n++;
+  return n;
+}
+
 /** Everything in Trash, most recently deleted first. */
 export function listTrash(businessId: string): TrashItem[] {
   const p = schema.contextPages;

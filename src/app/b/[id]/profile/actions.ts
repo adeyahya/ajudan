@@ -16,6 +16,7 @@ import { refreshWorkspaces } from "@/lib/workspace";
 import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
 import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 import { setSupervised } from "@/lib/supervision";
+import { ACCESS_LEVELS, AGENT_COLLECTIONS, setAgentAccess, type AccessLevel, type AgentCollection } from "@/lib/agent-access";
 import { backendOf, isProvider, PROVIDER_DEFAULTS, type BackendSettings, type ModelOption, type Provider } from "@/lib/backend";
 import { claudeModels, ollamaModels, openRouterModels } from "@/lib/model-catalog";
 import path from "node:path";
@@ -201,6 +202,15 @@ export async function setTeamEditAction(businessId: string, area: EditArea, on: 
   if (!biz) throw new Error("Business not found");
   if (!EDIT_AREAS.includes(area)) throw new Error("Unknown area");
   setTeamEdit(businessId, area, on === true);
+  refresh();
+}
+
+/** Business → Permissions → What teammates can do: one workspace collection's access (src/lib/agent-access.ts). */
+export async function setAgentAccessAction(businessId: string, collection: AgentCollection, level: AccessLevel) {
+  const biz = db.select({ id: schema.businesses.id }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  if (!AGENT_COLLECTIONS.includes(collection) || !ACCESS_LEVELS.includes(level)) throw new Error("Unknown access");
+  setAgentAccess(businessId, { [collection]: level });
   refresh();
 }
 
