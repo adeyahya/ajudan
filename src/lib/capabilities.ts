@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
-import { describeMcpSpec, findMcpServer, grantMcpAccess, missingMcpSecrets, saveMcpServer, type McpSpec } from "@/lib/mcp-servers";
+import { describeMcpSpec, findMcpServer, grantMcpAccess, mcpSecretProblems, saveMcpServer, type McpSpec } from "@/lib/mcp-servers";
 import { normalizeHost, setSecret } from "@/lib/secrets";
 import { createTask } from "@/lib/tasks";
 import { EDIT_LABELS, setTeamEdit, type EditArea } from "@/lib/team-edits";
@@ -131,8 +131,9 @@ export async function grantCapability(approval: Approval, opts: { secretValue?: 
     case "mcp": {
       if (r.existing && !findMcpServer(business.id, r.name)) throw new Error(`The ${r.name} server was removed meanwhile.`);
       if (!r.existing) {
-        const missing = missingMcpSecrets(business.id, r);
+        const { missing, wrongHost, host } = mcpSecretProblems(business.id, r);
         if (missing.length) throw new Error(`Store the credential ${missing.join(", ")} first (approve its request, or add it on Business → Credentials), then approve this.`);
+        if (wrongHost.length) throw new Error(`${wrongHost.join(", ")} may not be sent to ${host}: add that host to it on Business → Credentials, then approve this.`);
         saveMcpServer(business.id, r, r.why);
       }
       grantMcpAccess(teammate, r.name);

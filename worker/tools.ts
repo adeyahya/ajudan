@@ -26,7 +26,7 @@ import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
-import { checkMcpSpec, findMcpServer, missingMcpSecrets } from "@/lib/mcp-servers";
+import { checkMcpSpec, findMcpServer, mcpSecretProblems } from "@/lib/mcp-servers";
 import { canTeamEdit, EDIT_AREAS, editOffMessage, type EditArea } from "@/lib/team-edits";
 import { isSupervised } from "@/lib/supervision";
 import { matchIds } from "@/lib/search";
@@ -929,7 +929,7 @@ export function createBizServer(ctx: BizContext) {
             const spec = { name, transport: a.url ? "http" : "stdio", command: a.command?.trim(), args: a.args, url: a.url?.trim(), env: a.env, headers: a.headers } as const;
             const wrong = checkMcpSpec(spec);
             if (wrong) return fail(wrong);
-            const missing = missingMcpSecrets(businessId, spec);
+            const { missing } = mcpSecretProblems(businessId, spec);
             request = { kind: "mcp", ...spec, why: a.why };
             const { approval, duplicate } = requestCapability({ businessId, teammate, taskId, request });
             if (!duplicate) void notifyOwner(approval.id);

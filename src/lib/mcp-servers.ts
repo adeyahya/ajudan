@@ -87,15 +87,19 @@ export function describeMcpSpec(spec: McpSpec) {
   return `${where}${secrets.length ? `, with the credential${secrets.length > 1 ? "s" : ""} ${secrets.join(", ")}` : ""}`;
 }
 
-/** Credentials the spec needs that aren't stored, or that may not be sent to its host. */
-export function missingMcpSecrets(businessId: string, spec: McpSpec) {
+/** Credentials the spec needs that aren't stored (`missing`), or that may not be sent to its host (`wrongHost`). */
+export function mcpSecretProblems(businessId: string, spec: McpSpec) {
   const host = spec.transport === "http" && spec.url ? normalizeHost(spec.url) : null;
-  return specSecrets(spec).filter((name) => {
+  const inHeaders = specSecrets({ headers: spec.headers });
+  const missing: string[] = [];
+  const wrongHost: string[] = [];
+  for (const name of specSecrets(spec)) {
     const s = findSecret(businessId, name);
-    if (!s) return true;
+    if (!s) missing.push(name);
     // Sent over the network in a header: only to a host the secret allows.
-    return host != null && specSecrets({ headers: spec.headers }).includes(name) && !hostAllowed(host, s.hosts);
-  });
+    else if (host && inHeaders.includes(name) && !hostAllowed(host, s.hosts)) wrongHost.push(name);
+  }
+  return { missing, wrongHost, host };
 }
 
 /** Adds the server (or updates it with the newly approved spec). */

@@ -68,6 +68,18 @@ describe("asking for a server", () => {
     expect(mcp.findMcpServer(biz.id, "crm")).toBeUndefined();
   });
 
+  it("approves new tools only in the app, not from WhatsApp", async () => {
+    const { decide } = await import("@/lib/approvals");
+    const { approval } = requestCapability({ businessId: biz.id, teammate: mate, taskId: task.id, request: { kind: "mcp", name: "wa", transport: "stdio", command: "npx", why: "x" } });
+    expect(await decide({ businessId: biz.id, approvalId: approval.id, decision: "approved", via: "whatsapp" })).toMatchObject({ ok: false, error: expect.stringMatching(/in the app/) });
+  });
+
+  it("names a stored credential that may not go to the server's host", () => {
+    db.insert(schema.secrets).values({ businessId: biz.id, name: "CRM2", hosts: ["other.com"] }).run();
+    const r = mcp.mcpSecretProblems(biz.id, { name: "crm", transport: "http", url: "https://crm.example.com/mcp", headers: { Authorization: "Bearer {{secret.CRM2}} {{secret.NONE}}" } });
+    expect(r).toEqual({ missing: ["NONE"], wrongHost: ["CRM2"], host: "crm.example.com" });
+  });
+
   it("builds run configs, leaving out a server whose credential is gone", async () => {
     db.insert(schema.mcpServers).values({ businessId: biz.id, name: "gone", transport: "stdio", command: "x", env: { K: "{{secret.NOPE}}" } }).run();
     mcp.grantMcpAccess(reload(), "gone");

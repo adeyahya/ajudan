@@ -56,6 +56,10 @@ export async function decide(p: {
     if (r.kind === "secret" && !p.secretValue?.trim()) {
       return { ok: false, error: `${r.name} is a credential: enter it in the app (Approvals page), never in a chat.` };
     }
+    // New tools run a program or reach a server: approve them where the exact command shows.
+    if (r.kind === "mcp" && !r.existing && p.via !== "app") {
+      return { ok: false, error: `New tools (${r.name}) are approved in the app, on the Approvals page, where you see exactly what runs.` };
+    }
   }
 
   // Only one decision wins (double clicks, the app and WhatsApp at the same time):
