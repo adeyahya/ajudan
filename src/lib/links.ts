@@ -1,7 +1,8 @@
 import path from "node:path";
-import { and, eq, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { ObjectType } from "@/db/schema";
+import { matchIds } from "@/lib/search";
 
 /**
  * Links between workspace objects (the `links` table): any object to any object, stored
@@ -133,4 +134,60 @@ export function describeRef(businessId: string, ref: ObjectRef): RefInfo | null 
       return { ...ref, title: a?.title || path.posix.basename(ref.id), href: `${base}/library?f=${encodeURIComponent(ref.id)}`, deleted: !!a?.deletedAt };
     }
   }
+}
+
+/**
+ * Objects to link to, for the link picker: docs (Context pages), deliverables, library files
+ * and contacts whose text matches `query` (the search index when a word is 3+ characters,
+ * else a title scan), up to `perType` of each, Trash left out.
+ */
+export function findLinkTargets(businessId: string, query: string, perType = 5): RefInfo[] {
+  const q = query.trim().slice(0, 100);
+  if (!q) return [];
+  const words = q.split(/\s+/);
+  const pat = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const likeTitle = (col: SQL | Parameters<typeof eq>[0] | null) => sql`${col} like ${pat} escape '\\'`;
+  const pick = (ids: string[] | null, scan: () => string[]) => (ids ? ids.slice(0, perType) : scan());
+
+  const p = schema.contextPages;
+  const d = schema.deliverables;
+  const a = schema.assets;
+  const c = schema.contacts;
+  const refs: ObjectRef[] = [
+    ...pick(matchIds("context_pages", businessId, words, { all: true, limit: perType }), () =>
+      db.select({ id: p.id }).from(p).where(and(eq(p.businessId, businessId), isNull(p.deletedAt), likeTitle(p.title))).limit(perType).all().map((r) => r.id),
+    ).map((id) => ({ type: "doc" as const, id })),
+    ...pick(matchIds("deliverables", businessId, words, { all: true, limit: perType }), () =>
+      db
+        .select({ id: d.id })
+        .from(d)
+        .where(and(eq(d.businessId, businessId), isNull(d.deletedAt), likeTitle(d.title)))
+        .orderBy(desc(d.createdAt))
+        .limit(perType)
+        .all()
+        .map((r) => r.id),
+    ).map((id) => ({ type: "deliverable" as const, id })),
+    ...pick(matchIds("assets", businessId, words, { all: true, limit: perType }), () =>
+      db
+        .select({ id: a.path })
+        .from(a)
+        .where(and(eq(a.businessId, businessId), isNull(a.deletedAt), or(likeTitle(a.title), likeTitle(a.path))))
+        .limit(perType)
+        .all()
+        .map((r) => r.id),
+    ).map((id) => ({ type: "asset" as const, id })),
+    ...pick(matchIds("contacts", businessId, words, { all: true, limit: perType }), () =>
+      db
+        .select({ id: c.id })
+        .from(c)
+        .where(and(eq(c.businessId, businessId), isNull(c.deletedAt), or(likeTitle(c.name), likeTitle(c.company))))
+        .limit(perType)
+        .all()
+        .map((r) => r.id),
+    ).map((id) => ({ type: "contact" as const, id })),
+  ];
+  return refs.flatMap((r) => {
+    const info = describeRef(businessId, r);
+    return info && !info.deleted ? [info] : [];
+  });
 }

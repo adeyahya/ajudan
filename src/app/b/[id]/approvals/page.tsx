@@ -31,6 +31,7 @@ import { fullTime, kindLabel, relativeTime } from "../deliverables/format";
 import { HistoryPeek } from "./history-peek";
 import { InboxList, type InboxCard } from "./inbox-list";
 import { approvalKind, KIND_META } from "./kinds";
+import { TeamChanges } from "./team-changes";
 
 type Props = PageProps<"/b/[id]/approvals">;
 
@@ -147,6 +148,7 @@ async function Content({ params, searchParams }: Pick<Props, "params" | "searchP
               cards={cards}
               empty={<EmptyState icon={<Inbox />} title={t(lang, "approvals.empty.title")} body={t(lang, "approvals.empty.body")} />}
             />
+            <TeamChanges businessId={id} lang={lang} />
           </div>
         ) : (
           <DataTable<Approval>
