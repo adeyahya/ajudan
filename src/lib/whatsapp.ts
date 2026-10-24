@@ -146,6 +146,11 @@ export async function sendFile(chatJid: string, file: string, caption?: string) 
   });
 }
 
+/** Send an OGG/Opus file as a WhatsApp voice note (src/lib/voice.ts makes them). */
+export async function sendVoice(chatJid: string, file: string) {
+  return wacli(["send", "voice", "--to", chatJid, "--file", file], { timeoutMs: 180_000 });
+}
+
 /** Create a group on the business's WhatsApp. Needs the store lock (see worker withSyncPaused). */
 export async function createGroup(name: string, opts: { description?: string; announceOnly?: boolean } = {}) {
   const g = await wacli<{ JID: string; Name: string }>(

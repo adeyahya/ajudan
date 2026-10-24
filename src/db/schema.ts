@@ -65,6 +65,8 @@ export const businesses = sqliteTable("businesses", {
   supervised: integer("supervised", { mode: "boolean" }).notNull().default(false),
   /** Which model provider runs the team (src/lib/backend.ts). Null: Claude Code with the local login. */
   aiBackend: text("ai_backend", { mode: "json" }).$type<import("@/lib/backend").BackendSettings>(),
+  /** Voice-note replies on WhatsApp (src/lib/voice-settings.ts). Null: off. */
+  voiceReplies: text("voice_replies", { mode: "json" }).$type<import("@/lib/voice-settings").VoiceSettings>(),
   createdAt: createdAt(),
 });
 

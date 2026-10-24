@@ -15,7 +15,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "app": "next build && open -n node_modules/electron/dist/Electron.app --args \"$PWD/electron\"",
-    "app:package": "node scripts/package-app.mjs"
+    "app:package": "node scripts/package-app.mjs",
+    "voice:setup": "sh scripts/setup-voice.sh"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.68",

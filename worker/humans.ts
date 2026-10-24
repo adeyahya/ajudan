@@ -22,13 +22,20 @@ import { dataDir } from "@/lib/paths";
 import { createTask } from "@/lib/tasks";
 import { QUIET_BY_PACE } from "@/lib/watches";
 import { onIncomingMessage } from "./whatsapp-sync";
-import { downloadMedia, isLinked, isRealMessage, listMessages, messageText, sendFile, sendText, type WaMessage } from "@/lib/whatsapp";
+import { downloadMedia, isLinked, isRealMessage, listMessages, messageText, sendFile, sendText, sendVoice, type WaMessage } from "@/lib/whatsapp";
+import { speak, speakable, voiceAvailable } from "@/lib/voice";
+import { voiceSettings } from "@/lib/voice-settings";
 
 const POLL_MS = 10_000;
 /** Wait this long after a person's last message before handing the batch over. */
 export const QUIET_MS = 25_000;
 
-/** Send text (and files from the business folder) to a human teammate, and record it. */
+/**
+ * Send text (and files from the business folder) to a human teammate, and record it.
+ * With voice replies on (Business → WhatsApp), a voice note goes first: always, or
+ * when their last message was one. `spoken` is what it says (else the text, made
+ * speakable); `voice: false` keeps a message text-only (approval requests).
+ */
 export async function sendToHuman(p: {
   business: Pick<Business, "id" | "name" | "language">;
   human: Teammate;
@@ -37,6 +44,8 @@ export async function sendToHuman(p: {
   files?: string[];
   taskId?: string | null;
   firstOfRequest?: boolean;
+  spoken?: string;
+  voice?: boolean;
 }) {
   if (!p.human.phone) throw new Error(`${p.human.name} has no WhatsApp number.`);
   const jid = humanJid(p.human.phone);
@@ -44,6 +53,7 @@ export async function sendToHuman(p: {
   const body = [senderLine(p.from, p.business.name, p.business.language), p.text.trim(), p.firstOfRequest ? replyHint(p.business.language) : ""]
     .filter(Boolean)
     .join("\n\n");
+  const voiceNote = p.voice === false || !wantsVoice(p.business.id, p.human.id) ? null : await voiceNoteFor(p, jid);
   await sendText(jid, body);
   for (const f of files) await sendFile(jid, path.join(dataDir(), f));
   recordHumanMessage({
@@ -53,7 +63,7 @@ export async function sendToHuman(p: {
     fromTeammateId: p.from?.id ?? null,
     taskId: p.taskId ?? null,
     text: p.text.trim(),
-    attachments: files,
+    attachments: voiceNote ? [voiceNote, ...files] : files,
     sentAt: new Date(),
   });
   logEvent({
@@ -64,6 +74,37 @@ export async function sendToHuman(p: {
     message: `${p.from?.name ?? "You"} → ${p.human.name} on WhatsApp: ${p.text.replace(/\s+/g, " ").slice(0, 100)}`,
     data: { humanId: p.human.id },
   });
+}
+
+/** Voice replies are on for this business, and this person gets one now. */
+export function wantsVoice(businessId: string, humanId: string) {
+  const row = db.select({ v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  const mode = voiceSettings(row?.v).mode;
+  if (mode === "off" || !voiceAvailable()) return false;
+  if (mode === "always") return true;
+  const lastIn = db
+    .select({ text: schema.humanMessages.text })
+    .from(schema.humanMessages)
+    .where(and(eq(schema.humanMessages.humanId, humanId), eq(schema.humanMessages.direction, "in")))
+    .orderBy(desc(schema.humanMessages.sentAt))
+    .get();
+  return lastIn?.text.startsWith("🎤") ?? false;
+}
+
+/** Make and send the voice note; a failure only costs the voice (the text still goes). */
+async function voiceNoteFor(p: { business: Pick<Business, "id" | "language">; human: Teammate; from: Pick<Teammate, "id" | "name"> | null; text: string; spoken?: string }, jid: string) {
+  const say = speakable(p.spoken?.trim() || p.text);
+  if (!say) return null;
+  try {
+    const row = db.select({ v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, p.business.id)).get();
+    const rel = await speak(say, voiceSettings(row?.v), p.business.language);
+    await sendVoice(jid, path.join(dataDir(), rel));
+    return rel;
+  } catch (err) {
+    console.error(`[humans] voice note to ${p.human.name} failed`, err);
+    logEvent({ businessId: p.business.id, teammateId: p.from?.id ?? null, type: "text", message: `Couldn't send ${p.human.name} a voice note (${(err as Error).message.slice(0, 120)}); sent text only.` });
+    return null;
+  }
 }
 
 /** A task assigned to a human: send it on WhatsApp and wait for their reply. */

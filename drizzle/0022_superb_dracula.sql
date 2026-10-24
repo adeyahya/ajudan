@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `voice_replies` text;

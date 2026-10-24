@@ -7,7 +7,9 @@ import { getBusiness, listTeammates } from "@/lib/data";
 import { getSpendRollup } from "@/lib/health";
 import { t, uiLang, type UiLang } from "@/lib/i18n";
 import { languageName } from "@/lib/language";
+import { listLibrary } from "@/lib/assets";
 import { backendKey } from "@/lib/secrets";
+import { voiceAvailable } from "@/lib/voice";
 import { teamEdits } from "@/lib/team-edits";
 import { goalsToText, joinLines } from "@/lib/onboarding/profile-form";
 import { saveProfile } from "./actions";
@@ -18,6 +20,7 @@ import { PermissionsPanel } from "./permissions-panel";
 import { ReposPanel } from "./repos-panel";
 import { SecretsPanel } from "./secrets-panel";
 import { SpendPanel } from "./spend-panel";
+import { VoicePanel } from "./voice-panel";
 import { WhatsappPanel } from "./whatsapp-panel";
 
 /**
@@ -191,7 +194,18 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
         ))}
 
       {tab === "whatsapp" && (
-        <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={names((m) => m.whatsappAccess)} lang={lang} />
+        <>
+          <WhatsappPanel businessId={id} allowed={biz.whatsappChats} teammatesWithAccess={names((m) => m.whatsappAccess)} lang={lang} />
+          <VoicePanel
+            key={JSON.stringify(biz.voiceReplies)}
+            businessId={id}
+            stored={biz.voiceReplies}
+            available={voiceAvailable()}
+            clips={listLibrary(id)
+              .filter((f) => f.kind === "audio")
+              .map((f) => ({ path: f.path, label: f.title || f.name }))}
+          />
+        </>
       )}
       {tab === "permissions" && <PermissionsPanel businessId={id} edits={teamEdits(biz.teamEdits)} supervised={biz.supervised} />}
       {tab === "backend" && <BackendPanel key={JSON.stringify(biz.aiBackend)} businessId={id} stored={biz.aiBackend} hasKey={Boolean(await backendKey(id))} />}

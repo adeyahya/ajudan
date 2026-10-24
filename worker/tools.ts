@@ -947,6 +947,12 @@ export function createBizServer(ctx: BizContext) {
           name: z.string(),
           message: z.string().describe("The WhatsApp message, in the business's language"),
           files: z.array(z.string()).optional().describe("media/… or work/… files to send"),
+          spoken: z
+            .string()
+            .optional()
+            .describe(
+              "When they talk to you in voice notes (🎤), your message also goes as a voice note: this is what it says. Write it to be heard: short (under ~60 words), natural spoken language, no links, lists or emoji; the written message keeps the details.",
+            ),
         },
         async (a) => {
           const h = find(a.name);
@@ -954,7 +960,7 @@ export function createBizServer(ctx: BizContext) {
           const files = cleanFiles(a.files);
           if (badFiles(files).length) return fail(`Unknown file(s): ${badFiles(files).join(", ")}.`);
           try {
-            await sendToHuman({ business: business(), human: h, from: teammate, text: a.message, files, taskId: openRequest(h.id)?.id ?? null });
+            await sendToHuman({ business: business(), human: h, from: teammate, text: a.message, files, spoken: a.spoken, taskId: openRequest(h.id)?.id ?? null });
           } catch (err) {
             return fail(`Couldn't send on WhatsApp: ${(err as Error).message}`);
           }

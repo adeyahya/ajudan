@@ -59,7 +59,7 @@ export async function notifyOwner(approvalId: string) {
     : t(business, `Balas *ya ${code}* untuk setuju, atau *tidak ${code}* + alasannya.`, `Reply *yes ${code}* to approve, or *no ${code}* + why.`);
   const text = `${PROMPT} *${t(business, "Perlu persetujuan", "Needs your approval")}* · ${code}\n${a.summary}${body ? `\n\n${body}` : ""}\n\n${how}`;
   try {
-    await sendToHuman({ business, human: owner, from: null, text, files });
+    await sendToHuman({ business, human: owner, from: null, text, files, voice: false });
   } catch (err) {
     console.error("[owner-approvals] couldn't notify the owner", err);
   }
@@ -139,7 +139,7 @@ export async function handleOwnerAnswers(business: Business, owner: Teammate, te
     .orderBy(desc(schema.humanMessages.sentAt))
     .get();
   const answeringPrompt = !!lastOut?.text.startsWith(PROMPT);
-  const reply = (text: string) => sendToHuman({ business, human: owner, from: null, text }).catch((err) => console.error("[owner-approvals]", err));
+  const reply = (text: string) => sendToHuman({ business, human: owner, from: null, text, voice: false }).catch((err) => console.error("[owner-approvals]", err));
 
   for (const raw of texts) {
     const answer = parseAnswer(raw, (code) => findPendingByCode(business.id, code).length > 0);

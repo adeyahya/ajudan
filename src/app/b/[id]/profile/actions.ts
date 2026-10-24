@@ -18,6 +18,13 @@ import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 import { setSupervised } from "@/lib/supervision";
 import { backendOf, isProvider, PROVIDER_DEFAULTS, type BackendSettings, type ModelOption, type Provider } from "@/lib/backend";
 import { claudeModels, ollamaModels, openRouterModels } from "@/lib/model-catalog";
+import path from "node:path";
+import { isLibraryPath } from "@/lib/assets";
+import { mediaKind } from "@/lib/media";
+import { dataDir } from "@/lib/paths";
+import { transcribe } from "@/lib/speech";
+import { speak, voiceAvailable } from "@/lib/voice";
+import { VOICE_ATTRS, VOICE_MODES, voiceSettings, type VoiceMode, type VoiceSettings } from "@/lib/voice-settings";
 
 export type ProfileFormState = { error?: string; ok?: boolean };
 
@@ -282,5 +289,44 @@ export async function listModelsAction(businessId: string, provider: Provider, b
     return { models: await ollamaModels(backendOf({ provider: "ollama", baseUrl: url })) };
   } catch {
     return { models: [], error: t(biz.language, provider === "ollama" ? "profile.backend.picker.ollamaDown" : "profile.backend.picker.catalogDown") };
+  }
+}
+
+/**
+ * Business → WhatsApp → Voice replies. A clip to clone is transcribed once (whisper.cpp)
+ * so OmniVoice knows what it says.
+ */
+export async function saveVoiceAction(businessId: string, fd: FormData) {
+  const biz = db.select({ language: schema.businesses.language, v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  const mode = String(fd.get("mode") ?? "off") as VoiceMode;
+  if (!VOICE_MODES.includes(mode)) throw new Error("Unknown mode");
+  const instruct = (["gender", "age", "pitch"] as const)
+    .map((k) => String(fd.get(k) ?? ""))
+    .filter((v) => (Object.values(VOICE_ATTRS) as readonly (readonly string[])[]).some((list) => list.includes(v)))
+    .join(", ");
+  const ref = fd.get("source") === "clone" ? String(fd.get("refAudio") ?? "") : "";
+  if (ref && (!isLibraryPath(ref) || mediaKind(ref) !== "audio" || !fs.existsSync(path.join(dataDir(), ref)))) throw new Error(t(biz.language, "profile.voice.err.clip"));
+  let refText = ref && ref === biz.v?.refAudio ? biz.v.refText : undefined;
+  if (ref && !refText) {
+    const tr = await transcribe(path.join(dataDir(), ref), { language: biz.language });
+    refText = tr.text.trim();
+    if (!refText) throw new Error(t(biz.language, "profile.voice.err.silent"));
+  }
+  const settings: VoiceSettings = { mode, instruct: instruct || undefined, ...(ref ? { refAudio: ref, refText } : {}) };
+  db.update(schema.businesses).set({ voiceReplies: settings }).where(eq(schema.businesses.id, businessId)).run();
+  refresh();
+}
+
+/** Say a sample sentence in the saved voice; returns a URL to play it. */
+export async function previewVoiceAction(businessId: string): Promise<{ url?: string; error?: string }> {
+  const biz = db.select({ language: schema.businesses.language, v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (!biz) throw new Error("Business not found");
+  if (!voiceAvailable()) return { error: t(biz.language, "profile.voice.notSetUp") };
+  try {
+    const rel = await speak(t(biz.language, "profile.voice.sample"), voiceSettings(biz.v), biz.language);
+    return { url: `/api/b/${businessId}/files/${rel.split("/").map(encodeURIComponent).join("/")}` };
+  } catch (err) {
+    return { error: (err as Error).message };
   }
 }
