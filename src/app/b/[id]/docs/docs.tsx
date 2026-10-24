@@ -2,437 +2,594 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, FileTextIcon, ImageIcon, Info, Paperclip, PlusIcon, Trash2, UserRoundPlus, VideoIcon, XIcon } from "lucide-react";
+import { BookOpen, ChevronLeft, FileTextIcon, FolderIcon, FolderInput, FolderPlus, LayoutGrid, Pencil, PlusIcon, Tag, Trash2, XIcon } from "lucide-react";
 import { DocLayoutButtons, useDocLayout } from "@/components/doc-layout";
 import { TopBarActions } from "@/components/breadcrumb";
 import { useT, useTn } from "@/components/i18n";
-import { Badge, Button, cn, EmptyState, IconButton, Input, Kbd, LineTabs, Textarea } from "@/components/kit";
-import { Markdown } from "@/components/markdown";
-import { SidePeek } from "@/components/side-peek";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Deliverable, DeliverableStatus } from "@/db/schema";
-import type { MessageKey } from "@/lib/i18n";
-import type { MediaKind } from "@/lib/media-types";
-import { statusTone } from "@/lib/status-tones";
-import { fileUrl } from "@/components/image-strip";
+import { Badge, Button, cn, EmptyState, Input } from "@/components/kit";
+import { ObjectPanel } from "@/components/object-panel";
 import { PlanTask } from "@/components/plan-task";
-import { DeleteDialog, localizeError, MoreMenu, PropRow, Segmented, WorkspaceShell } from "@/components/workspace-ui";
-import { deleteDoc, saveDoc } from "./actions";
-
-const KINDS = ["note", "brief", "plan", "script", "social_post", "blog_post", "email", "ad_copy", "report", "faq", "price_list"];
-const STATUS: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
-/** The English label of a kind nobody translated (kinds the team invented): "case_study" → "Case study". */
-const label = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+import { SidePeek } from "@/components/side-peek";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DeleteDialog, MoreMenu, WorkspaceShell } from "@/components/workspace-ui";
+import type { Deliverable, DeliverableStatus } from "@/db/schema";
+import { folderParent, folderTree, isInFolder, normalizeFolder } from "@/lib/docs-folders";
+import { DOC_STATUSES, docsHref, filterDocs, STATUS_FILTERS, teammateOf, type DocItem, type DocsFilter, type DocStatus } from "@/lib/docs-list";
+import { mentionHref } from "@/lib/docs-mentions";
+import { DOC_TEMPLATES } from "@/lib/docs-templates";
+import type { MessageKey } from "@/lib/i18n";
+import { statusTone } from "@/lib/status-tones";
+import { moveDocsToFolder, renameDocFolder, setStatusOfDocs, trashManyDocs } from "./actions";
+import { Editor, useKindLabel, type HandOver, type MediaOption } from "./editor";
+import type { MentionOption } from "./mention-textarea";
 
 type Mate = { id: string; name: string; title: string; kind: string };
-type MediaOption = { path: string; name: string; kind: MediaKind };
-export type DocsFilter = "all" | "mine" | "team";
+const ANY = "any";
 
-function useKindLabel() {
-  const t = useT();
-  return (k: string) => (KINDS.includes(k) ? t(`studio.docs.kind.${k}` as MessageKey) : label(k));
-}
-
-/** Write briefs, notes and scripts, and edit the team's drafts; hand any doc to a teammate for later. */
-/** A list row: no full text, just its start for the search box. */
-export type DocRow = Pick<Deliverable, "id" | "title" | "kind" | "status" | "teammateId"> & { excerpt: string };
-
+/**
+ * Docs: one list over saved work (deliverables) and Context pages, with folders, filters,
+ * search and bulk actions; a deliverable opens in the editor, a Context page in Context.
+ */
 export function Docs({
   businessId,
-  docs,
-  doc,
-  docId,
+  items,
+  matches,
   filter,
+  doc,
+  newTemplate,
   teammates,
   media,
+  candidates,
 }: {
   businessId: string;
-  docs: DocRow[];
+  items: DocItem[];
+  /** "deliverable:<id>" / "context:<id>" keys matching ?q, or null without a search. */
+  matches: string[] | null;
+  filter: DocsFilter;
   /** The open doc, in full. */
   doc?: Deliverable;
-  docId?: string;
-  filter: DocsFilter;
+  /** Set when writing a new doc: "blank" or a template key. */
+  newTemplate?: string;
   teammates: Mate[];
   media: MediaOption[];
+  candidates: MentionOption[];
 }) {
   const t = useT();
-  const kindLabel = useKindLabel();
-  const [q, setQ] = useState("");
-  const [hand, setHand] = useState<{ key: string; text: string; attachments: string[] } | null>(null);
-  // Focus mode hides the list: the doc takes the whole width.
+  const [peek, setPeek] = useState<{ kind: "hand"; hand: HandOver } | { kind: "links" } | null>(null);
   const { focus } = useDocLayout();
   const names = useMemo(() => new Map(teammates.map((m) => [m.id, m.name])), [teammates]);
-  const shown = docs.filter((d) => {
-    if (filter === "mine" && d.teammateId) return false;
-    if (filter === "team" && !d.teammateId) return false;
-    const s = q.trim().toLowerCase();
-    return !s || `${d.title} ${d.kind} ${d.excerpt}`.toLowerCase().includes(s);
-  });
-  const base = `/b/${businessId}/docs`;
-  const href = (f: DocsFilter, id?: string) => {
-    const p = new URLSearchParams();
-    if (f !== "all") p.set("who", f);
-    if (id) p.set("doc", id);
-    const s = p.toString();
-    return s ? `${base}?${s}` : base;
-  };
+  const folders = useMemo(() => folderTree(items.map((d) => d.folder)).map((f) => f.path), [items]);
+  const editing = !!doc || newTemplate !== undefined;
+  const listHref = docsHref(businessId, filter);
 
-  const peek = (
-    <SidePeek open={!!hand} onClose={() => setHand(null)} title={t("studio.docs.handTitle")} description={t("studio.docs.handHelp")}>
-      {hand && (
+  const peekEl = (
+    <SidePeek
+      open={!!peek}
+      onClose={() => setPeek(null)}
+      title={peek?.kind === "links" ? t("docs.links") : t("studio.docs.handTitle")}
+      description={peek?.kind === "links" ? t("docs.linksHelp") : t("studio.docs.handHelp")}
+    >
+      {peek?.kind === "hand" && (
         <div className="space-y-4">
           <PlanTask
-            key={hand.key}
+            key={peek.hand.key}
             businessId={businessId}
             teammates={teammates.filter((m) => m.kind === "ai")}
-            attachments={hand.attachments}
-            defaultText={hand.text}
-            onDone={() => setHand(null)}
+            attachments={peek.hand.attachments}
+            defaultText={peek.hand.text}
+            onDone={() => setPeek(null)}
           />
         </div>
       )}
+      {peek?.kind === "links" && doc && <ObjectPanel businessId={businessId} objectRef={{ type: "deliverable", id: doc.id }} />}
     </SidePeek>
   );
 
+  if (editing) {
+    const author = doc ? teammateOf(doc.createdBy ?? (doc.teammateId ? `teammate:${doc.teammateId}` : "owner")) : null;
+    return (
+      <WorkspaceShell title={t("nav.docs")} peek={peekEl}>
+        <TopBarActions>
+          <DocLayoutButtons />
+        </TopBarActions>
+        <Button asChild size="sm" variant="ghost" className={cn("mb-3 -ml-2 text-muted-foreground", focus && "hidden")}>
+          <Link href={listHref}>
+            <ChevronLeft /> {t("studio.docs.allDocs")}
+          </Link>
+        </Button>
+        <Editor
+          key={doc?.id ?? `new:${newTemplate}`}
+          businessId={businessId}
+          doc={doc}
+          template={newTemplate}
+          initialFolder={filter.folder}
+          folders={folders}
+          author={author ? (names.get(author) ?? t("studio.docs.team")) : undefined}
+          media={media}
+          mentions={candidates}
+          backHref={listHref}
+          onHandOver={(hand) => setPeek({ kind: "hand", hand })}
+          onShowLinks={() => setPeek({ kind: "links" })}
+          canHand={teammates.some((m) => m.kind === "ai")}
+        />
+      </WorkspaceShell>
+    );
+  }
+
   return (
-    <WorkspaceShell title={t("nav.docs")} peek={peek}>
-      <TopBarActions>
-        <DocLayoutButtons />
-      </TopBarActions>
-      <div className={cn("grid gap-8", !focus && "@3xl:grid-cols-[260px_minmax(0,1fr)]")}>
-        <aside className={cn("min-w-0 space-y-3", doc && "hidden @3xl:block", focus && "hidden @3xl:hidden")}>
-          <div className="flex items-center gap-2">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.docs.search")} aria-label={t("studio.docs.search")} className="h-7 min-w-0 flex-1 text-[13px]" />
-            <Button asChild size="sm">
-              <Link href={href(filter)}>
-                <PlusIcon /> {t("studio.docs.new")}
-              </Link>
-            </Button>
-          </div>
-          <LineTabs
-            label={t("studio.docs.filter")}
-            items={(["all", "mine", "team"] as const).map((f) => ({
-              href: href(f, docId),
-              label: t(`studio.docs.filter.${f}`),
-              active: filter === f,
-            }))}
-          />
-          {shown.length === 0 ? (
-            <EmptyState compact icon={<FileTextIcon />} title={docs.length ? t("studio.docs.noMatch") : t("studio.docs.emptyTitle")} body={docs.length ? undefined : t("studio.docs.emptyBody")} />
-          ) : (
-            <ul className="-mx-2 max-h-[calc(100dvh-280px)] overflow-y-auto">
-              {shown.map((d) => {
-                const s = statusTone("deliverable", d.status);
-                return (
-                  <li key={d.id}>
-                    <Link
-                      href={href(filter, d.id)}
-                      aria-current={d.id === docId ? "page" : undefined}
-                      className={cn("block rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-hover", d.id === docId && "bg-accent")}
-                    >
-                      <span className="flex items-center gap-2">
-                        <FileTextIcon className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
-                        <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] font-medium text-foreground">{d.title}</span>
-                      </span>
-                      <span className="mt-1 flex min-w-0 items-center gap-1.5 pl-6 text-xs text-tertiary">
-                        <Badge tone={s.tone}>{t(s.label)}</Badge>
-                        <span className="truncate">
-                          {kindLabel(d.kind)} · {d.teammateId ? (names.get(d.teammateId) ?? t("studio.docs.team")) : t("studio.docs.you")}
-                        </span>
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </aside>
-        <div className="min-w-0">
-          {doc && (
-            <Button asChild size="sm" variant="ghost" className={cn("mb-3 -ml-2 text-muted-foreground", !focus && "@3xl:hidden")}>
-              <Link href={href(filter)}>
-                <ChevronLeft /> {t("studio.docs.allDocs")}
-              </Link>
-            </Button>
-          )}
-          <Editor
-            key={doc?.id ?? "new"}
-            businessId={businessId}
-            doc={doc}
-            author={doc?.teammateId ? names.get(doc.teammateId) : undefined}
-            media={media}
-            onHandOver={setHand}
-            canHand={teammates.some((m) => m.kind === "ai")}
-          />
-        </div>
-      </div>
+    <WorkspaceShell title={t("nav.docs")} actions={<NewDocMenu businessId={businessId} filter={filter} />}>
+      <DocsBrowser businessId={businessId} items={items} matches={matches} filter={filter} names={names} />
     </WorkspaceShell>
   );
 }
 
-function Editor({
+/** "New doc": blank, or from one of the built-in templates. Opens in the folder being shown. */
+function NewDocMenu({ businessId, filter, label }: { businessId: string; filter: DocsFilter; label?: string }) {
+  const t = useT();
+  const href = (key: string) => docsHref(businessId, filter, { new: key });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm">
+          <PlusIcon /> {label ?? t("docs.new")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuItem asChild>
+          <Link href={href("blank")}>
+            <FileTextIcon /> {t("docs.blank")}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-tertiary">{t("docs.fromTemplate")}</DropdownMenuLabel>
+        {DOC_TEMPLATES.map((tpl) => (
+          <DropdownMenuItem key={tpl.key} asChild>
+            <Link href={href(tpl.key)}>
+              <FileTextIcon /> {t(`docs.template.${tpl.key}`)}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const FOLDER_ERRORS: Record<string, MessageKey> = { "A folder can't go inside itself.": "docs.err.circular", "Pick a folder.": "docs.err.pickFolder" };
+
+function DocsBrowser({
   businessId,
-  doc,
-  author,
-  media,
-  onHandOver,
-  canHand,
+  items,
+  matches,
+  filter,
+  names,
 }: {
   businessId: string;
-  doc?: Deliverable;
-  author?: string;
-  media: MediaOption[];
-  onHandOver: (h: { key: string; text: string; attachments: string[] }) => void;
-  canHand: boolean;
+  items: DocItem[];
+  matches: string[] | null;
+  filter: DocsFilter;
+  names: Map<string, string>;
 }) {
   const t = useT();
   const tn = useTn();
   const kindLabel = useKindLabel();
   const router = useRouter();
-  const [title, setTitle] = useState(doc?.title ?? "");
-  const [kind, setKind] = useState(doc?.kind ?? "brief");
-  const [channel, setChannel] = useState(doc?.channel ?? "");
-  const [content, setContent] = useState(doc?.content ?? "");
-  const [status, setStatus] = useState<DeliverableStatus>(doc?.status ?? "draft");
-  const [attachments, setAttachments] = useState<string[]>(doc?.attachments ?? []);
-  const [tab, setTab] = useState<"write" | "split" | "preview">("write");
-  const [picking, setPicking] = useState(false);
-  const [msg, setMsg] = useState<{ ok?: string; error?: string } | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [pending, start] = useTransition();
-  const kinds = KINDS.includes(kind) ? KINDS : [kind, ...KINDS];
-  const dirty =
-    title !== (doc?.title ?? "") ||
-    kind !== (doc?.kind ?? "brief") ||
-    channel !== (doc?.channel ?? "") ||
-    content !== (doc?.content ?? "") ||
-    status !== (doc?.status ?? "draft") ||
-    attachments.join() !== (doc?.attachments ?? []).join();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Folders named here that have no docs yet (a folder exists once a doc is in it).
+  const [newFolders, setNewFolders] = useState<string[]>([]);
+  const [folderDialog, setFolderDialog] = useState<{ mode: "new" | "rename"; path?: string } | null>(null);
+  const [trashing, setTrashing] = useState(false);
+  const [q, setQ] = useState(filter.q);
 
-  const save = () =>
-    start(async () => {
-      const r = await saveDoc(businessId, { id: doc?.id, title, kind, channel, content, status, attachments });
-      if ("error" in r) return setMsg({ error: localizeError(t, r.error) });
-      setMsg({ ok: t("common.saved") });
-      if (!doc) router.replace(`/b/${businessId}/docs?doc=${r.id}`);
+  const matchSet = useMemo(() => (matches ? new Set(matches) : null), [matches]);
+  const shown = useMemo(() => filterDocs(items, filter, matchSet), [items, filter, matchSet]);
+  const deliverables = items.filter((d) => d.source === "deliverable");
+  const tree = useMemo(() => folderTree(deliverables.map((d) => d.folder), [...newFolders, ...(filter.folder ? [filter.folder] : [])]), [deliverables, newFolders, filter.folder]);
+  const selectable = shown.filter((d) => d.source === "deliverable");
+  const picked = selectable.filter((d) => selected.has(d.id)).map((d) => d.id);
+  const allPicked = selectable.length > 0 && picked.length === selectable.length;
+  const href = (f: Partial<DocsFilter>) => docsHref(businessId, { ...filter, ...f });
+  const activeFilters = filter.who !== "all" || !!filter.status || !!filter.folder || !!filter.q;
+
+  // Search as you type, on the server (both tables' full text), a moment after typing stops.
+  const qRef = useRef(filter.q);
+  useEffect(() => {
+    if (q.trim() === qRef.current) return;
+    const id = setTimeout(() => {
+      qRef.current = q.trim();
+      router.replace(docsHref(businessId, { ...filter, q: q.trim() }), { scroll: false });
+    }, 300);
+    return () => clearTimeout(id);
+  }, [q, filter, businessId, router]);
+
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
     });
 
-  const words = content.trim() ? content.trim().split(/\s+/).length : 0;
-  // Instructions for the teammate (agent-facing, like the rest of the task text), not UI chrome.
-  const handOver = `Work from this ${label(kind).toLowerCase()} (saved as "${title}"):\n\n${content}`.slice(0, 20000);
+  const move = (folder: string | null) =>
+    start(async () => {
+      const r = await moveDocsToFolder(businessId, picked, folder);
+      toast(tn("docs.moved", r.moved));
+      setSelected(new Set());
+    });
+  const mark = (status: DeliverableStatus) =>
+    start(async () => {
+      const r = await setStatusOfDocs(businessId, picked, status);
+      toast(tn("docs.statusChanged", r.changed));
+      setSelected(new Set());
+    });
+  const trash = () =>
+    start(async () => {
+      const r = await trashManyDocs(businessId, picked);
+      toast(tn("docs.trashed", r.trashed));
+      setSelected(new Set());
+    });
+
+  const authorOf = (d: DocItem) => {
+    if (d.by === "owner") return t("studio.docs.you");
+    const id = teammateOf(d.by);
+    return (id && names.get(id)) || t("studio.docs.team");
+  };
+  const counts = { all: items.length, context: items.filter((d) => d.source === "context").length };
 
   return (
-    <div className={cn("mx-auto w-full", tab === "split" ? "max-w-none" : "max-w-[var(--doc-w)]")}>
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder={t("studio.docs.titlePlaceholder")}
-        aria-label={t("studio.docs.title")}
-        className="w-full border-0 bg-transparent p-0 text-2xl leading-8 font-semibold text-foreground outline-none placeholder:text-placeholder focus-visible:outline-none"
-      />
-      <div className="mt-4 space-y-0.5">
-        <PropRow label={t("studio.docs.kind")}>
-          <Select value={kind} onValueChange={setKind}>
-            <SelectTrigger size="sm" className="border-transparent hover:border-input" aria-label={t("studio.docs.kind")}>
+    <div className="grid gap-6 @3xl:grid-cols-[220px_minmax(0,1fr)]">
+      {/* Folders */}
+      <aside className="hidden min-w-0 @3xl:block">
+        <nav aria-label={t("docs.folders")} className="space-y-0.5">
+          <SideItem href={href({ folder: null, status: null })} active={!filter.folder && filter.status !== "context"} icon={<LayoutGrid />} label={t("docs.allDocs")} count={counts.all} />
+          <SideItem href={href({ folder: null, status: "context" })} active={filter.status === "context"} icon={<BookOpen />} label={t("docs.teamReads")} count={counts.context} />
+          <div className="flex items-center justify-between px-2 pt-4 pb-1">
+            <span className="text-xs font-medium text-tertiary">{t("docs.folders")}</span>
+            <Button size="icon-xs" variant="ghost" className="text-tertiary" aria-label={t("docs.newFolder")} onClick={() => setFolderDialog({ mode: "new" })}>
+              <FolderPlus />
+            </Button>
+          </div>
+          {tree.length === 0 && <p className="px-2 text-xs text-tertiary">{t("docs.noFolders")}</p>}
+          {tree.map((f) => (
+            <div key={f.path} className="group/folder relative" style={{ paddingLeft: f.depth * 12 }}>
+              <SideItem
+                href={href({ folder: f.path, status: filter.status === "context" ? null : filter.status })}
+                active={filter.folder === f.path}
+                icon={<FolderIcon />}
+                label={f.name}
+                count={f.total || undefined}
+              />
+              <MoreMenu
+                label={t("docs.folderMenu")}
+                size="icon-xs"
+                className="absolute top-0.5 right-1 bg-background opacity-0 group-hover/folder:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+              >
+                <DropdownMenuItem onSelect={() => setFolderDialog({ mode: "rename", path: f.path })} disabled={f.total === 0}>
+                  <Pencil /> {t("docs.renameFolder")}
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={docsHref(businessId, { folder: f.path }, { new: "blank" })}>
+                    <PlusIcon /> {t("docs.newDocHere")}
+                  </Link>
+                </DropdownMenuItem>
+              </MoreMenu>
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="min-w-0">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("docs.search")} aria-label={t("docs.search")} className="h-7 w-full text-[13px] @xl:w-64" />
+          <Select value={filter.who} onValueChange={(v) => router.push(href({ who: v as DocsFilter["who"] }))}>
+            <SelectTrigger size="sm" aria-label={t("docs.source")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {kinds.map((k) => (
-                <SelectItem key={k} value={k}>
-                  {kindLabel(k)}
+              {(["all", "mine", "team"] as const).map((w) => (
+                <SelectItem key={w} value={w}>
+                  {t(`docs.source.${w}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </PropRow>
-        <PropRow label={t("studio.docs.status")}>
-          <Select value={status} onValueChange={(v) => setStatus(v as DeliverableStatus)}>
-            <SelectTrigger size="sm" className="border-transparent hover:border-input" aria-label={t("studio.docs.status")}>
+          <Select value={filter.status ?? ANY} onValueChange={(v) => router.push(href({ status: v === ANY ? null : (v as DocStatus), folder: v === "context" ? null : filter.folder }))}>
+            <SelectTrigger size="sm" aria-label={t("docs.status")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {STATUS.map((s) => {
-                const st = statusTone("deliverable", s);
-                return (
-                  <SelectItem key={s} value={s}>
-                    <Badge tone={st.tone}>{t(st.label)}</Badge>
-                  </SelectItem>
-                );
-              })}
+              <SelectItem value={ANY}>{t("docs.status.all")}</SelectItem>
+              {STATUS_FILTERS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s === "context" ? t("docs.teamReads") : t(statusTone("deliverable", s).label)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-        </PropRow>
-        <PropRow label={t("studio.docs.channel")}>
-          <Input
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            placeholder={t("studio.docs.channelPlaceholder")}
-            aria-label={t("studio.docs.channel")}
-            className="h-7 border-transparent text-[13px] shadow-none hover:border-input"
-          />
-        </PropRow>
-        {author && (
-          <PropRow label={t("studio.docs.author")}>
-            <span className="px-2.5 text-foreground">{author}</span>
-          </PropRow>
-        )}
-      </div>
-
-      <div className="mt-6 flex items-center gap-2 border-b border-border pb-2">
-        <Segmented
-          label={t("studio.docs.mode")}
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "write", label: t("studio.docs.write") },
-            { value: "split", label: t("studio.docs.split") },
-            { value: "preview", label: t("studio.docs.preview") },
-          ]}
-        />
-        <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" aria-expanded={picking} onClick={() => setPicking(!picking)}>
-          <Paperclip /> {picking ? t("studio.docs.doneAttaching") : t("studio.docs.attach")}
-        </Button>
-      </div>
-
-      {picking && (
-        <div className="mt-3 grid max-h-56 grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-2 overflow-y-auto rounded-lg border border-border p-2">
-          {media.length === 0 && <p className="col-span-full p-2 text-xs text-tertiary">{t("studio.docs.libraryEmpty")}</p>}
-          {media.map((m) => {
-            const on = attachments.includes(m.path);
-            return (
-              <button
-                key={m.path}
-                type="button"
-                title={m.name}
-                aria-pressed={on}
-                onClick={() => setAttachments((a) => (a.includes(m.path) ? a.filter((x) => x !== m.path) : [...a, m.path]))}
-                className={cn("rounded-md", on && "ring-2 ring-ring ring-offset-2 ring-offset-background")}
-              >
-                <Thumb businessId={businessId} path={m.path} kind={m.kind} />
-              </button>
-            );
-          })}
+          {/* Phone: folders as a picker */}
+          <Select value={filter.folder ?? ANY} onValueChange={(v) => router.push(href({ folder: v === ANY ? null : v }))}>
+            <SelectTrigger size="sm" aria-label={t("docs.folder")} className="@3xl:hidden">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY}>{t("docs.allDocs")}</SelectItem>
+              {tree.map((f) => (
+                <SelectItem key={f.path} value={f.path}>
+                  {f.path}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {activeFilters && (
+            <Button asChild size="sm" variant="ghost" className="text-muted-foreground">
+              <Link href={docsHref(businessId, {})} onClick={() => setQ("")}>
+                <XIcon /> {t("docs.clearFilters")}
+              </Link>
+            </Button>
+          )}
         </div>
-      )}
 
-      {attachments.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {attachments.map((p) => (
-            <span key={p} className="group/att relative">
-              <Thumb businessId={businessId} path={p} />
-              <button
-                type="button"
-                onClick={() => setAttachments((a) => a.filter((x) => x !== p))}
-                className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-xs transition-opacity duration-100 group-hover/att:opacity-100 hover:text-foreground focus-visible:opacity-100"
-                aria-label={t("studio.docs.removeAttachment")}
-              >
-                <XIcon className="size-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className={cn("mt-3", tab === "split" && "grid gap-6 @5xl:grid-cols-2")}>
-        {tab !== "preview" && (
-          <Textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={20}
-            aria-label={t("studio.docs.body")}
-            placeholder={t("studio.docs.bodyPlaceholder")}
-            // Grows with the text: the page scrolls, not a box inside it.
-            className={cn(
-              "min-h-[60vh] resize-none border-0 px-0 text-[15px] leading-[26px] shadow-none [field-sizing:content] hover:border-0 focus-visible:ring-0",
-              tab === "split" && "font-mono text-[13px] leading-[22px]",
-            )}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-                e.preventDefault();
-                save();
-              }
-            }}
-          />
-        )}
-        {tab !== "write" && (
-          <div className={cn("min-h-[60vh] min-w-0", tab === "split" && "border-t border-border pt-6 @5xl:border-t-0 @5xl:border-l @5xl:pt-0 @5xl:pl-6")}>
-            {content.trim() ? <Markdown className="text-[15px] leading-[26px]">{content}</Markdown> : <p className="text-sm text-tertiary">{t("studio.docs.nothingToPreview")}</p>}
+        {filter.folder && (
+          <div className="mt-4 flex items-center gap-2">
+            <FolderIcon className="size-4 text-tertiary" strokeWidth={1.75} />
+            <span className="min-w-0 truncate text-sm font-medium text-foreground">{filter.folder.split("/").join(" / ")}</span>
+            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setFolderDialog({ mode: "rename", path: filter.folder! })}>
+              <Pencil /> {t("docs.rename")}
+            </Button>
           </div>
         )}
+
+        {/* Bulk actions */}
+        <div className={cn("mt-4 flex h-9 items-center gap-2 border-b border-border pb-2", !selectable.length && "hidden")}>
+          <Checkbox
+            checked={allPicked ? true : picked.length ? "indeterminate" : false}
+            onCheckedChange={() => setSelected(allPicked ? new Set() : new Set(selectable.map((d) => d.id)))}
+            aria-label={t("docs.selectAll")}
+            className="ml-2"
+          />
+          {picked.length > 0 ? (
+            <>
+              <span className="text-[13px] text-foreground tabular-nums">{tn("docs.selected", picked.length)}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" disabled={pending}>
+                    <FolderInput /> {t("docs.moveTo")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-80 min-w-48 overflow-y-auto">
+                  <DropdownMenuItem onSelect={() => move(null)}>{t("docs.topLevel")}</DropdownMenuItem>
+                  {tree.map((f) => (
+                    <DropdownMenuItem key={f.path} onSelect={() => move(f.path)}>
+                      <FolderIcon /> {f.path}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setFolderDialog({ mode: "new" })}>
+                    <FolderPlus /> {t("docs.newFolder")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" disabled={pending}>
+                    <Tag /> {t("docs.markAs")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {DOC_STATUSES.map((s) => {
+                    const st = statusTone("deliverable", s);
+                    return (
+                      <DropdownMenuItem key={s} onSelect={() => mark(s)}>
+                        <Badge tone={st.tone}>{t(st.label)}</Badge>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button size="sm" variant="ghost" className="text-destructive" disabled={pending} onClick={() => setTrashing(true)}>
+                <Trash2 /> {t("docs.moveToTrash")}
+              </Button>
+              <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => setSelected(new Set())}>
+                {t("docs.clearSelection")}
+              </Button>
+            </>
+          ) : (
+            <span className="text-xs text-tertiary">{t("docs.selectAll")}</span>
+          )}
+        </div>
+
+        {shown.length === 0 ? (
+          filter.folder && !items.some((d) => d.source === "deliverable" && isInFolder(d.folder, filter.folder!)) ? (
+            <EmptyState
+              icon={<FolderIcon />}
+              title={t("docs.folderEmptyTitle")}
+              body={t("docs.folderEmptyBody")}
+              action={<NewDocMenu businessId={businessId} filter={filter} label={t("docs.newDocHere")} />}
+            />
+          ) : (
+            <EmptyState
+              icon={<FileTextIcon />}
+              title={items.length ? t("studio.docs.noMatch") : t("studio.docs.emptyTitle")}
+              body={items.length ? undefined : t("studio.docs.emptyBody")}
+            />
+          )
+        ) : (
+          <ul className={cn("mt-1", pending && "opacity-60")}>
+            {shown.map((d) => {
+              const context = d.source === "context";
+              const s = context ? { tone: "purple" as const, label: "docs.teamReads" as MessageKey } : statusTone("deliverable", d.status);
+              const open = context ? mentionHref(businessId, { type: "doc", id: d.id }) : docsHref(businessId, filter, { doc: d.id });
+              return (
+                <li key={`${d.source}:${d.id}`} className="group/row flex items-center gap-2 rounded-md px-2 hover:bg-hover">
+                  {context ? (
+                    <span className="size-4 shrink-0" />
+                  ) : (
+                    <Checkbox checked={selected.has(d.id)} onCheckedChange={() => toggle(d.id)} aria-label={t("docs.select", { title: d.title })} />
+                  )}
+                  <Link href={open} className="flex min-w-0 flex-1 items-center gap-3 py-2" title={context ? t("docs.teamReadsHelp") : undefined}>
+                    {context ? (
+                      <BookOpen className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
+                    ) : (
+                      <FileTextIcon className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] leading-[18px] font-medium text-foreground">{d.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-tertiary">
+                        {context ? t("nav.context") : kindLabel(d.kind)} · {authorOf(d)}
+                        {d.folder && !filter.folder ? ` · ${d.folder}` : ""}
+                        {d.folder && filter.folder && d.folder !== filter.folder ? ` · ${d.folder.slice(filter.folder.length + 1)}` : ""}
+                      </span>
+                    </span>
+                    <Badge tone={s.tone} className="shrink-0">
+                      {t(s.label)}
+                    </Badge>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
-      <div className="sticky bottom-[calc(var(--bottombar-h)+env(safe-area-inset-bottom))] mt-4 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="sm" onClick={save} loading={pending} disabled={pending || !dirty || !title.trim()}>
-              {pending ? t("common.saving") : t("common.save")}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t("common.save")} <Kbd>⌘S</Kbd>
-          </TooltipContent>
-        </Tooltip>
-        <span className="text-xs text-tertiary tabular-nums">{tn("studio.docs.words", words)}</span>
-        {msg?.ok && !dirty && <span className="text-xs text-tertiary">{msg.ok}</span>}
-        {msg?.error && (
-          <span role="alert" className="text-xs text-destructive">
-            {msg.error}
-          </span>
-        )}
-        <span className="ml-auto flex items-center gap-1">
-          {doc && content.trim() && canHand && (
-            <Button size="sm" variant="secondary" onClick={() => onHandOver({ key: `${doc.id}:${doc.title}:${doc.content.length}`, text: handOver, attachments })}>
-              <UserRoundPlus /> {t("studio.docs.hand")}
-            </Button>
-          )}
-          <IconButton label={t("studio.docs.prepareHelp")} side="top">
-            <Info />
-          </IconButton>
-          {doc && (
-            <MoreMenu label={t("studio.more")} disabled={pending}>
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
-                <Trash2 /> {t("common.delete")}
-              </DropdownMenuItem>
-            </MoreMenu>
-          )}
-        </span>
-      </div>
-      {doc && (
-        <DeleteDialog
-          open={deleting}
-          onOpenChange={setDeleting}
-          title={t("studio.docs.deleteTitle", { title: doc.title })}
-          body={t("studio.docs.deleteBody")}
-          onConfirm={() => {
-            setDeleting(false);
-            start(async () => {
-              await deleteDoc(businessId, doc.id);
-              toast(t("studio.docs.deleted"));
-              router.replace(`/b/${businessId}/docs`);
-            });
-          }}
-        />
-      )}
+      <FolderDialog
+        state={folderDialog}
+        parent={filter.folder}
+        moveCount={picked.length}
+        onClose={() => setFolderDialog(null)}
+        onCreate={(path) => {
+          setFolderDialog(null);
+          if (picked.length) move(path);
+          else setNewFolders((f) => [...f, path]);
+          router.push(docsHref(businessId, { ...filter, folder: path, status: filter.status === "context" ? null : filter.status }));
+        }}
+        onRename={async (from, to) => {
+          const r = await renameDocFolder(businessId, from, to);
+          if ("error" in r) return FOLDER_ERRORS[r.error] ? t(FOLDER_ERRORS[r.error]) : r.error;
+          setFolderDialog(null);
+          toast(t("docs.folderRenamed"));
+          setNewFolders((list) => list.filter((p) => !isInFolder(p, from)));
+          if (filter.folder && isInFolder(filter.folder, from)) router.replace(docsHref(businessId, { ...filter, folder: to + filter.folder.slice(from.length) }));
+          return null;
+        }}
+      />
+      <DeleteDialog
+        open={trashing}
+        onOpenChange={setTrashing}
+        title={tn("docs.trashTitle", picked.length)}
+        body={t("docs.trashBody")}
+        onConfirm={() => {
+          setTrashing(false);
+          trash();
+        }}
+      />
     </div>
   );
 }
 
-function Thumb({ businessId, path, kind }: { businessId: string; path: string; kind?: MediaKind }) {
-  const k = kind ?? (/\.(png|jpe?g|webp|gif|svg)$/i.test(path) ? "image" : /\.(mp4|mov|m4v|webm)$/i.test(path) ? "video" : "file");
+/** Name a new folder (under the one being shown), or rename one (its last part). */
+function FolderDialog({
+  state,
+  parent,
+  moveCount,
+  onClose,
+  onCreate,
+  onRename,
+}: {
+  state: { mode: "new" | "rename"; path?: string } | null;
+  parent: string | null;
+  moveCount: number;
+  onClose: () => void;
+  onCreate: (path: string) => void;
+  onRename: (from: string, to: string) => Promise<string | null>;
+}) {
+  const t = useT();
+  const tn = useTn();
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const renaming = state?.mode === "rename" && state.path;
+  const [opened, setOpened] = useState<typeof state>(null);
+  if (state !== opened) {
+    setOpened(state);
+    setName(renaming ? state.path!.slice(state.path!.lastIndexOf("/") + 1) : "");
+    setError(null);
+  }
+
+  const submit = () => {
+    if (!state) return;
+    if (state.mode === "rename" && state.path) {
+      const base = folderParent(state.path);
+      const to = normalizeFolder(name.includes("/") ? name : [base, name].filter(Boolean).join("/"));
+      if (!to) return setError(t("docs.err.pickFolder"));
+      if (to === state.path) return onClose();
+      start(async () => setError(await onRename(state.path!, to)));
+    } else {
+      const to = normalizeFolder([parent, name].filter(Boolean).join("/"));
+      if (!to || !normalizeFolder(name)) return setError(t("docs.err.pickFolder"));
+      onCreate(to);
+    }
+  };
+
   return (
-    <span className="flex size-16 items-center justify-center overflow-hidden rounded-md bg-muted ring-1 ring-black/5 ring-inset">
-      {k === "image" ? (
-        // eslint-disable-next-line @next/next/no-img-element -- local files from the business folder
-        <img src={fileUrl(businessId, path)} alt="" className="size-full object-cover" />
-      ) : k === "video" ? (
-        <VideoIcon className="size-6 text-placeholder" strokeWidth={1.5} />
-      ) : (
-        <ImageIcon className="size-6 text-placeholder" strokeWidth={1.5} />
+    <Dialog open={!!state} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{renaming ? t("docs.renameFolderTitle", { name: state!.path! }) : t("docs.newFolder")}</DialogTitle>
+          <DialogDescription>{renaming ? t("docs.renameFolderHelp") : t("docs.newFolderHelp")}</DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          className="space-y-2"
+        >
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t("docs.folderName")} aria-label={t("docs.folderName")} />
+          {error && (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" loading={pending} disabled={pending || !name.trim()}>
+              {renaming ? t("docs.rename") : moveCount ? tn("docs.newFolderMove", moveCount) : t("docs.create")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SideItem({ href, active, icon, label, count }: { href: string; active: boolean; icon: React.ReactNode; label: string; count?: number }) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex h-7 w-full items-center gap-2 rounded-md px-2 pr-8 text-left text-[13px] leading-[18px] font-medium text-foreground transition-colors duration-100 hover:bg-hover [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:stroke-[1.75] [&_svg]:text-tertiary",
+        active && "bg-accent [&_svg]:text-foreground",
       )}
-    </span>
+    >
+      {icon}
+      <span className="flex-1 truncate">{label}</span>
+      <span className="text-xs font-normal text-tertiary tabular-nums">{count}</span>
+    </Link>
   );
 }
