@@ -283,6 +283,19 @@ export function describeToolUse(name: string, input: Record<string, unknown>): s
       return `Designing ${short(input.name, 40)}`;
     case "mcp__biz__save_deliverable":
       return `Saving “${short(input.title, 50)}”`;
+    case "mcp__biz__search_workspace":
+    case "mcp__biz__search_docs":
+      return `Searching the workspace for "${short(input.query, 30)}"`;
+    case "mcp__biz__search_media":
+      return `Searching the media library for "${short(input.query, 30)}"`;
+    case "mcp__biz__create_doc":
+      return `Writing the doc “${short(input.title, 50)}”`;
+    case "mcp__biz__link_objects":
+      return "Linking related work";
+    case "mcp__biz__unlink_objects":
+      return "Removing a link";
+    case "mcp__biz__tag_objects":
+      return "Tagging files and contacts";
     case "mcp__biz__list_deliverables":
       return "Checking saved work";
     case "mcp__biz__assign_task":
