@@ -1,5 +1,6 @@
 /**
- * Voice-note replies on WhatsApp, per business (Business → WhatsApp → Voice replies).
+ * Voice-note replies on WhatsApp, per business (Business → WhatsApp → Voice replies),
+ * on by default ("mirror": voice back when someone sends a voice note).
  * The voice is made on this Mac by OmniVoice (src/lib/voice.ts): described by its
  * attributes, or cloned from a short clip in the media library. Safe to import from
  * the browser: settings only.
@@ -29,6 +30,9 @@ export const VOICE_ATTRS = {
 
 export const DEFAULT_INSTRUCT = "female, young adult, moderate pitch";
 
+/** Every business answers voice with voice unless the owner turns it off. */
+export const DEFAULT_MODE: VoiceMode = "mirror";
+
 export function voiceSettings(stored: VoiceSettings | null | undefined): Required<Pick<VoiceSettings, "mode" | "instruct">> & VoiceSettings {
-  return { ...stored, mode: stored?.mode ?? "off", instruct: stored?.instruct?.trim() || DEFAULT_INSTRUCT };
+  return { ...stored, mode: stored?.mode ?? DEFAULT_MODE, instruct: stored?.instruct?.trim() || DEFAULT_INSTRUCT };
 }

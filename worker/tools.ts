@@ -951,7 +951,13 @@ export function createBizServer(ctx: BizContext) {
             .string()
             .optional()
             .describe(
-              "When they talk to you in voice notes (🎤), your message also goes as a voice note: this is what it says. Write it to be heard: short (under ~60 words), natural spoken language, no links, lists or emoji; the written message keeps the details.",
+              "What the voice note says, when one goes with this message (see voice_note): written to be heard, short (under ~60 words), natural spoken language, no links, lists or emoji. The written message keeps the details.",
+            ),
+          voice_note: z
+            .boolean()
+            .optional()
+            .describe(
+              "true: also send this as a WhatsApp voice note, e.g. when the owner asks you to voice-note someone. Without it, a voice note goes only when the business's voice-reply setting calls for one (say, they sent you a voice note).",
             ),
         },
         async (a) => {
@@ -959,12 +965,14 @@ export function createBizServer(ctx: BizContext) {
           if (!h) return unknown(a.name);
           const files = cleanFiles(a.files);
           if (badFiles(files).length) return fail(`Unknown file(s): ${badFiles(files).join(", ")}.`);
+          let sent: Awaited<ReturnType<typeof sendToHuman>>;
           try {
-            await sendToHuman({ business: business(), human: h, from: teammate, text: a.message, files, spoken: a.spoken, taskId: openRequest(h.id)?.id ?? null });
+            sent = await sendToHuman({ business: business(), human: h, from: teammate, text: a.message, files, spoken: a.spoken, voice: a.voice_note ? true : undefined, taskId: openRequest(h.id)?.id ?? null });
           } catch (err) {
             return fail(`Couldn't send on WhatsApp: ${(err as Error).message}`);
           }
-          return ok(`Sent to ${h.name}.`);
+          // Say plainly why a voice note didn't go, so the teammate can tell the owner.
+          return ok(`Sent to ${h.name}${sent.voiceNote ? " (with a voice note)" : ""}.${a.voice_note && !sent.voiceNote ? ` No voice note: ${sent.noVoice}` : ""}`);
         },
       ),
       tool(

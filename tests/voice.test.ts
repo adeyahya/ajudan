@@ -15,7 +15,7 @@ process.env.AJUDAN_VOICE_DIR = voiceDir;
 const { db, schema } = await import("@/db");
 const { speakable, voiceAvailable } = await import("@/lib/voice");
 const { voiceSettings } = await import("@/lib/voice-settings");
-const { wantsVoice } = await import("../worker/humans");
+const { addressedTeammate, voiceBlocked, wantsVoice } = await import("../worker/humans");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -42,15 +42,11 @@ describe("when the team answers with a voice note", () => {
     db.insert(schema.humanMessages).values({ businessId: biz.id, humanId: owner.id, direction: "in", text, sentAt: new Date(at) }).run();
   const set = (mode: "off" | "mirror" | "always") => db.update(schema.businesses).set({ voiceReplies: { mode } }).run();
 
-  it("defaults to off", () => {
+  it("is on by default: a voice note back only when their last message was one", () => {
     expect(voiceAvailable()).toBe(true);
-    expect(voiceSettings(null)).toMatchObject({ mode: "off", instruct: "female, young adult, moderate pitch" });
+    expect(voiceSettings(null)).toMatchObject({ mode: "mirror", instruct: "female, young adult, moderate pitch" });
+    expect(voiceBlocked(biz.id)).toBeNull();
     said("🎤 halo, laporan hari ini gimana?", 1000);
-    expect(wantsVoice(biz.id, owner.id)).toBe(false);
-  });
-
-  it("mirrors: a voice note back only when their last message was one", () => {
-    set("mirror");
     expect(wantsVoice(biz.id, owner.id)).toBe(true);
     said("oke, tulis aja", 2000);
     expect(wantsVoice(biz.id, owner.id)).toBe(false);
@@ -59,5 +55,36 @@ describe("when the team answers with a voice note", () => {
   it("always: every message", () => {
     set("always");
     expect(wantsVoice(biz.id, owner.id)).toBe(true);
+  });
+
+  it("off: never, and the reason says where to turn it on", () => {
+    set("off");
+    said("🎤 kirim voice note dong", 3000);
+    expect(wantsVoice(biz.id, owner.id)).toBe(false);
+    expect(voiceBlocked(biz.id)).toContain("Business → WhatsApp → Voice replies");
+  });
+});
+
+describe("a message that opens with a teammate's name", () => {
+  const biz = db.insert(schema.businesses).values({ name: "Tani", status: "active" }).returning().get();
+  const mate = (name: string) => db.insert(schema.teammates).values({ businessId: biz.id, name, roleKey: "researcher", title: "x", status: "active" }).returning().get();
+  const ajeng = mate("Ajeng");
+  const sari = mate("Sari");
+  mate("Rina Ayu");
+  mate("Rini");
+
+  it("goes to that teammate, by name, by the short form, after an honorific", () => {
+    expect(addressedTeammate(["🎤 Jeng, coba kabarin Yosa"], biz.id)?.id).toBe(ajeng.id);
+    expect(addressedTeammate(["Ajeng tolong cek"], biz.id)?.id).toBe(ajeng.id);
+    expect(addressedTeammate(["Mbak Sari, captcha udah"], biz.id)?.id).toBe(sari.id);
+    expect(addressedTeammate(["rina, makasih"], biz.id)?.name).toBe("Rina Ayu");
+  });
+
+  it("ignores messages that don't open with a name", () => {
+    expect(addressedTeammate(["oke siap"], biz.id)).toBeNull();
+    expect(addressedTeammate(["ya 34DF"], biz.id)).toBeNull();
+    expect(addressedTeammate(["Ri, cek"], biz.id)).toBeNull(); // too short to tell
+    expect(addressedTeammate(["ini laporannya ya"], biz.id)).toBeNull(); // not "Rini"
+    expect(addressedTeammate(["Jeng tolong"], biz.id)).toBeNull(); // a short form needs the comma
   });
 });

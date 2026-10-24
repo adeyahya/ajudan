@@ -53,7 +53,8 @@ export async function sendToHuman(p: {
   const body = [senderLine(p.from, p.business.name, p.business.language), p.text.trim(), p.firstOfRequest ? replyHint(p.business.language) : ""]
     .filter(Boolean)
     .join("\n\n");
-  const voiceNote = p.voice === false || !wantsVoice(p.business.id, p.human.id) ? null : await voiceNoteFor(p, jid);
+  const noVoice = voiceBlocked(p.business.id);
+  const voiceNote = noVoice || p.voice === false || (p.voice !== true && !wantsVoice(p.business.id, p.human.id)) ? null : await voiceNoteFor(p, jid);
   await sendText(jid, body);
   for (const f of files) await sendFile(jid, path.join(dataDir(), f));
   recordHumanMessage({
@@ -74,13 +75,29 @@ export async function sendToHuman(p: {
     message: `${p.from?.name ?? "You"} → ${p.human.name} on WhatsApp: ${p.text.replace(/\s+/g, " ").slice(0, 100)}`,
     data: { humanId: p.human.id },
   });
+  return {
+    voiceNote,
+    /** Why no voice note could go, if one was asked for. */
+    noVoice: noVoice ?? (voiceNote ? undefined : "making the voice note failed; the text went."),
+  };
+}
+
+/**
+ * Why this business can't send voice notes at all, or null when it can: switched off
+ * (Business → WhatsApp → Voice replies) or not set up on this Mac.
+ */
+export function voiceBlocked(businessId: string): string | null {
+  const row = db.select({ v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
+  if (voiceSettings(row?.v).mode === "off") return "voice replies are switched off for this business (the owner can turn them on in Business → WhatsApp → Voice replies); the text went.";
+  if (!voiceAvailable()) return "the voice isn't set up on this Mac yet (the owner runs `pnpm voice:setup` in the Ajudan folder); the text went.";
+  return null;
 }
 
 /** Voice replies are on for this business, and this person gets one now. */
 export function wantsVoice(businessId: string, humanId: string) {
   const row = db.select({ v: schema.businesses.voiceReplies }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get();
   const mode = voiceSettings(row?.v).mode;
-  if (mode === "off" || !voiceAvailable()) return false;
+  if (voiceBlocked(businessId)) return false;
   if (mode === "always") return true;
   const lastIn = db
     .select({ text: schema.humanMessages.text })
@@ -327,6 +344,32 @@ async function saveMedia(jid: string, m: WaMessage) {
  * the manager (owner's requests and messages out of the blue). If that teammate's
  * follow-up is still queued, add to it instead of starting another run.
  */
+/** Words people put before a name ("Mbak Sari", "Kak Ajeng"). */
+const HONORIFICS = new Set(["mas", "mbak", "kak", "ka", "bu", "ibu", "pak", "bapak", "bang", "dek", "om", "tante", "hi", "hai", "halo", "hey", "hello", "dear"]);
+
+/**
+ * The AI teammate a message is addressed to, by its opening word: the name ("Ajeng"),
+ * or the tail people shorten it to when calling someone ("Jeng," for Ajeng: needs the
+ * comma, so "ini laporannya" isn't for Rini), after an honorific ("Mbak Sari").
+ * Null when it doesn't open with a name.
+ */
+export function addressedTeammate(texts: string[], businessId: string): Teammate | null {
+  const first = (texts[0] ?? "").replace(/^🎤\s*/, "").trim().toLowerCase();
+  const words = first.split(/[\s,.:;!?]+/).filter(Boolean).slice(0, 3);
+  const word = words.find((w) => !HONORIFICS.has(w));
+  if (!word || word.length < 3) return null;
+  const calling = new RegExp(`^(?:\\S+\\s+){0,2}?${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,`).test(first);
+  const mates = db
+    .select()
+    .from(schema.teammates)
+    .where(and(eq(schema.teammates.businessId, businessId), eq(schema.teammates.status, "active"), eq(schema.teammates.kind, "ai")))
+    .all();
+  const full = mates.filter((m) => m.name.toLowerCase().split(/\s+/)[0] === word);
+  if (full.length === 1) return full[0];
+  const short = mates.filter((m) => m.name.toLowerCase().split(/\s+/)[0].endsWith(word));
+  return calling && full.length === 0 && short.length === 1 ? short[0] : null;
+}
+
 function routeReply(business: Business, human: Teammate, request: Task | undefined, texts: string[], files: string[]) {
   // "oke sinta", "makasih 🙏" after the work is wrapped up: recorded in the conversation,
   // but no one needs to act. ("iya" to an open request or a question is an answer.)
@@ -346,8 +389,12 @@ function routeReply(business: Business, human: Teammate, request: Task | undefin
     ? db.select().from(schema.tasks).where(eq(schema.tasks.id, request.parentTaskId)).get()
     : undefined;
   const askingMate = asking ? db.select().from(schema.teammates).where(eq(schema.teammates.id, asking.teammateId)).get() : undefined;
-  const target = askingMate && askingMate.kind === "ai" && askingMate.status === "active" ? askingMate : getManager(business.id);
+  // "Jeng, kabarin Yosa…": a message that starts with a teammate's name goes to them,
+  // even while someone else waits on this person's answer.
+  const named = addressedTeammate(texts, business.id);
+  const target = named ?? (askingMate && askingMate.kind === "ai" && askingMate.status === "active" ? askingMate : getManager(business.id));
   if (!target) return;
+  const fromAsking = !!askingMate && target.id === askingMate.id;
 
   const said = texts.length ? texts.map((t) => `> ${t.replace(/\n/g, "\n> ")}`).join("\n\n") : "(no text, only files)";
   const queued = db
@@ -362,9 +409,12 @@ function routeReply(business: Business, human: Teammate, request: Task | undefin
       .run();
     return;
   }
-  const about = request
-    ? `${human.name} (human teammate) replied on WhatsApp to the request "${request.title}"${askingMate && target.id === askingMate.id ? " you sent" : ""}:`
-    : `${human.name} (human teammate) sent a WhatsApp message (there's no open request to them):`;
+  const about =
+    request && (fromAsking || !named)
+      ? `${human.name} (human teammate) replied on WhatsApp to the request "${request.title}"${fromAsking ? " you sent" : ""}:`
+      : named
+        ? `${human.name} (human teammate) sent you a WhatsApp message, addressed to you by name:`
+        : `${human.name} (human teammate) sent a WhatsApp message (there's no open request to them):`;
   const voiceHint = texts.some((t) => t.startsWith("🎤"))
     ? "\n\n(🎤 marks a voice note, transcribed automatically: names, numbers and prices may be misheard. Confirm anything important before acting on it.)"
     : "";
@@ -375,7 +425,7 @@ function routeReply(business: Business, human: Teammate, request: Task | undefin
     instructions: `${about}\n\n${said}${voiceHint}`,
     createdBy: `${HUMAN}${human.id}`,
     // Keeps the manager's report chain: the follow-up belongs to the owner's request.
-    parentTaskId: asking?.parentTaskId ?? null,
+    parentTaskId: fromAsking ? (asking?.parentTaskId ?? null) : null,
     // The teammate that asked carries on in the same conversation.
     sessionId: asking && target.id === asking.teammateId ? asking.sessionId : null,
     attachments: files,
