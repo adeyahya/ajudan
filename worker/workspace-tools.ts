@@ -19,7 +19,7 @@ import { logEvent } from "@/lib/events";
 import { normalizePhone } from "@/lib/humans";
 import { addLink, describeRef, OBJECT_TYPES, removeLink, type ObjectRef } from "@/lib/links";
 import { linkIntoWorkspace } from "@/lib/media";
-import { recordHistory } from "@/lib/object-history";
+import { NO_LABELS, recordHistory } from "@/lib/object-history";
 import { dataDir } from "@/lib/paths";
 import { isSupervised } from "@/lib/supervision";
 import { canChange, canCreate, collectionOf, teammateBy } from "@/lib/workspace-access";
@@ -278,11 +278,12 @@ export function workspaceTools(ctx: BizContext): SdkMcpToolDefinition<any>[] {
             const tags = nextTags(cur?.tags ?? []);
             if (cur) {
               db.update(schema.assets).set({ tags, updatedBy: by }).where(eq(schema.assets.path, r.id)).run();
-              recordHistory({ businessId, type: "asset", id: r.id, snapshot: cur, action: "update", by });
+              recordHistory({ businessId, type: "asset", id: r.id, snapshot: { ...cur, tags, updatedBy: by }, before: cur, action: "update", by });
             } else {
               // The file is the owner's upload: the new labels row stays theirs, changed by this teammate.
               const row = db.insert(schema.assets).values({ path: r.id, businessId, tags, updatedBy: by }).returning().get();
-              recordHistory({ businessId, type: "asset", id: r.id, snapshot: row, action: "create", by });
+              // Undo clears the labels again rather than trashing the owner's file.
+              recordHistory({ businessId, type: "asset", id: r.id, snapshot: row, before: NO_LABELS, action: "update", by });
             }
             done.push(`${path.posix.basename(r.id)}: ${tags.map((t) => `#${t}`).join(" ") || "no tags"}`);
           } else {
@@ -299,7 +300,7 @@ export function workspaceTools(ctx: BizContext): SdkMcpToolDefinition<any>[] {
             }
             const tags = nextTags(cur.tags);
             db.update(schema.contacts).set({ tags, updatedBy: by }).where(eq(schema.contacts.id, cur.id)).run();
-            recordHistory({ businessId, type: "contact", id: cur.id, snapshot: cur, action: "update", by });
+            recordHistory({ businessId, type: "contact", id: cur.id, snapshot: { ...cur, tags, updatedBy: by }, before: cur, action: "update", by });
             done.push(`${cur.name}: ${tags.map((t) => `#${t}`).join(" ") || "no tags"}`);
           }
         }

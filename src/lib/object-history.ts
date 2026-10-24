@@ -9,10 +9,11 @@ import { removeDeliverableFile, syncDeliverableFile } from "@/lib/workfiles";
 /**
  * A snapshot of a workspace object per change, with who made it ("owner", "system" or
  * "teammate:<id>"). Trash records "delete"/"restore" (src/lib/trash.ts); editors and
- * teammate tools record "create"/"update". A teammate's "update" stores the state BEFORE
- * its change, so undoing it means restoring that snapshot. restoreVersion() writes a
- * snapshot's editable fields back and records a "restore" whose snapshot is the state it
- * replaced (so a restore can be undone the same way).
+ * teammate tools record "create"/"update". The snapshot is always the object AFTER the
+ * change (a version: "Restore this version" writes it back). An update can also carry the
+ * state before it under `snapshot.before`; teammate updates always do, and Undo in the
+ * Inbox writes that back. restoreVersion() records a "restore" the same way (snapshot =
+ * the restored state, before = what it replaced), so a restore can be undone too.
  */
 
 export type { HistoryAction, ObjectType };
@@ -23,10 +24,27 @@ export function toSnapshot(row: object): Record<string, unknown> {
   return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
 }
 
-export function recordHistory(v: { businessId: string; type: ObjectType; id: string; snapshot: object; action: HistoryAction; by: string }) {
+export function recordHistory(v: {
+  businessId: string;
+  type: ObjectType;
+  id: string;
+  /** The object after the change. */
+  snapshot: object;
+  /** The object before the change (updates), so the change can be undone. */
+  before?: object | null;
+  action: HistoryAction;
+  by: string;
+}) {
+  const snapshot = toSnapshot(v.snapshot);
+  delete snapshot.before;
+  if (v.before) {
+    const before = toSnapshot(v.before);
+    delete before.before;
+    snapshot.before = before;
+  }
   return db
     .insert(schema.objectHistory)
-    .values({ businessId: v.businessId, objectType: v.type, objectId: v.id, snapshot: toSnapshot(v.snapshot), action: v.action, by: v.by })
+    .values({ businessId: v.businessId, objectType: v.type, objectId: v.id, snapshot, action: v.action, by: v.by })
     .returning()
     .get();
 }
@@ -115,6 +133,9 @@ export function actorResolver(businessId: string): (by: string | null | undefine
 
 /* ------------------------------------------------------------------ restore */
 
+/** A file's organization before anyone labeled it: the `before` of a first labels row. */
+export const NO_LABELS = { title: "", note: "", tags: [] as string[], album: null, starred: false };
+
 /** Object types whose snapshots restoreVersion() can write back, and the fields it writes. */
 const EDITABLE = {
   deliverable: ["title", "content", "kind", "channel", "status", "attachments", "folder"],
@@ -145,8 +166,13 @@ function editableFields(type: RestorableType, snapshot: Record<string, unknown>)
  * or something they made or deleted (Trash takes or gives it back).
  */
 export function canUndoEntry(e: Pick<HistoryEntry, "action" | "objectType" | "snapshot">) {
-  if (e.action === "update") return canRestoreEntry(e);
+  if (e.action === "update") return isRestorable(e.objectType) && !!editableFields(e.objectType, beforeOf(e.snapshot));
   return (e.action === "create" || e.action === "delete") && e.objectType !== "task";
+}
+
+function beforeOf(snapshot: Record<string, unknown>): Record<string, unknown> {
+  const b = snapshot.before;
+  return b && typeof b === "object" ? (b as Record<string, unknown>) : {};
 }
 
 /** Whether "Restore this version" makes sense for this entry. */
@@ -173,12 +199,12 @@ function currentRow(businessId: string, type: RestorableType, id: string) {
  * entry is unknown, its type isn't restorable, the snapshot holds nothing editable, or the
  * object is gone for good.
  */
-export function restoreVersion(businessId: string, historyId: string, by = "owner"): boolean {
+export function restoreVersion(businessId: string, historyId: string, by = "owner", which: "version" | "before" = "version"): boolean {
   const entry = getHistoryEntry(businessId, historyId);
   if (!entry || !isRestorable(entry.objectType)) return false;
   const type = entry.objectType;
   const id = entry.objectId;
-  const fields = editableFields(type, entry.snapshot);
+  const fields = editableFields(type, which === "before" ? beforeOf(entry.snapshot) : entry.snapshot);
   if (!fields) return false;
   const before = currentRow(businessId, type, id);
   switch (type) {
@@ -207,6 +233,6 @@ export function restoreVersion(businessId: string, historyId: string, by = "owne
       break;
     }
   }
-  recordHistory({ businessId, type, id, snapshot: before ?? { path: id }, action: "restore", by });
+  recordHistory({ businessId, type, id, snapshot: currentRow(businessId, type, id) ?? { path: id, ...fields }, before, action: "restore", by });
   return true;
 }

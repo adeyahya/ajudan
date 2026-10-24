@@ -10,7 +10,7 @@ const { db, schema } = await import("@/db");
 const { recordHistory, historyFor, restoreVersion, canUndoEntry, recentTeamHistory, supersededIds } = await import("@/lib/object-history");
 const { softDelete, listTrash, purgeOlderThan } = await import("@/lib/trash");
 const { newFromTeam, keepReviewItem, markReviewSeen } = await import("@/lib/home");
-const { dueFollowUps } = await import("@/lib/home-follow-ups");
+const { dueFollowUps } = await import("@/lib/contacts");
 const { addLink, findLinkTargets, linksFor } = await import("@/lib/links");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -26,17 +26,18 @@ beforeAll(() => {
 });
 
 describe("restoreVersion", () => {
-  it("puts a contact's earlier fields back and records a restore holding what it replaced", () => {
+  it("undoes a teammate's update from its `before`, and records a restore that can be undone too", () => {
     const c = db
       .insert(schema.contacts)
       .values({ businessId, name: "Budi", phone: "62811", notes: "Likes batik", followUpAt: new Date("2026-11-01T00:00:00Z") })
       .returning()
       .get();
-    // A teammate's update stores the state before it.
-    const entry = recordHistory({ businessId, type: "contact", id: c.id, snapshot: c, action: "update", by: `teammate:${mateId}` });
+    // A teammate's update: the snapshot is the new version, `before` what it replaced.
     db.update(schema.contacts).set({ name: "Budi S.", notes: "Wrong notes", followUpAt: null, updatedBy: `teammate:${mateId}` }).where(eq(schema.contacts.id, c.id)).run();
+    const changed = db.select().from(schema.contacts).where(eq(schema.contacts.id, c.id)).get()!;
+    const entry = recordHistory({ businessId, type: "contact", id: c.id, snapshot: changed, before: c, action: "update", by: `teammate:${mateId}` });
 
-    expect(restoreVersion(businessId, entry.id, "owner")).toBe(true);
+    expect(restoreVersion(businessId, entry.id, "owner", "before")).toBe(true);
     const after = db.select().from(schema.contacts).where(eq(schema.contacts.id, c.id)).get()!;
     expect(after).toMatchObject({ name: "Budi", notes: "Likes batik", updatedBy: "owner" });
     expect(after.followUpAt?.toISOString()).toBe("2026-11-01T00:00:00.000Z");
@@ -44,13 +45,16 @@ describe("restoreVersion", () => {
     const [latest] = historyFor(businessId, "contact", c.id);
     expect(latest.action).toBe("restore");
     expect(latest.by).toBe("owner");
-    expect(latest.snapshot.notes).toBe("Wrong notes");
-    // ...so the restore can itself be undone.
-    expect(restoreVersion(businessId, latest.id)).toBe(true);
+    expect(latest.snapshot.notes).toBe("Likes batik");
+    expect((latest.snapshot.before as { notes: string }).notes).toBe("Wrong notes");
+    // ...so the restore can itself be undone, and the teammate's version restored again.
+    expect(restoreVersion(businessId, latest.id, "owner", "before")).toBe(true);
+    expect(db.select().from(schema.contacts).where(eq(schema.contacts.id, c.id)).get()!.notes).toBe("Wrong notes");
+    expect(restoreVersion(businessId, entry.id)).toBe(true);
     expect(db.select().from(schema.contacts).where(eq(schema.contacts.id, c.id)).get()!.notes).toBe("Wrong notes");
   });
 
-  it("restores a deliverable and a library file's organization; refuses unknown or gone objects", () => {
+  it("restores a version of a deliverable and a library file's organization; refuses unknown or gone objects", () => {
     const d = db.insert(schema.deliverables).values({ businessId, kind: "plan", title: "Q4 plan", content: "v1" }).returning().get();
     const e = recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: d, action: "update", by: `teammate:${mateId}` });
     db.update(schema.deliverables).set({ title: "Q4 plan (rev)", content: "v2" }).where(eq(schema.deliverables.id, d.id)).run();
@@ -81,7 +85,10 @@ describe("restoreVersion", () => {
     expect(canUndoEntry(contactUpdate)).toBe(true);
     expect(canUndoEntry({ action: "create", objectType: "contact", snapshot: {} })).toBe(true);
     expect(canUndoEntry({ action: "create", objectType: "task", snapshot: {} })).toBe(false);
-    expect(canUndoEntry({ action: "update", objectType: "contact", snapshot: { id: "x" } })).toBe(false);
+    expect(canUndoEntry({ action: "update", objectType: "contact", snapshot: { id: "x", name: "No before" } })).toBe(false);
+    expect(canUndoEntry({ action: "update", objectType: "contact", snapshot: { name: "B", before: { name: "A" } } })).toBe(true);
+    // A logged interaction is not a version of the contact.
+    expect(canUndoEntry({ action: "update", objectType: "contact", snapshot: { interaction: { kind: "call", text: "hi" } } })).toBe(false);
   });
 });
 

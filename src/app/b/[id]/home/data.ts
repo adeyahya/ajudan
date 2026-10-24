@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import type { Contact } from "@/db/schema";
-import { dueFollowUps } from "@/lib/home-follow-ups";
+import { dueFollowUps } from "@/lib/contacts";
 import { newFromTeam, recentForOwner, starredItems, type HomeItem } from "@/lib/home";
 import { actorResolver, type Actor } from "@/lib/object-history";
 

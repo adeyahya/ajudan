@@ -157,7 +157,7 @@ describe("workspace tools", () => {
     expect(db.select().from(schema.contacts).where(eq(schema.contacts.id, mine.id)).get()!.tags).toEqual(["payday"]);
     const h = historyFor(biz, "contact", mine.id);
     expect(h[0]).toMatchObject({ action: "update", by: `teammate:${mate}` });
-    expect((h[0].snapshot as { tags: string[] }).tags).toEqual(["old"]); // the previous state, for undo
+    expect((h[0].snapshot.before as { tags: string[] }).tags).toEqual(["old"]); // the previous state, for undo
   });
 
   it("search_workspace reports refs and who made each item", async () => {

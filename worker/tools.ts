@@ -38,7 +38,8 @@ import { renderVideo } from "./video";
 import { fileInside } from "./fs-guard";
 import { isPrivateHost } from "@/lib/net";
 import { canAgent } from "@/lib/agent-access";
-import { recordHistory } from "@/lib/object-history";
+import { NO_LABELS, recordHistory } from "@/lib/object-history";
+import { CONTACT_TOOL_NAMES, contactTools } from "./contact-tools";
 import { canChange, canCreate, teammateBy } from "@/lib/workspace-access";
 import { deliverableCreator } from "@/lib/workspace-search";
 import { contactToChange, workspaceTools } from "./workspace-tools";
@@ -81,7 +82,7 @@ export const SAFE_BIZ_TOOLS = [
   "link_objects",
   "unlink_objects",
   "tag_objects",
-  // Contacts (worker/contact-tools.ts) go here when merged: contact_timeline, log_interaction, set_follow_up, list_segment.
+  ...CONTACT_TOOL_NAMES,
 ].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
@@ -285,7 +286,8 @@ export function createBizServer(ctx: BizContext) {
           db.update(schema.assets).set({ updatedBy: by }).where(eq(schema.assets.path, p)).run();
           const prev = before.get(p);
           // A new labels row on the owner's file stays the owner's (created_by), changed by this teammate.
-          recordHistory({ businessId, type: "asset", id: p, snapshot: prev ?? { ...row, updatedBy: by }, action: prev ? "update" : "create", by });
+          // Undo clears the labels again rather than trashing the owner's file.
+          recordHistory({ businessId, type: "asset", id: p, snapshot: row, before: prev ?? NO_LABELS, action: "update", by });
         }
         ev("media_organized", `${teammate.name} organized ${n} file${n === 1 ? "" : "s"} in the library`, { files });
         return ok(`Organized ${n} of ${asked.length} file(s).${refused.length ? ` Not changed (the owner's, and the team may only suggest): ${refused.join(", ")}.` : ""}`);
@@ -333,7 +335,7 @@ export function createBizServer(ctx: BizContext) {
         }
         const r = upsertContact(ctx.businessId, a, by);
         if ("error" in r) return fail(r.error ?? "Couldn't save the contact.");
-        recordHistory({ businessId, type: "contact", id: r.contact.id, snapshot: r.created ? r.contact : (prev ?? r.contact), action: r.created ? "create" : "update", by });
+        recordHistory({ businessId, type: "contact", id: r.contact.id, snapshot: r.contact, before: r.created ? null : prev, action: r.created ? "create" : "update", by });
         ev("contact_saved", `${teammate.name} ${r.created ? "added" : "updated"} the contact ${r.contact.name}`, { contactId: r.contact.id });
         return ok(`${r.created ? "Added" : "Updated"} (id ${r.contact.id}):\n${describeContact(r.contact)}`);
       },
@@ -594,7 +596,7 @@ export function createBizServer(ctx: BizContext) {
         });
         if (!r.ok) return fail(r.error);
         db.update(schema.deliverables).set({ updatedBy: by }).where(eq(schema.deliverables.id, r.deliverable.id)).run();
-        if (prev) recordHistory({ businessId, type: "deliverable", id: prev.id, snapshot: prev, action: "update", by });
+        if (prev) recordHistory({ businessId, type: "deliverable", id: prev.id, snapshot: { ...r.deliverable, updatedBy: by }, before: prev, action: "update", by });
         return ok(
           `Updated "${r.deliverable.title}" (now version ${r.deliverable.versions.length + 1}; the previous one is kept). It's a draft again: mark_ready_to_post when it's ready for the owner.`,
         );
@@ -631,7 +633,7 @@ export function createBizServer(ctx: BizContext) {
           .set({ status: "ready_to_post", channel: a.channel, updatedBy: by })
           .where(eq(schema.deliverables.id, d.id))
           .run();
-        recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: d, action: "update", by });
+        recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: { ...d, status: "ready_to_post", channel: a.channel, updatedBy: by }, before: d, action: "update", by });
         syncDeliverableFile(d.id);
         ev("deliverable_ready", `${teammate.name} finished "${d.title}" for the owner to post on ${a.channel}`, {
           deliverableId: d.id,
@@ -765,7 +767,7 @@ export function createBizServer(ctx: BizContext) {
         const own = page.createdBy === by;
         if (direct || (own && !supervised)) {
           applyPageEdit({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
-          recordHistory({ businessId, type: "doc", id: page.id, snapshot: page, action: "update", by });
+          recordHistory({ businessId, type: "doc", id: page.id, snapshot: findPage(businessId, page.id) ?? page, before: page, action: "update", by });
           return ok(`${a.mode === "append" ? "Added to" : "Rewrote"} "${page.title}" (${direct ? "the owner lets the team edit pages directly" : "your own page"}; it's in the page's history).`);
         }
         const s = createSuggestion({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
@@ -774,7 +776,7 @@ export function createBizServer(ctx: BizContext) {
     ),
     // Workspace: search everything, docs, links, tags (worker/workspace-tools.ts).
     ...workspaceTools(ctx),
-    // Contacts: spread ...contactTools(ctx) from worker/contact-tools.ts here (contact_timeline, log_interaction, set_follow_up, list_segment).
+    ...contactTools({ businessId, teammate, taskId }),
   ];
 
   tools.push(

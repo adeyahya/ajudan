@@ -108,7 +108,7 @@ export async function undoTeamChange(businessId: string, historyId: string) {
   const e = getHistoryEntry(businessId, String(historyId));
   if (!e || !e.by.startsWith("teammate:")) return { error: "Change not found" };
   let ok = false;
-  if (e.action === "update") ok = restoreVersion(businessId, e.id, "owner");
+  if (e.action === "update") ok = restoreVersion(businessId, e.id, "owner", "before");
   else if ((TRASH_TYPES as string[]).includes(e.objectType)) {
     const type = e.objectType as TrashType;
     if (e.action === "create") ok = softDelete(businessId, type, e.objectId, "owner");

@@ -697,7 +697,10 @@ export const objectHistory = sqliteTable("object_history", {
     .references(() => businesses.id, { onDelete: "cascade" }),
   objectType: text("object_type").$type<ObjectType>().notNull(),
   objectId: text("object_id").notNull(),
-  /** The object's row as it was after this change (before it, for "delete"). */
+  /**
+   * The object's row after this change (the version; for "delete", the row as trashed).
+   * Updates may also hold `before`, the row before the change, which Undo writes back.
+   */
   snapshot: text("snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
   action: text("action").$type<HistoryAction>().notNull(),
   /** "owner", "system" or "teammate:<id>". */
