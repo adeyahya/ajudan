@@ -2,7 +2,7 @@
 
 import { Bookmark, Building2, Calendar, CalendarClock, Download, Ellipsis, GitMerge, Hash, Phone, Tag, Trash2, Type, Upload, UserPlus, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useLang, useT } from "@/components/i18n";
 import { useGrowingList } from "@/components/use-growing-list";
@@ -361,13 +361,17 @@ function DuplicatesDialog({ businessId, open, onOpenChange }: { businessId: stri
       setKeep({});
     });
   const describe = (c: PersonRow) => [c.phone && `+${c.phone}`, c.email, c.company].filter(Boolean).join(" · ");
+  // The menu opens this through `open`, which Radix doesn't report in onOpenChange: load on open.
+  useEffect(() => {
+    if (open) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   return (
     <Dialog
       open={open}
       onOpenChange={(o) => {
         onOpenChange(o);
-        if (o) load();
-        else setGroups(null);
+        if (!o) setGroups(null);
       }}
     >
       <DialogContent className="sm:max-w-xl">

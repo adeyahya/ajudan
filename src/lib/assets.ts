@@ -6,7 +6,7 @@ import { db, schema } from "@/db";
 import type { Asset } from "@/db/schema";
 import { mediaKind, type MediaKind } from "@/lib/media-types";
 import { dataDir } from "@/lib/paths";
-import { recordHistory } from "@/lib/object-history";
+import { NO_LABELS, recordHistory } from "@/lib/object-history";
 import { softDelete } from "@/lib/trash";
 
 /**
@@ -157,10 +157,12 @@ export function organize(businessId: string, paths: string[], patch: AssetPatch,
         ? tx.update(schema.assets).set({ ...clean, tags, ...stamp }).where(eq(schema.assets.path, p)).returning().get()
         : tx
             .insert(schema.assets)
-            .values({ path: p, businessId, ...clean, tags, ...(by ? { createdBy: by, updatedBy: by } : {}) })
+            // A first labels row doesn't make the file theirs: an upload in media/ stays the owner's.
+            .values({ path: p, businessId, ...clean, tags, ...(by ? { createdBy: isTeamMediaPath(p) ? by : "owner", updatedBy: by } : {}) })
             .returning()
             .get();
-      if (by && row && organizationChanged(cur, row)) recordHistory({ businessId, type: "asset", id: p, snapshot: row, action: cur ? "update" : "create", by });
+      // Labels are an update even on a file's first row, so Undo clears them instead of trashing the file.
+      if (by && row && organizationChanged(cur, row)) recordHistory({ businessId, type: "asset", id: p, snapshot: row, before: cur ?? NO_LABELS, action: "update", by });
     }
   });
   return valid.length;

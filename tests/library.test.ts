@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyFilter, cleanFilter, isEmptyFilter, matchesFilter, mergeFilters, sameFilter, type FilterableItem } from "@/lib/library-filter";
 
@@ -161,10 +162,17 @@ describe("team outputs, history and trash", () => {
     expect(organize(biz, [made], { title: "Payday banner" }, [], "owner")).toBe(1); // no change
     organize(biz, [made], { starred: true }, [], "owner");
     const h = historyFor(biz, "asset", made);
-    expect(h.map((e) => e.action).sort()).toEqual(["create", "update"]);
+    // Labels are always an update (the first one's `before` is "no labels"), so Undo never trashes the file.
+    expect(h.map((e) => e.action)).toEqual(["update", "update"]);
+    expect(h.at(-1)!.snapshot.before).toMatchObject({ title: "", tags: [] });
     expect(h.every((e) => e.by === "owner")).toBe(true);
     const row = listLibrary(biz, { team: true }).find((i) => i.path === made)!;
     expect(row).toMatchObject({ title: "Payday banner", tags: ["promo"], starred: true, source: "team" });
+    // A teammate's first labels on the owner's upload leave the file the owner's.
+    organize(biz, ["media/upload.jpg"], { title: "Upload" }, [], "teammate:x");
+    expect(db.select().from(schema.assets).all().find((a) => a.path === "media/upload.jpg")).toMatchObject({ createdBy: "owner", updatedBy: "teammate:x" });
+    db.delete(schema.objectHistory).run();
+    db.delete(schema.assets).where(eq(schema.assets.path, "media/upload.jpg")).run();
     // Callers that don't say who (older worker code) record nothing.
     organize(biz, ["media/upload.jpg"], { note: "x" });
     expect(historyFor(biz, "asset", "media/upload.jpg")).toEqual([]);
