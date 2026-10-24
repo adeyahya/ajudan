@@ -2,201 +2,125 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ComponentProps } from "react";
+import { defaultRehypePlugins } from "streamdown";
 import { toast } from "sonner";
-import { ChevronLeft, FileTextIcon, ImageIcon, Info, Paperclip, PlusIcon, Trash2, UserRoundPlus, VideoIcon, XIcon } from "lucide-react";
-import { DocLayoutButtons, useDocLayout } from "@/components/doc-layout";
-import { TopBarActions } from "@/components/breadcrumb";
-import { useT, useTn } from "@/components/i18n";
-import { Badge, Button, cn, EmptyState, IconButton, Input, Kbd, LineTabs, Textarea } from "@/components/kit";
+import { Download, ImageIcon, Info, Link2, Paperclip, Printer, Trash2, UserRoundPlus, VideoIcon, XIcon } from "lucide-react";
+import { useLang, useT, useTn } from "@/components/i18n";
+import { fileUrl } from "@/components/image-strip";
+import { Badge, Button, cn, IconButton, Input, Kbd } from "@/components/kit";
 import { Markdown } from "@/components/markdown";
-import { SidePeek } from "@/components/side-peek";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DeleteDialog, localizeError, MoreMenu, PropRow, Segmented } from "@/components/workspace-ui";
 import type { Deliverable, DeliverableStatus } from "@/db/schema";
+import { normalizeFolder } from "@/lib/docs-folders";
+import { DOC_STATUSES } from "@/lib/docs-list";
+import { resolveMentions } from "@/lib/docs-mentions";
+import { docTemplate, templateText } from "@/lib/docs-templates";
 import type { MessageKey } from "@/lib/i18n";
 import type { MediaKind } from "@/lib/media-types";
 import { statusTone } from "@/lib/status-tones";
-import { deleteDoc, saveDoc } from "../actions";
-import { fileUrl } from "../_components/edits-list";
-import { PlanTask } from "../_components/plan-task";
-import { DeleteDialog, localizeError, MoreMenu, PropRow, Segmented, StudioShell } from "../_components/studio-shell";
+import { deleteDoc, saveDoc } from "./actions";
+import { MentionTextarea, type MentionOption } from "./mention-textarea";
 
-const KINDS = ["note", "brief", "plan", "script", "social_post", "blog_post", "email", "ad_copy", "report", "faq", "price_list"];
-const STATUS: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
+/** Kinds with a label in studio.docs.kind.* … */
+const STUDIO_KINDS = ["note", "brief", "plan", "script", "social_post", "blog_post", "email", "ad_copy", "report", "faq", "price_list"];
+/** … and the template kinds, labelled in docs.kind.*. */
+const DOC_KINDS = ["quote", "sop", "meeting_notes", "product_sheet"];
+export const KINDS = [...STUDIO_KINDS, ...DOC_KINDS];
 /** The English label of a kind nobody translated (kinds the team invented): "case_study" → "Case study". */
-const label = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+export const kindFallback = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
-type Mate = { id: string; name: string; title: string; kind: string };
-type MediaOption = { path: string; name: string; kind: MediaKind };
-export type DocsFilter = "all" | "mine" | "team";
-
-function useKindLabel() {
+export function useKindLabel() {
   const t = useT();
-  return (k: string) => (KINDS.includes(k) ? t(`studio.docs.kind.${k}` as MessageKey) : label(k));
+  return (k: string) =>
+    STUDIO_KINDS.includes(k) ? t(`studio.docs.kind.${k}` as MessageKey) : DOC_KINDS.includes(k) ? t(`docs.kind.${k}` as MessageKey) : kindFallback(k);
 }
 
-/** Write briefs, notes and scripts, and edit the team's drafts; hand any doc to a teammate for later. */
-/** A list row: no full text, just its start for the search box. */
-export type DocRow = Pick<Deliverable, "id" | "title" | "kind" | "status" | "teammateId"> & { excerpt: string };
+export type MediaOption = { path: string; name: string; kind: MediaKind };
+export type HandOver = { key: string; text: string; attachments: string[] };
 
-export function Docs({
-  businessId,
-  docs,
-  doc,
-  docId,
-  filter,
-  teammates,
-  media,
-}: {
-  businessId: string;
-  docs: DocRow[];
-  /** The open doc, in full. */
-  doc?: Deliverable;
-  docId?: string;
-  filter: DocsFilter;
-  teammates: Mate[];
-  media: MediaOption[];
-}) {
-  const t = useT();
-  const kindLabel = useKindLabel();
-  const [q, setQ] = useState("");
-  const [hand, setHand] = useState<{ key: string; text: string; attachments: string[] } | null>(null);
-  // Focus mode hides the list: the doc takes the whole width.
-  const { focus } = useDocLayout();
-  const names = useMemo(() => new Map(teammates.map((m) => [m.id, m.name])), [teammates]);
-  const shown = docs.filter((d) => {
-    if (filter === "mine" && d.teammateId) return false;
-    if (filter === "team" && !d.teammateId) return false;
-    const s = q.trim().toLowerCase();
-    return !s || `${d.title} ${d.kind} ${d.excerpt}`.toLowerCase().includes(s);
-  });
-  const base = `/b/${businessId}/studio/docs`;
-  const href = (f: DocsFilter, id?: string) => {
-    const p = new URLSearchParams();
-    if (f !== "all") p.set("who", f);
-    if (id) p.set("doc", id);
-    const s = p.toString();
-    return s ? `${base}?${s}` : base;
-  };
-
-  const peek = (
-    <SidePeek open={!!hand} onClose={() => setHand(null)} title={t("studio.docs.handTitle")} description={t("studio.docs.handHelp")}>
-      {hand && (
-        <div className="space-y-4">
-          <PlanTask
-            key={hand.key}
-            businessId={businessId}
-            teammates={teammates.filter((m) => m.kind === "ai")}
-            attachments={hand.attachments}
-            defaultText={hand.text}
-            onDone={() => setHand(null)}
-          />
-        </div>
-      )}
-    </SidePeek>
-  );
-
-  return (
-    <StudioShell peek={peek}>
-      <TopBarActions>
-        <DocLayoutButtons />
-      </TopBarActions>
-      <div className={cn("grid gap-8", !focus && "@3xl:grid-cols-[260px_minmax(0,1fr)]")}>
-        <aside className={cn("min-w-0 space-y-3", doc && "hidden @3xl:block", focus && "hidden @3xl:hidden")}>
-          <div className="flex items-center gap-2">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.docs.search")} aria-label={t("studio.docs.search")} className="h-7 min-w-0 flex-1 text-[13px]" />
-            <Button asChild size="sm">
-              <Link href={href(filter)}>
-                <PlusIcon /> {t("studio.docs.new")}
-              </Link>
-            </Button>
-          </div>
-          <LineTabs
-            label={t("studio.docs.filter")}
-            items={(["all", "mine", "team"] as const).map((f) => ({
-              href: href(f, docId),
-              label: t(`studio.docs.filter.${f}`),
-              active: filter === f,
-            }))}
-          />
-          {shown.length === 0 ? (
-            <EmptyState compact icon={<FileTextIcon />} title={docs.length ? t("studio.docs.noMatch") : t("studio.docs.emptyTitle")} body={docs.length ? undefined : t("studio.docs.emptyBody")} />
+/** The preview: markdown with @mentions drawn as chips that open the mentioned object. */
+const PREVIEW_REHYPE = [defaultRehypePlugins.raw, defaultRehypePlugins.sanitize];
+function DocPreview({ businessId, content }: { businessId: string; content: string }) {
+  const { text, hrefs } = useMemo(() => resolveMentions(content, businessId), [content, businessId]);
+  const components = useMemo(
+    () =>
+      ({
+        a: ({ href, children }: { href?: string; children?: React.ReactNode }) =>
+          href && hrefs.has(href) ? (
+            <Link
+              href={href}
+              className="inline-flex items-center rounded-sm bg-secondary px-1 font-medium text-foreground! no-underline! hover:bg-hover-strong"
+            >
+              @{children}
+            </Link>
           ) : (
-            <ul className="-mx-2 max-h-[calc(100dvh-280px)] overflow-y-auto">
-              {shown.map((d) => {
-                const s = statusTone("deliverable", d.status);
-                return (
-                  <li key={d.id}>
-                    <Link
-                      href={href(filter, d.id)}
-                      aria-current={d.id === docId ? "page" : undefined}
-                      className={cn("block rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-hover", d.id === docId && "bg-accent")}
-                    >
-                      <span className="flex items-center gap-2">
-                        <FileTextIcon className="size-4 shrink-0 text-tertiary" strokeWidth={1.75} />
-                        <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] font-medium text-foreground">{d.title}</span>
-                      </span>
-                      <span className="mt-1 flex min-w-0 items-center gap-1.5 pl-6 text-xs text-tertiary">
-                        <Badge tone={s.tone}>{t(s.label)}</Badge>
-                        <span className="truncate">
-                          {kindLabel(d.kind)} · {d.teammateId ? (names.get(d.teammateId) ?? t("studio.docs.team")) : t("studio.docs.you")}
-                        </span>
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </aside>
-        <div className="min-w-0">
-          {doc && (
-            <Button asChild size="sm" variant="ghost" className={cn("mb-3 -ml-2 text-muted-foreground", !focus && "@3xl:hidden")}>
-              <Link href={href(filter)}>
-                <ChevronLeft /> {t("studio.docs.allDocs")}
-              </Link>
-            </Button>
-          )}
-          <Editor
-            key={doc?.id ?? "new"}
-            businessId={businessId}
-            doc={doc}
-            author={doc?.teammateId ? names.get(doc.teammateId) : undefined}
-            media={media}
-            onHandOver={setHand}
-            canHand={teammates.some((m) => m.kind === "ai")}
-          />
-        </div>
-      </div>
-    </StudioShell>
+            <a href={href} target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          ),
+      }) as unknown as NonNullable<ComponentProps<typeof Markdown>["components"]>,
+    [hrefs],
+  );
+  return (
+    <Markdown className="text-[15px] leading-[26px]" components={components} rehypePlugins={PREVIEW_REHYPE}>
+      {text}
+    </Markdown>
   );
 }
 
-function Editor({
+/**
+ * One deliverable: title, properties (kind, status, folder, channel), the markdown body with
+ * @mentions, attachments, and save / hand over / links / export / delete.
+ */
+export function Editor({
   businessId,
   doc,
+  template,
+  initialFolder,
+  folders,
   author,
   media,
+  mentions,
+  backHref,
   onHandOver,
+  onShowLinks,
   canHand,
 }: {
   businessId: string;
   doc?: Deliverable;
+  /** For a new doc: a template key from src/lib/docs-templates.ts. */
+  template?: string;
+  initialFolder?: string | null;
+  folders: string[];
   author?: string;
   media: MediaOption[];
-  onHandOver: (h: { key: string; text: string; attachments: string[] }) => void;
+  mentions: MentionOption[];
+  backHref: string;
+  onHandOver: (h: HandOver) => void;
+  onShowLinks: () => void;
   canHand: boolean;
 }) {
   const t = useT();
   const tn = useTn();
+  const lang = useLang();
   const kindLabel = useKindLabel();
   const router = useRouter();
-  const [title, setTitle] = useState(doc?.title ?? "");
-  const [kind, setKind] = useState(doc?.kind ?? "brief");
+  const start0 = useMemo(() => {
+    if (doc) return { title: doc.title, kind: doc.kind, content: doc.content, folder: doc.folder ?? "" };
+    const tpl = docTemplate(template);
+    if (!tpl) return { title: "", kind: "brief", content: "", folder: initialFolder ?? "" };
+    const text = templateText(tpl, lang);
+    return { title: text.title, kind: tpl.kind, content: text.body, folder: initialFolder ?? "" };
+  }, [doc, template, initialFolder, lang]);
+  const [title, setTitle] = useState(start0.title);
+  const [kind, setKind] = useState(start0.kind);
   const [channel, setChannel] = useState(doc?.channel ?? "");
-  const [content, setContent] = useState(doc?.content ?? "");
+  const [content, setContent] = useState(start0.content);
+  const [folder, setFolder] = useState(start0.folder);
   const [status, setStatus] = useState<DeliverableStatus>(doc?.status ?? "draft");
   const [attachments, setAttachments] = useState<string[]>(doc?.attachments ?? []);
   const [tab, setTab] = useState<"write" | "split" | "preview">("write");
@@ -206,24 +130,27 @@ function Editor({
   const [pending, start] = useTransition();
   const kinds = KINDS.includes(kind) ? KINDS : [kind, ...KINDS];
   const dirty =
-    title !== (doc?.title ?? "") ||
-    kind !== (doc?.kind ?? "brief") ||
-    channel !== (doc?.channel ?? "") ||
-    content !== (doc?.content ?? "") ||
-    status !== (doc?.status ?? "draft") ||
-    attachments.join() !== (doc?.attachments ?? []).join();
+    !doc ||
+    title !== doc.title ||
+    kind !== doc.kind ||
+    channel !== (doc.channel ?? "") ||
+    content !== doc.content ||
+    status !== doc.status ||
+    normalizeFolder(folder) !== doc.folder ||
+    attachments.join() !== doc.attachments.join();
 
   const save = () =>
     start(async () => {
-      const r = await saveDoc(businessId, { id: doc?.id, title, kind, channel, content, status, attachments });
+      const r = await saveDoc(businessId, { id: doc?.id, title, kind, channel, content, status, attachments, folder: normalizeFolder(folder) });
       if ("error" in r) return setMsg({ error: localizeError(t, r.error) });
       setMsg({ ok: t("common.saved") });
-      if (!doc) router.replace(`/b/${businessId}/studio/docs?doc=${r.id}`);
+      if (!doc) router.replace(`/b/${businessId}/docs?doc=${r.id}`);
     });
 
   const words = content.trim() ? content.trim().split(/\s+/).length : 0;
   // Instructions for the teammate (agent-facing, like the rest of the task text), not UI chrome.
-  const handOver = `Work from this ${label(kind).toLowerCase()} (saved as "${title}"):\n\n${content}`.slice(0, 20000);
+  const handOver = `Work from this ${kindFallback(kind).toLowerCase()} (saved as "${title}"):\n\n${content}`.slice(0, 20000);
+  const exportHref = (format: string) => (doc ? `/api/b/${businessId}/docs/${doc.id}/export?format=${format}` : "#");
 
   return (
     <div className={cn("mx-auto w-full", tab === "split" ? "max-w-none" : "max-w-[var(--doc-w)]")}>
@@ -255,7 +182,7 @@ function Editor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {STATUS.map((s) => {
+              {DOC_STATUSES.map((s) => {
                 const st = statusTone("deliverable", s);
                 return (
                   <SelectItem key={s} value={s}>
@@ -265,6 +192,21 @@ function Editor({
               })}
             </SelectContent>
           </Select>
+        </PropRow>
+        <PropRow label={t("docs.folder")}>
+          <Input
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            list="doc-folders"
+            placeholder={t("docs.folderPlaceholder")}
+            aria-label={t("docs.folder")}
+            className="h-7 border-transparent text-[13px] shadow-none hover:border-input"
+          />
+          <datalist id="doc-folders">
+            {folders.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
         </PropRow>
         <PropRow label={t("studio.docs.channel")}>
           <Input
@@ -293,6 +235,7 @@ function Editor({
             { value: "preview", label: t("studio.docs.preview") },
           ]}
         />
+        <span className="hidden truncate text-xs text-tertiary @2xl:inline">{t("docs.mentionHint")}</span>
         <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" aria-expanded={picking} onClick={() => setPicking(!picking)}>
           <Paperclip /> {picking ? t("studio.docs.doneAttaching") : t("studio.docs.attach")}
         </Button>
@@ -339,9 +282,10 @@ function Editor({
 
       <div className={cn("mt-3", tab === "split" && "grid gap-6 @5xl:grid-cols-2")}>
         {tab !== "preview" && (
-          <Textarea
+          <MentionTextarea
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={setContent}
+            options={mentions}
             rows={20}
             aria-label={t("studio.docs.body")}
             placeholder={t("studio.docs.bodyPlaceholder")}
@@ -353,14 +297,14 @@ function Editor({
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "s") {
                 e.preventDefault();
-                save();
+                if (dirty && title.trim()) save();
               }
             }}
           />
         )}
         {tab !== "write" && (
           <div className={cn("min-h-[60vh] min-w-0", tab === "split" && "border-t border-border pt-6 @5xl:border-t-0 @5xl:border-l @5xl:pt-0 @5xl:pl-6")}>
-            {content.trim() ? <Markdown className="text-[15px] leading-[26px]">{content}</Markdown> : <p className="text-sm text-tertiary">{t("studio.docs.nothingToPreview")}</p>}
+            {content.trim() ? <DocPreview businessId={businessId} content={content} /> : <p className="text-sm text-tertiary">{t("studio.docs.nothingToPreview")}</p>}
           </div>
         )}
       </div>
@@ -394,6 +338,27 @@ function Editor({
           </IconButton>
           {doc && (
             <MoreMenu label={t("studio.more")} disabled={pending}>
+              <DropdownMenuItem onSelect={onShowLinks}>
+                <Link2 /> {t("docs.links")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs font-normal text-tertiary">{t("docs.export")}</DropdownMenuLabel>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("md")} download>
+                  <Download /> {t("docs.exportMd")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("html")} download>
+                  <Download /> {t("docs.exportHtml")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={exportHref("print")} target="_blank" rel="noreferrer">
+                  <Printer /> {t("docs.print")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
                 <Trash2 /> {t("common.delete")}
               </DropdownMenuItem>
@@ -412,7 +377,7 @@ function Editor({
             start(async () => {
               await deleteDoc(businessId, doc.id);
               toast(t("studio.docs.deleted"));
-              router.replace(`/b/${businessId}/studio/docs`);
+              router.replace(backHref);
             });
           }}
         />

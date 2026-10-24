@@ -24,7 +24,7 @@ export async function ContextHome({ businessId, lang, q }: { businessId: string;
   const names = new Map(mates.map((m) => [m.id, m.name]));
   const byId = new Map(pages.map((p) => [p.id, p]));
   const base = `/b/${businessId}/context`;
-  const href = (p: ContextPage) => (p.kind === "database" ? `${base}/people` : `${base}?page=${p.id}`);
+  const href = (p: ContextPage) => (p.kind === "database" ? `/b/${businessId}/contacts` : `${base}?page=${p.id}`);
   const always = (p: ContextPage) => mates.filter((m) => readerMode(p, m.id, rows) === "always").length;
   const firstStale = health.stale[0];
   const query = q.trim();
@@ -102,7 +102,7 @@ export async function ContextHome({ businessId, lang, q }: { businessId: string;
               })}
               {people.map((c) => (
                 <li key={c.id}>
-                  <Link href={`${base}/people?c=${c.id}`} className="block px-3 py-2.5 text-[13px] whitespace-pre-line text-muted-foreground transition-colors duration-100 hover:bg-hover">
+                  <Link href={`/b/${businessId}/contacts?c=${c.id}`} className="block px-3 py-2.5 text-[13px] whitespace-pre-line text-muted-foreground transition-colors duration-100 hover:bg-hover">
                     {describeContact(c).replace(/^- /, "")}
                   </Link>
                 </li>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { and, count, desc, eq, inArray, isNotNull, like, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, like, sql, type SQL } from "drizzle-orm";
 import { connection } from "next/server";
 import { CircleDot, Clock, FolderCheck, Image as ImageIcon, Radio, Tag, Type, User, X } from "lucide-react";
 import { db, schema } from "@/db";
@@ -68,7 +68,8 @@ type Filters = { status?: string; kinds: string[]; teammates: string[]; q?: stri
 
 async function loadDeliverables(businessId: string, f: Filters, peekId: string | undefined) {
   await connection();
-  const base = eq(schema.deliverables.businessId, businessId);
+  // Work in Trash (src/lib/trash.ts) is left out everywhere here.
+  const base = and(eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt))!;
   const where: SQL[] = [base];
   if (f.status && STATUSES.includes(f.status as DeliverableStatus))
     where.push(eq(schema.deliverables.status, f.status as DeliverableStatus));
@@ -166,7 +167,7 @@ async function Content({ params, searchParams }: Pick<Props, "params" | "searchP
   return (
     <SidePeekLayout
       peek={
-        <DeliverablePeek open={!!peek} title={peek ? kindLabel(peek.kind) : undefined} openHref={peek ? `/b/${id}/studio/docs?doc=${peek.id}` : undefined}>
+        <DeliverablePeek open={!!peek} title={peek ? kindLabel(peek.kind) : undefined} openHref={peek ? `/b/${id}/docs?doc=${peek.id}` : undefined}>
           {peek && (
             <DeliverableDetail
               d={peek}

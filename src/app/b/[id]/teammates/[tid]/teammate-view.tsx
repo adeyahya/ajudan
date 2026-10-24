@@ -3,7 +3,7 @@ import path from "node:path";
 import { CornerDownRight, Phone } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { db, schema } from "@/db";
@@ -81,7 +81,7 @@ async function loadTeammate(businessId: string, teammateId: string) {
       if (d.taskId && d.attachments.length) taskImages.set(d.taskId, [...(taskImages.get(d.taskId) ?? []), ...d.attachments]);
     }
   }
-  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(eq(schema.deliverables.teammateId, teammateId)).get()?.n ?? 0;
+  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(and(eq(schema.deliverables.teammateId, teammateId), isNull(schema.deliverables.deletedAt))).get()?.n ?? 0;
   const mates = db
     .select({ id: schema.teammates.id, name: schema.teammates.name })
     .from(schema.teammates)

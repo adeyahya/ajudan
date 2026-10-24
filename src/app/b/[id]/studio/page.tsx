@@ -1,22 +1,19 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { listLibrary } from "@/lib/assets";
-import { getBusiness, listTeammates } from "@/lib/data";
-import { StudioSkeleton } from "./_components/studio-skeleton";
-import { Library } from "./library";
+import { WorkspaceSkeleton } from "@/components/workspace-skeleton";
+import { withQuery } from "@/lib/url-query";
 
-export default function StudioLibraryPage(props: PageProps<"/b/[id]/studio">) {
+/** The library moved to /b/[id]/library; the Studio keeps the video and audio editors. */
+export default function StudioPage(props: PageProps<"/b/[id]/studio">) {
   return (
-    <Suspense fallback={<StudioSkeleton shape="gallery" />}>
-      <Content params={props.params} />
+    <Suspense fallback={<WorkspaceSkeleton shape="gallery" />}>
+      <Redirect {...props} />
     </Suspense>
   );
 }
 
-async function Content({ params }: { params: PageProps<"/b/[id]/studio">["params"] }) {
+async function Redirect({ params, searchParams }: PageProps<"/b/[id]/studio">) {
   const { id } = await params;
-  const business = await getBusiness(id);
-  if (!business) notFound();
-  const mates = (await listTeammates(id)).filter((t) => t.kind === "ai").map((t) => ({ id: t.id, name: t.name, title: t.title }));
-  return <Library businessId={id} items={listLibrary(id)} teammates={mates} />;
+  redirect(withQuery(`/b/${id}/library`, await searchParams));
+  return null;
 }

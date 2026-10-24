@@ -1,14 +1,19 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Contact, ContactKind } from "@/db/schema";
 import { cleanTags } from "@/lib/assets";
+import { endOfToday } from "@/lib/contact-filters";
 import { normalizePhone } from "@/lib/humans";
+import { recordHistory } from "@/lib/object-history";
 import { matchIds } from "@/lib/search";
+import { softDelete } from "@/lib/trash";
 
 /**
  * The business's address book: customers, suppliers and partners the owner keeps.
  * Teammates look people up with search_contacts, and a name from here works as a
  * WhatsApp target (sending to someone new still needs the owner's approval).
+ * Owner edits, follow-ups and logged interactions go into object_history; the
+ * timeline (src/lib/contact-timeline.ts) reads them back.
  */
 
 export const CONTACT_KINDS: Record<ContactKind, string> = {
@@ -19,14 +24,42 @@ export const CONTACT_KINDS: Record<ContactKind, string> = {
   other: "Other",
 };
 
-export type ContactInput = { name: string; phone?: string; email?: string; company?: string; kind?: string; tags?: string[] | string; notes?: string };
+export type ContactInput = {
+  name: string;
+  phone?: string;
+  email?: string;
+  company?: string;
+  kind?: string;
+  tags?: string[] | string;
+  notes?: string;
+  /** The owner's own fields; left as they are when not given. */
+  fields?: Record<string, string>;
+};
 
-function businessLanguage(businessId: string) {
+const MAX_FIELDS = 30;
+
+/** Custom fields: trimmed keys (≤ 40 chars) and values (≤ 500), empty ones dropped, at most 30. */
+export function cleanFields(fields: Record<string, string> | undefined | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fields ?? {})) {
+    const key = String(k).replace(/\s+/g, " ").trim().slice(0, 40);
+    const value = String(v ?? "").trim().slice(0, 500);
+    if (!key || !value || key in out) continue;
+    out[key] = value;
+    if (Object.keys(out).length >= MAX_FIELDS) break;
+  }
+  return out;
+}
+
+export function businessLanguage(businessId: string) {
   return db.select({ l: schema.businesses.language }).from(schema.businesses).where(eq(schema.businesses.id, businessId)).get()?.l ?? "en";
 }
 
 /** Clean one contact's fields; an error when something can't be saved. */
-export function cleanContact(input: ContactInput, language: string): { value: Omit<Contact, "id" | "businessId" | "createdAt" | "createdBy"> } | { error: string } {
+export function cleanContact(
+  input: ContactInput,
+  language: string,
+): { value: Pick<Contact, "name" | "phone" | "email" | "company" | "kind" | "tags" | "notes"> } | { error: string } {
   const name = input.name.trim().slice(0, 120);
   if (!name) return { error: "A contact needs a name." };
   let phone: string | null = null;
@@ -41,27 +74,119 @@ export function cleanContact(input: ContactInput, language: string): { value: Om
   return { value: { name, phone, email, company: input.company?.trim().slice(0, 120) || null, kind, tags, notes: (input.notes ?? "").trim().slice(0, 4000) } };
 }
 
+/** The address book, without contacts in Trash. */
 export function listContacts(businessId: string) {
-  return db.select().from(schema.contacts).where(eq(schema.contacts.businessId, businessId)).orderBy(asc(schema.contacts.name)).all();
+  return db
+    .select()
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt)))
+    .orderBy(asc(schema.contacts.name))
+    .all();
 }
 
-export function saveContact(businessId: string, input: ContactInput & { id?: string }) {
+/** One live contact of this business, or undefined. */
+export function getContact(businessId: string, id: string) {
+  return db
+    .select()
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.id, id), eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt)))
+    .get();
+}
+
+/** The owner's edit or new contact (the Contacts page). Recorded in object_history with who made it. */
+export function saveContact(businessId: string, input: ContactInput & { id?: string }, by = "owner") {
   const c = cleanContact(input, businessLanguage(businessId));
   if ("error" in c) return c;
+  const fields = input.fields !== undefined ? { fields: cleanFields(input.fields) } : {};
   if (input.id) {
     const row = db
       .update(schema.contacts)
-      .set(c.value)
-      .where(and(eq(schema.contacts.id, input.id), eq(schema.contacts.businessId, businessId)))
+      .set({ ...c.value, ...fields, updatedBy: by })
+      .where(and(eq(schema.contacts.id, input.id), eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt)))
       .returning()
       .get();
-    return row ? { contact: row } : { error: "Contact not found." };
+    if (!row) return { error: "Contact not found." };
+    recordHistory({ businessId, type: "contact", id: row.id, snapshot: row, action: "update", by });
+    return { contact: row };
   }
-  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value }).returning().get() };
+  const row = db.insert(schema.contacts).values({ businessId, ...c.value, ...fields, createdBy: by, updatedBy: by }).returning().get();
+  recordHistory({ businessId, type: "contact", id: row.id, snapshot: row, action: "create", by });
+  return { contact: row };
 }
 
-export function deleteContact(businessId: string, id: string) {
-  db.delete(schema.contacts).where(and(eq(schema.contacts.id, id), eq(schema.contacts.businessId, businessId))).run();
+/** Move a contact to Trash (src/lib/trash.ts); purging it from there deletes it for good. */
+export function deleteContact(businessId: string, id: string, by = "owner") {
+  softDelete(businessId, "contact", id, by);
+}
+
+// ---- follow-ups and interactions ----
+
+export type InteractionKind = "call" | "meeting" | "note" | "message";
+export const INTERACTION_KINDS: InteractionKind[] = ["call", "meeting", "note", "message"];
+
+export { endOfToday };
+
+/** Contacts to get back to: overdue and due by `until` (default the end of today), soonest first. */
+export function dueFollowUps(businessId: string, until?: Date): Contact[] {
+  const t = schema.contacts;
+  return db
+    .select()
+    .from(t)
+    .where(and(eq(t.businessId, businessId), isNull(t.deletedAt), isNotNull(t.followUpAt), lte(t.followUpAt, until ?? endOfToday())))
+    .orderBy(asc(t.followUpAt), asc(t.name))
+    .all();
+}
+
+/**
+ * Set (or, with `at` null, clear) when to get back to someone and what for. Recorded in
+ * object_history as the row plus a `followUp` entry, which the timeline shows.
+ */
+export function setFollowUp(businessId: string, id: string, at: Date | null, note: string, by = "owner") {
+  if (at && Number.isNaN(at.getTime())) return { error: "That isn't a date." };
+  const row = db
+    .update(schema.contacts)
+    .set({ followUpAt: at, followUpNote: at ? note.trim().slice(0, 500) : "", updatedBy: by })
+    .where(and(eq(schema.contacts.id, id), eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt)))
+    .returning()
+    .get();
+  if (!row) return { error: "Contact not found." };
+  recordHistory({
+    businessId,
+    type: "contact",
+    id,
+    snapshot: { ...row, followUp: { action: at ? "set" : "clear", at: at?.toISOString() ?? null, note: row.followUpNote } },
+    action: "update",
+    by,
+  });
+  return { contact: row };
+}
+
+/** The follow-up happened: clear it, and keep what it was for in the timeline. */
+export function completeFollowUp(businessId: string, id: string, by = "owner") {
+  const cur = getContact(businessId, id);
+  if (!cur) return { error: "Contact not found." };
+  if (!cur.followUpAt) return { error: "No follow-up is set for this contact." };
+  const row = db.update(schema.contacts).set({ followUpAt: null, followUpNote: "", updatedBy: by }).where(eq(schema.contacts.id, id)).returning().get()!;
+  recordHistory({
+    businessId,
+    type: "contact",
+    id,
+    snapshot: { ...row, followUp: { action: "done", at: cur.followUpAt.toISOString(), note: cur.followUpNote } },
+    action: "update",
+    by,
+  });
+  return { contact: row };
+}
+
+/** A call, meeting, note or message with someone, kept in their timeline (object_history; the row doesn't change). */
+export function logInteraction(businessId: string, id: string, kind: InteractionKind, text: string, by = "owner") {
+  const body = text.trim().slice(0, 4000);
+  if (!body) return { error: "Say what happened." };
+  if (!INTERACTION_KINDS.includes(kind)) return { error: `Kind must be one of ${INTERACTION_KINDS.join(", ")}.` };
+  const cur = getContact(businessId, id);
+  if (!cur) return { error: "Contact not found." };
+  const entry = recordHistory({ businessId, type: "contact", id, snapshot: { interaction: { kind, text: body } }, action: "update", by });
+  return { entry, contact: cur };
 }
 
 // ---- CSV ----
@@ -100,51 +225,67 @@ export function parseCsv(text: string) {
   return rows;
 }
 
+type StdField = Exclude<keyof ContactInput, "fields">;
+
 /** Header names people use, in English and Indonesian/Malay, mapped to our fields. */
-const HEADERS: Record<string, keyof ContactInput> = {
+const HEADERS: Record<string, StdField> = {
   name: "name", nama: "name", "full name": "name", "nama lengkap": "name", contact: "name",
-  phone: "phone", "phone number": "phone", mobile: "phone", whatsapp: "phone", wa: "phone", hp: "phone", "no hp": "phone", telepon: "phone", "nomor hp": "phone",
-  email: "email", "e-mail": "email", surel: "email",
-  company: "company", perusahaan: "company", business: "company", toko: "company", organization: "company",
+  phone: "phone", "phone number": "phone", mobile: "phone", whatsapp: "phone", wa: "phone", hp: "phone", "no hp": "phone", telepon: "phone", "nomor hp": "phone", "phone 1 - value": "phone",
+  email: "email", "e-mail": "email", surel: "email", "e-mail 1 - value": "email",
+  company: "company", perusahaan: "company", business: "company", toko: "company", organization: "company", "organization name": "company", "organization 1 - name": "company",
   kind: "kind", type: "kind", jenis: "kind", tipe: "kind", category: "kind",
   tags: "tags", tag: "tags", label: "tags", labels: "tags",
   notes: "notes", note: "notes", catatan: "notes", keterangan: "notes",
 };
 
+/** A column we don't know becomes a custom field, unless it's an export's bookkeeping ("Phone 1 - Type"). */
+const customColumn = (header: string) => {
+  const h = header.trim();
+  return h && h.length <= 40 && !/ - (type|label)$/i.test(h) ? h : null;
+};
+
+/** Rows to import, each with a label for the "skipped" list ("Row 3", "Card 2"). */
+export type ImportRow = { label: string; input: ContactInput };
+export type ImportResult = { added: number; updated: number; skipped: string[]; error?: string };
+
 /**
- * Import contacts from CSV (or tab/semicolon separated) text with a header row. Rows
- * whose phone or email matches an existing contact update it instead of adding a copy.
+ * Add contacts; someone whose phone or email matches an existing contact updates that one
+ * instead (tags added, fields filled in, notes kept when the new row has none).
  */
-export function importContacts(businessId: string, text: string) {
-  const rows = parseCsv(text);
-  if (rows.length < 2) return { added: 0, updated: 0, skipped: [] as string[], error: "Need a header row and at least one contact." };
-  const cols = rows[0].map((h) => HEADERS[h.trim().toLowerCase()]);
-  if (!cols.includes("name")) return { added: 0, updated: 0, skipped: [], error: 'The first row needs a "name" column (also: phone, email, company, kind, tags, notes).' };
+export function importRows(businessId: string, rows: ImportRow[], by = "owner"): ImportResult {
   const language = businessLanguage(businessId);
   const existing = listContacts(businessId);
   let added = 0;
   let updated = 0;
   const skipped: string[] = [];
   db.transaction((tx) => {
-    for (const [n, r] of rows.slice(1).entries()) {
-      const input: ContactInput = { name: "" };
-      cols.forEach((k, i) => {
-        if (k) (input as Record<string, string>)[k] = r[i] ?? "";
-      });
+    for (const { label, input } of rows) {
       const c = cleanContact(input, language);
       if ("error" in c) {
-        skipped.push(`Row ${n + 2}: ${c.error}`);
+        skipped.push(`${label}: ${c.error}`);
         continue;
       }
+      const fields = cleanFields(input.fields);
       const same = existing.find((e) => (c.value.phone && e.phone === c.value.phone) || (c.value.email && e.email === c.value.email));
       if (same) {
-        tx.update(schema.contacts)
-          .set({ ...c.value, tags: cleanTags([...same.tags, ...c.value.tags]), notes: c.value.notes || same.notes })
+        const row = tx
+          .update(schema.contacts)
+          .set({
+            ...c.value,
+            tags: cleanTags([...same.tags, ...c.value.tags]),
+            notes: c.value.notes || same.notes,
+            fields: cleanFields({ ...same.fields, ...fields }),
+            updatedBy: by,
+          })
           .where(eq(schema.contacts.id, same.id))
-          .run();
+          .returning()
+          .get();
+        recordHistory({ businessId, type: "contact", id: row.id, snapshot: row, action: "update", by });
+        Object.assign(same, row);
         updated++;
       } else {
-        const row = tx.insert(schema.contacts).values({ businessId, ...c.value }).returning().get();
+        const row = tx.insert(schema.contacts).values({ businessId, ...c.value, fields, createdBy: by, updatedBy: by }).returning().get();
+        recordHistory({ businessId, type: "contact", id: row.id, snapshot: row, action: "create", by });
         existing.push(row);
         added++;
       }
@@ -153,10 +294,40 @@ export function importContacts(businessId: string, text: string) {
   return { added, updated, skipped: skipped.slice(0, 20) };
 }
 
+/**
+ * Import contacts from CSV (or tab/semicolon separated) text with a header row. Columns we
+ * don't recognize become custom fields. Rows whose phone or email matches an existing
+ * contact update it instead of adding a copy.
+ */
+export function importContacts(businessId: string, text: string): ImportResult {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { added: 0, updated: 0, skipped: [], error: "Need a header row and at least one contact." };
+  const cols = rows[0].map((h) => HEADERS[h.trim().toLowerCase()] ?? null);
+  const custom = rows[0].map((h, i) => (cols[i] ? null : customColumn(h)));
+  if (!cols.includes("name")) return { added: 0, updated: 0, skipped: [], error: 'The first row needs a "name" column (also: phone, email, company, kind, tags, notes).' };
+  return importRows(
+    businessId,
+    rows.slice(1).map((r, n) => {
+      const input: ContactInput = { name: "", fields: {} };
+      cols.forEach((k, i) => {
+        if (k) (input as unknown as Record<StdField, string>)[k] = r[i] ?? "";
+        else if (custom[i] && r[i]?.trim()) input.fields![custom[i]!] = r[i];
+      });
+      return { label: `Row ${n + 2}`, input };
+    }),
+  );
+}
+
+/** The address book as CSV; custom fields get a column each after the standard ones. */
 export function contactsCsv(businessId: string) {
   const q = (v: string | null) => (v && /[",;\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : (v ?? ""));
-  const lines = listContacts(businessId).map((c) => [c.name, c.phone ? `+${c.phone}` : "", c.email, c.company, c.kind, c.tags.join(", "), c.notes].map(q).join(","));
-  return ["name,phone,email,company,kind,tags,notes", ...lines].join("\n") + "\n";
+  const contacts = listContacts(businessId);
+  const std = new Set(["name", "phone", "email", "company", "kind", "tags", "notes"]);
+  const extra = [...new Set(contacts.flatMap((c) => Object.keys(c.fields ?? {})))].filter((k) => !std.has(k.toLowerCase()));
+  const lines = contacts.map((c) =>
+    [c.name, c.phone ? `+${c.phone}` : "", c.email, c.company, c.kind, c.tags.join(", "), c.notes, ...extra.map((k) => c.fields?.[k] ?? "")].map(q).join(","),
+  );
+  return [["name", "phone", "email", "company", "kind", "tags", "notes", ...extra].map(q).join(","), ...lines].join("\n") + "\n";
 }
 
 // ---- for teammates ----
@@ -167,7 +338,12 @@ export function searchAddressBook(businessId: string, query: string, kind?: Cont
   const ids = matchIds("contacts", businessId, words.map((w) => w.replace(/^#/, "")), { all: true, limit: 2000 });
   const candidates = ids
     ? ids.length
-      ? db.select().from(schema.contacts).where(and(eq(schema.contacts.businessId, businessId), inArray(schema.contacts.id, ids))).orderBy(asc(schema.contacts.name)).all()
+      ? db
+          .select()
+          .from(schema.contacts)
+          .where(and(eq(schema.contacts.businessId, businessId), inArray(schema.contacts.id, ids), isNull(schema.contacts.deletedAt)))
+          .orderBy(asc(schema.contacts.name))
+          .all()
       : []
     : listContacts(businessId);
   return candidates
@@ -184,7 +360,12 @@ export function describeContact(c: Contact) {
   if (c.phone) bits.push(`+${c.phone}`);
   if (c.email) bits.push(c.email);
   if (c.tags.length) bits.push(c.tags.map((t) => `#${t}`).join(" "));
-  return `- ${bits.join(" · ")}${c.notes ? `\n  Notes: ${c.notes.replace(/\s+/g, " ")}` : ""}`;
+  const extra: string[] = [];
+  const fields = Object.entries(c.fields ?? {});
+  if (fields.length) extra.push(`Fields: ${fields.map(([k, v]) => `${k}: ${v}`).join("; ")}`);
+  if (c.followUpAt) extra.push(`Follow up: ${c.followUpAt.toISOString().slice(0, 10)}${c.followUpNote ? ` (${c.followUpNote})` : ""}`);
+  if (c.notes) extra.push(`Notes: ${c.notes.replace(/\s+/g, " ")}`);
+  return `- ${bits.join(" · ")}${extra.map((x) => `\n  ${x}`).join("")}`;
 }
 
 /**
@@ -217,10 +398,10 @@ export function upsertContact(businessId: string, input: Partial<ContactInput> &
   const c = cleanContact(merged, language);
   if ("error" in c) return c;
   if (cur) {
-    const row = db.update(schema.contacts).set(c.value).where(eq(schema.contacts.id, cur.id)).returning().get();
+    const row = db.update(schema.contacts).set({ ...c.value, updatedBy: by }).where(eq(schema.contacts.id, cur.id)).returning().get();
     return { contact: row, created: false };
   }
-  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value, createdBy: by }).returning().get(), created: true };
+  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value, createdBy: by, updatedBy: by }).returning().get(), created: true };
 }
 
 /** An address-book entry whose name matches exactly (for WhatsApp targets). */

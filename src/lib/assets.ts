@@ -1,17 +1,29 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Asset } from "@/db/schema";
 import { mediaKind, type MediaKind } from "@/lib/media-types";
 import { dataDir } from "@/lib/paths";
+import { NO_LABELS, recordHistory } from "@/lib/object-history";
+import { softDelete } from "@/lib/trash";
 
 /**
  * The owner's asset library: the files in media/ plus how the owner organized them
  * (title, note, tags, album, star: the `assets` table). Organizing costs no Claude
  * usage, so it's something to do while the team rests; teammates see it in list_media.
+ *
+ * The Library page also shows what the team made (work/images/, work/videos/: rendered
+ * designs and videos) with source "team". Those files can be organized and trashed the
+ * same way; their assets row is keyed by their "work/…" path.
  */
+
+/** Where the team's media lands (worker/tools.ts render_image, worker/video.ts). */
+export const TEAM_MEDIA_DIRS = ["work/images", "work/videos"] as const;
+
+/** "owner": uploaded or made in the Studio (media/); "team": a teammate made it (work/…). */
+export type LibrarySource = "owner" | "team";
 
 export type LibraryItem = {
   path: string;
@@ -24,6 +36,9 @@ export type LibraryItem = {
   tags: string[];
   album: string | null;
   starred: boolean;
+  source: LibrarySource;
+  /** "owner" or "teammate:<id>" when known (from the assets row). */
+  createdBy: string | null;
 };
 
 /** media/<file> only: no folders, dotfiles or anything outside. */
@@ -31,14 +46,50 @@ export function isLibraryPath(rel: string) {
   return /^media\/[^/\\]+$/.test(rel) && !path.basename(rel).startsWith(".") && path.posix.normalize(rel) === rel;
 }
 
+/** work/images/<file> or work/videos/<file>: a file the team made, shown in the Library. */
+export function isTeamMediaPath(rel: string) {
+  return /^work\/(images|videos)\/[^/\\]+$/.test(rel) && !path.basename(rel).startsWith(".") && path.posix.normalize(rel) === rel;
+}
+
+/** A path the Library can organize and trash: media/<file> or a team-made file. */
+export function isOrganizablePath(rel: string) {
+  return isLibraryPath(rel) || isTeamMediaPath(rel);
+}
+
 export function cleanTags(tags: string[]) {
   return [...new Set(tags.map((t) => t.trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-")).filter(Boolean))].slice(0, 20);
 }
 
-/** Every file in the media library with its organization, newest first. */
-export function listLibrary(businessId: string): LibraryItem[] {
-  const dir = path.join(dataDir(), "media");
+/** Library paths in Trash (an assets row with deleted_at): their files stay on disk but are hidden. */
+export function trashedPaths(businessId?: string) {
+  return new Set(
+    db
+      .select({ path: schema.assets.path })
+      .from(schema.assets)
+      .where(and(isNotNull(schema.assets.deletedAt), businessId ? eq(schema.assets.businessId, businessId) : undefined))
+      .all()
+      .map((r) => r.path),
+  );
+}
+
+/** Files directly in one folder-relative directory, skipping dotfiles and (when asked) non-media. */
+function filesIn(rel: string, mediaOnly: boolean) {
+  const dir = path.join(dataDir(), rel);
   if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && !d.name.startsWith(".") && (!mediaOnly || mediaKind(d.name) !== "file"))
+    .map((d) => ({ rel: `${rel}/${d.name}`, name: d.name, abs: path.join(dir, d.name) }));
+}
+
+/**
+ * Every file in the media library with its organization, newest first. Files in Trash are
+ * left out. With `team`, also the images and videos teammates made (work/images/,
+ * work/videos/), marked source "team"; other callers keep the plain media/ library.
+ */
+export function listLibrary(businessId: string, { team = false }: { team?: boolean } = {}): LibraryItem[] {
+  const files = [...filesIn("media", false), ...(team ? TEAM_MEDIA_DIRS.flatMap((d) => filesIn(d, true)) : [])];
+  if (!files.length) return [];
   const rows = new Map(
     db
       .select()
@@ -47,17 +98,16 @@ export function listLibrary(businessId: string): LibraryItem[] {
       .all()
       .map((r) => [r.path, r]),
   );
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isFile() && !d.name.startsWith("."))
-    .map((d) => {
-      const rel = `media/${d.name}`;
-      const st = fs.statSync(path.join(dir, d.name));
-      const r = rows.get(rel);
+  return files
+    .filter((f) => !rows.get(f.rel)?.deletedAt)
+    .map((f) => {
+      const st = fs.statSync(f.abs);
+      const r = rows.get(f.rel);
+      const byTeam = f.rel.startsWith("work/") || !!r?.createdBy.startsWith("teammate:");
       return {
-        path: rel,
-        name: d.name,
-        kind: mediaKind(d.name),
+        path: f.rel,
+        name: f.name,
+        kind: mediaKind(f.name),
         bytes: st.size,
         mtime: st.mtimeMs,
         title: r?.title ?? "",
@@ -65,17 +115,24 @@ export function listLibrary(businessId: string): LibraryItem[] {
         tags: r?.tags ?? [],
         album: r?.album ?? null,
         starred: r?.starred ?? false,
+        source: byTeam ? ("team" as const) : ("owner" as const),
+        createdBy: r?.createdBy ?? null,
       };
     })
-    .sort((a, b) => b.mtime - a.mtime);
+    .sort((x, y) => y.mtime - x.mtime);
 }
 
 export type AssetPatch = Partial<Pick<Asset, "title" | "note" | "tags" | "album" | "starred">>;
 
-/** Change how files are organized (creates their rows as needed). Only files that exist. */
-export function organize(businessId: string, paths: string[], patch: AssetPatch, addTags: string[] = []) {
+/**
+ * Change how files are organized (creates their rows as needed). Only files that exist:
+ * media/ files and the team's work/images/, work/videos/ files. With `by` ("owner" or
+ * "teammate:<id>") the change is stamped as theirs (updated_by) and a snapshot goes into
+ * object_history; without it nothing is attributed (older callers).
+ */
+export function organize(businessId: string, paths: string[], patch: AssetPatch, addTags: string[] = [], by?: string) {
   const dir = dataDir();
-  const valid = paths.filter((p) => isLibraryPath(p) && fs.existsSync(path.join(dir, p)));
+  const valid = [...new Set(paths)].filter((p) => isOrganizablePath(p) && fs.existsSync(path.join(dir, p)));
   if (!valid.length) return 0;
   const existing = new Map(
     db
@@ -86,27 +143,57 @@ export function organize(businessId: string, paths: string[], patch: AssetPatch,
       .map((r) => [r.path, r]),
   );
   const clean: AssetPatch = { ...patch };
+  for (const k of Object.keys(clean) as (keyof AssetPatch)[]) if (clean[k] === undefined) delete clean[k];
   if (clean.tags) clean.tags = cleanTags(clean.tags);
   if (clean.album !== undefined) clean.album = clean.album?.trim() || null;
   if (clean.title !== undefined) clean.title = clean.title.trim().slice(0, 200);
   if (clean.note !== undefined) clean.note = clean.note.trim().slice(0, 4000);
+  const stamp = by ? { updatedBy: by } : {};
   db.transaction((tx) => {
     for (const p of valid) {
       const cur = existing.get(p);
       const tags = cleanTags([...(clean.tags ?? cur?.tags ?? []), ...addTags]);
-      if (cur) tx.update(schema.assets).set({ ...clean, tags }).where(eq(schema.assets.path, p)).run();
-      else tx.insert(schema.assets).values({ path: p, businessId, ...clean, tags }).run();
+      const row = cur
+        ? tx.update(schema.assets).set({ ...clean, tags, ...stamp }).where(eq(schema.assets.path, p)).returning().get()
+        : tx
+            .insert(schema.assets)
+            // A first labels row doesn't make the file theirs: an upload in media/ stays the owner's.
+            .values({ path: p, businessId, ...clean, tags, ...(by ? { createdBy: isTeamMediaPath(p) ? by : "owner", updatedBy: by } : {}) })
+            .returning()
+            .get();
+      // Labels are an update even on a file's first row, so Undo clears them instead of trashing the file.
+      if (by && row && organizationChanged(cur, row)) recordHistory({ businessId, type: "asset", id: p, snapshot: row, before: cur ?? NO_LABELS, action: "update", by });
     }
   });
   return valid.length;
 }
 
-/** Delete files from the library for good (and their organization). */
-export function deleteFromLibrary(businessId: string, paths: string[]) {
+/** Whether organizing changed anything worth a history entry. */
+function organizationChanged(before: Asset | undefined, after: Asset) {
+  if (!before) return true;
+  const pick = (r: Asset) => JSON.stringify([r.title, r.note, r.tags, r.album, r.starred]);
+  return pick(before) !== pick(after);
+}
+
+/**
+ * Move files to Trash (src/lib/trash.ts): they stay on disk, hidden from the library and
+ * list_media, until restored or purged. Returns how many were moved.
+ */
+export function deleteFromLibrary(businessId: string, paths: string[], by = "owner") {
+  let n = 0;
+  for (const p of paths) {
+    if (!isOrganizablePath(p) || !fs.existsSync(path.join(dataDir(), p))) continue;
+    if (softDelete(businessId, "asset", p, by)) n++;
+  }
+  return n;
+}
+
+/** Delete files from the library for good (and their organization). Trash's purge uses this. */
+export function purgeFromLibrary(businessId: string, paths: string[]) {
   const dir = dataDir();
   let n = 0;
   for (const p of paths) {
-    if (!isLibraryPath(p)) continue;
+    if (!isOrganizablePath(p)) continue;
     fs.rmSync(path.join(dir, p), { force: true });
     db.delete(schema.assets).where(and(eq(schema.assets.businessId, businessId), eq(schema.assets.path, p))).run();
     n++;
@@ -130,9 +217,10 @@ export async function findSameFile(abs: string, except?: string) {
   const bytes = fs.statSync(abs).size;
   const dir = path.join(dataDir(), "media");
   if (!bytes || !fs.existsSync(dir)) return null;
+  const trashed = trashedPaths();
   const same = fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isFile() && !d.name.startsWith(".") && `media/${d.name}` !== except)
+    .filter((d) => d.isFile() && !d.name.startsWith(".") && `media/${d.name}` !== except && !trashed.has(`media/${d.name}`))
     .filter((d) => fs.statSync(path.join(dir, d.name)).size === bytes);
   if (!same.length) return null;
   const hash = await hashFile(abs);
@@ -240,7 +328,7 @@ export async function mergeDuplicates(businessId: string, keep: string, copies: 
       for (const pg of pages) tx.update(schema.contextPages).set({ blocks: swapPath(pg.blocks, from, keep) }).where(eq(schema.contextPages.id, pg.id)).run();
     }
   });
-  return deleteFromLibrary(businessId, gone);
+  return purgeFromLibrary(businessId, gone);
 }
 
 /** Organization for some files, for teammates' list_media. */

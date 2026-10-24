@@ -354,7 +354,7 @@ function TreeBody({ businessId, pages: serverPages, shortcuts = false }: { busin
   const views = [
     { href: base, label: t("context.home.crumb"), icon: LayoutGrid, active: pathname === base && !params.get("page") },
     { href: `${base}/readers`, label: t("context.tab.readers"), icon: Eye, active: pathname.startsWith(`${base}/readers`) },
-    { href: `${base}/people`, label: t("context.tab.people"), icon: Users, active: pathname.startsWith(`${base}/people`) },
+    { href: `/b/${businessId}/contacts`, label: t("context.tab.people"), icon: Users, active: false },
     { href: `${base}/organize`, label: t("context.tab.organize"), icon: Sparkles, active: pathname.startsWith(`${base}/organize`) },
   ];
   const [filter, setFilter] = useState("");

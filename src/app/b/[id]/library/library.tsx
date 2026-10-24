@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   AudioLines,
+  Bookmark,
+  BookmarkPlus,
+  Bot,
   Clapperboard,
   Copy,
   Download,
@@ -13,7 +16,9 @@ import {
   FolderIcon,
   ImageIcon,
   LayoutGrid,
+  ListChecks,
   MusicIcon,
+  Pencil,
   StarIcon,
   Tag,
   Trash2,
@@ -26,9 +31,10 @@ import { useT, useTn } from "@/components/i18n";
 import { Button, cn, EmptyState, IconButton, Input, LineTabs, Textarea } from "@/components/kit";
 import { Gallery, GalleryTile } from "@/components/data-table";
 import { thumbUrl } from "@/lib/file-urls";
-import { useShortcut } from "@/components/shortcuts";
+import { isTypingTarget, useShortcut } from "@/components/shortcuts";
 import { useGrowingList } from "@/components/use-growing-list";
 import { SidePeek } from "@/components/side-peek";
+import { ObjectPanel } from "@/components/object-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -36,10 +42,24 @@ import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Sele
 import { Switch } from "@/components/ui/switch";
 import type { DuplicateGroup, LibraryItem } from "@/lib/assets";
 import type { MessageKey } from "@/lib/i18n";
+import { applyFilter, isEmptyFilter, mergeFilters, sameFilter, type LibraryFilter } from "@/lib/library-filter";
+import type { LibraryUsage } from "@/lib/library-search";
+import type { SmartAlbum } from "@/lib/library-views";
 import { MEDIA_ACCEPT, type MediaKind } from "@/lib/media-types";
-import { deleteAssets, findDuplicateAssets, organizeAssets, removeDuplicateAssets } from "./actions";
-import { PlanTask, type MateOption } from "./_components/plan-task";
-import { DeleteDialog, MoreMenu, PropRow, StudioShell } from "./_components/studio-shell";
+import {
+  assetUsage,
+  createSmartAlbum,
+  deleteAssets,
+  deleteSmartAlbum,
+  findDuplicateAssets,
+  organizeAssets,
+  removeDuplicateAssets,
+  searchAssets,
+  updateSmartAlbum,
+  type ViewResult,
+} from "./actions";
+import { PlanTask, type MateOption } from "@/components/plan-task";
+import { DeleteDialog, MoreMenu, PropRow, WorkspaceShell } from "@/components/workspace-ui";
 
 const KINDS: { key: MediaKind | "all"; label: MessageKey }[] = [
   { key: "all", label: "studio.lib.kind.all" },
@@ -51,6 +71,13 @@ const KINDS: { key: MediaKind | "all"; label: MessageKey }[] = [
 const KIND_ICON = { image: ImageIcon, video: VideoIcon, audio: MusicIcon, file: FileIcon };
 const NONE = "__none";
 const NEW = "__new";
+
+const VIEW_ERRORS: Record<Extract<ViewResult, { error: string }>["error"], MessageKey> = {
+  name: "library.smartErr.name",
+  empty: "library.smartErr.empty",
+  tooMany: "library.smartErr.tooMany",
+  notFound: "library.smartErr.notFound",
+};
 
 export const fileUrl = (businessId: string, rel: string) => `/api/b/${businessId}/files/${rel.split("/").map(encodeURIComponent).join("/")}`;
 
@@ -68,8 +95,47 @@ function syncPeekParam(paths: string[]) {
   window.history.replaceState(window.history.state, "", url);
 }
 
-/** The media library, organized by the owner: albums, tags, notes and stars. */
-export function Library({ businessId, items, teammates }: { businessId: string; items: LibraryItem[]; teammates: MateOption[] }) {
+type UploadResult = { ok: boolean; statusText: string; json: { path?: string; error?: string; existing?: boolean } };
+
+/** POST one file to the media route (the same one chat uses), reporting how much has gone up. */
+function sendFile(url: string, file: File, onProgress: (fraction: number) => void) {
+  return new Promise<UploadResult>((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let json: UploadResult["json"] = {};
+      try {
+        json = JSON.parse(xhr.responseText) as UploadResult["json"];
+      } catch {}
+      resolve({ ok: xhr.status >= 200 && xhr.status < 300, statusText: xhr.statusText, json });
+    };
+    xhr.onerror = () => resolve({ ok: false, statusText: "Network error", json: {} });
+    xhr.send(file);
+  });
+}
+
+/** What the sidebar shows: everything, a built-in pick, an album or a smart album. */
+type Scope = { type: "all" } | { type: "starred" } | { type: "team" } | { type: "dupes" } | { type: "album"; name: string } | { type: "view"; id: string };
+
+function scopeFilter(scope: Scope, views: SmartAlbum[]): LibraryFilter {
+  switch (scope.type) {
+    case "starred":
+      return { starred: true };
+    case "team":
+      return { source: "team" };
+    case "album":
+      return { album: scope.name };
+    case "view":
+      return views.find((v) => v.id === scope.id)?.filter ?? {};
+    default:
+      return {};
+  }
+}
+
+/** The media library, organized by the owner: albums, smart albums, tags, notes and stars, plus what the team made. */
+export function Library({ businessId, items, views, teammates }: { businessId: string; items: LibraryItem[]; views: SmartAlbum[]; teammates: MateOption[] }) {
   const t = useT();
   const tn = useTn();
   const router = useRouter();
@@ -77,23 +143,28 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   const params = useSearchParams();
   const kindParam = params.get("kind");
   const kind: MediaKind | "all" = KINDS.some((k) => k.key === kindParam) ? (kindParam as MediaKind) : "all";
-  const [album, setAlbum] = useState<string | null>(null);
+  const [scopeState, setScope] = useState<Scope>({ type: "all" });
+  // A smart album deleted elsewhere falls back to everything.
+  const scope: Scope = scopeState.type === "view" && !views.some((v) => v.id === scopeState.id) ? { type: "all" } : scopeState;
   const [tag, setTag] = useState<string | null>(null);
-  const [starredOnly, setStarredOnly] = useState(false);
   const [q, setQ] = useState("");
+  const [rank, setRank] = useState<{ q: string; paths: string[] } | null>(null);
   const [selected, setSelectedState] = useState<string[]>(() => {
     const f = params.get("f");
     return f && items.some((i) => i.path === f) ? [f] : [];
   });
-  const [uploading, setUploading] = useState<{ done: number; total: number; error?: string } | null>(null);
+  const anchor = useRef<string | null>(null);
+  const [uploading, setUploading] = useState<{ done: number; total: number; pct: number; error?: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState<string[] | null>(null);
   const [, startDelete] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [dupView, setDupView] = useState(false);
   const [dupes, setDupes] = useState<DuplicateGroup[] | null>(null);
   const [removing, setRemoving] = useState<DuplicateGroup[] | null>(null);
   const [removePending, startRemove] = useTransition();
+  const [deletingView, setDeletingView] = useState<SmartAlbum | null>(null);
+  const dupView = scope.type === "dupes";
+  const activeView = scope.type === "view" ? views.find((v) => v.id === scope.id) ?? null : null;
 
   // Only files that share a size get read, so checking on every change stays cheap.
   useEffect(() => {
@@ -104,6 +175,19 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     };
   }, [businessId, items]);
   const dupCount = dupes?.reduce((n, g) => n + g.copies.length, 0) ?? 0;
+
+  // Full-text search (titles, notes, tags, albums, paths) plus file names, ranked on the server.
+  useEffect(() => {
+    const s = q.trim();
+    if (!s) return;
+    let live = true;
+    const timer = setTimeout(() => void searchAssets(businessId, s).then((paths) => live && setRank({ q: s, paths })), 150);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [businessId, q, items]);
+  const ranking = rank && rank.q === q.trim() ? rank.paths : null;
 
   const setSelected = (next: string[] | ((s: string[]) => string[])) =>
     setSelectedState((s) => {
@@ -119,57 +203,90 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   }, [items]);
   const tags = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
   const starredCount = items.filter((i) => i.starred).length;
+  const teamCount = items.filter((i) => i.source === "team").length;
 
-  const shown = items.filter((i) => {
-    if (kind !== "all" && i.kind !== kind) return false;
-    if (album && i.album !== album) return false;
-    if (tag && !i.tags.includes(tag)) return false;
-    if (starredOnly && !i.starred) return false;
-    const s = q.trim().toLowerCase();
-    if (s && ![i.name, i.title, i.note, i.album ?? "", ...i.tags].some((x) => x.toLowerCase().includes(s))) return false;
-    return true;
-  });
+  const base = scopeFilter(scope, views);
+  const toolbar: LibraryFilter = { kind: kind === "all" ? undefined : kind, q, tags: tag ? [tag] : undefined };
+  const shown = applyFilter(applyFilter(items, base), toolbar, ranking);
+  const viewCounts = useMemo(() => new Map(views.map((v) => [v.id, applyFilter(items, v.filter).length])), [items, views]);
+  // What "Save view" would save: the sidebar pick narrowed by the toolbar.
+  const current = mergeFilters(base, toolbar);
+  const canSave = !dupView && !isEmptyFilter(current) && !(activeView && sameFilter(activeView.filter, current));
+
   // Thousands of files: tiles render a slice at a time as you scroll.
-  const { visible, sentinel } = useGrowingList(shown, [kind, album, tag, starredOnly, q].join("\0"));
+  const { visible, sentinel } = useGrowingList(shown, [JSON.stringify(scope), kind, tag, q, ranking?.length ?? -1].join("\0"));
   const picked = items.filter((i) => selected.includes(i.path));
   const peekItem = picked.length === 1 ? picked[0] : null;
+  const uploadAlbum = scope.type === "album" ? scope.name : (activeView?.filter.album ?? null);
 
   const upload = async (files: FileList | File[]) => {
     const list = [...files];
     if (!list.length) return;
-    setUploading({ done: 0, total: list.length });
+    const total = list.reduce((n, f) => n + f.size, 0) || 1;
+    let sent = 0;
+    setUploading({ done: 0, total: list.length, pct: 0 });
     const added: string[] = [];
     let already = 0;
     for (const [n, f] of list.entries()) {
-      const res = await fetch(`/api/b/${businessId}/media`, { method: "POST", headers: { "X-File-Name": encodeURIComponent(f.name) }, body: f });
-      const j = (await res.json().catch(() => ({}))) as { path?: string; error?: string; existing?: boolean };
-      if (!res.ok || !j.path) {
-        setUploading({ done: n, total: list.length, error: `${f.name}: ${j.error ?? res.statusText}` });
+      const res = await sendFile(`/api/b/${businessId}/media`, f, (frac) =>
+        setUploading({ done: n, total: list.length, pct: Math.min(100, Math.round(((sent + frac * f.size) / total) * 100)) }),
+      );
+      if (!res.ok || !res.json.path) {
+        setUploading({ done: n, total: list.length, pct: 0, error: `${f.name}: ${res.json.error ?? res.statusText}` });
         router.refresh();
         return;
       }
-      if (j.existing) already++;
-      added.push(j.path);
-      setUploading({ done: n + 1, total: list.length });
+      sent += f.size;
+      if (res.json.existing) already++;
+      added.push(res.json.path);
+      setUploading({ done: n + 1, total: list.length, pct: Math.round((sent / total) * 100) });
     }
     // New uploads land in the album you're looking at.
-    if (album) await organizeAssets(businessId, added, { album });
+    if (uploadAlbum) await organizeAssets(businessId, added, { album: uploadAlbum });
     setUploading(null);
     setSelected(added);
+    anchor.current = added.at(-1) ?? null;
     toast(already ? tn("studio.lib.alreadyHere", already) : tn("studio.lib.uploaded", added.length));
     router.refresh();
   };
 
-  const click = (path: string, e: React.MouseEvent) => {
-    if (e.metaKey || e.ctrlKey || e.shiftKey) setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
+  /** Shift: everything between the last picked file and this one. ⌘/Ctrl: add or drop one. */
+  const pick = (path: string, { shift = false, add = false }: { shift?: boolean; add?: boolean }) => {
+    const from = anchor.current ? shown.findIndex((i) => i.path === anchor.current) : -1;
+    const to = shown.findIndex((i) => i.path === path);
+    if (shift && from >= 0 && to >= 0) {
+      const range = shown.slice(Math.min(from, to), Math.max(from, to) + 1).map((i) => i.path);
+      setSelected((s) => [...new Set([...s, ...range])]);
+      return;
+    }
+    anchor.current = path;
+    if (add || shift) setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
     else setSelected((s) => (s.length === 1 && s[0] === path ? [] : [path]));
   };
-  const toggle = (path: string) => setSelected((s) => (s.includes(path) ? s.filter((x) => x !== path) : [...s, path]));
+  const selectAll = () => {
+    setSelected(shown.map((i) => i.path));
+    anchor.current = shown[0]?.path ?? null;
+  };
 
-  const showAll = () => (setAlbum(null), setStarredOnly(false), setDupView(false));
-  const showStarred = () => (setStarredOnly(!starredOnly), setAlbum(null), setDupView(false));
-  const showAlbum = (a: string) => (setAlbum(album === a ? null : a), setStarredOnly(false), setDupView(false));
-  const showDupes = () => (setDupView(!dupView), setAlbum(null), setStarredOnly(false), setSelected([]));
+  // ⌘/Ctrl+A picks everything shown (not while typing); Delete/Backspace sends the pick to Trash.
+  useEffect(() => {
+    if (dupView) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "a" || isTypingTarget(e.target)) return;
+      if (document.querySelector("[role=dialog],[role=alertdialog],[role=menu]")) return;
+      e.preventDefault();
+      selectAll();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  useShortcut(["delete", "backspace"], () => setDeleting(selected), { enabled: selected.length > 0 && !deleting && !dupView });
+
+  const show = (next: Scope) => {
+    setScope((cur) => (JSON.stringify(cur) === JSON.stringify(next) && next.type !== "all" ? { type: "all" } : next));
+    if (next.type === "dupes") setSelected([]);
+  };
+  const isScope = (s: Scope) => JSON.stringify(scope) === JSON.stringify(s);
 
   const kindHref = (k: string) => {
     const next = new URLSearchParams(params.toString());
@@ -201,6 +318,39 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
     });
   };
 
+  const confirmDeleteView = () => {
+    const v = deletingView;
+    setDeletingView(null);
+    if (!v) return;
+    startDelete(async () => {
+      await deleteSmartAlbum(businessId, v.id);
+      if (scope.type === "view" && scope.id === v.id) setScope({ type: "all" });
+      toast(t("library.smartDeleted"));
+    });
+  };
+
+  /** Save the current filters as a new smart album (or into the open one), then open it. */
+  const saveView = async (name: string | null) => {
+    const res = activeView && name === null ? await updateSmartAlbum(businessId, activeView.id, { filter: current }) : await createSmartAlbum(businessId, name ?? "", current);
+    if ("error" in res) {
+      toast.error(t(VIEW_ERRORS[res.error]));
+      return false;
+    }
+    toast(name === null ? t("library.smartUpdated") : t("library.smartSaved"));
+    // The album holds the toolbar's filters now: clear them so they aren't applied twice.
+    setScope({ type: "view", id: res.id });
+    setQ("");
+    setTag(null);
+    if (kind !== "all") router.replace(kindHref("all"));
+    return true;
+  };
+
+  const renameView = async (v: SmartAlbum, name: string) => {
+    const res = await updateSmartAlbum(businessId, v.id, { name });
+    if ("error" in res) toast.error(t(VIEW_ERRORS[res.error]));
+    return !("error" in res);
+  };
+
   const peek = (
     <SidePeek
       open={!!peekItem}
@@ -228,12 +378,13 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   );
 
   return (
-    <StudioShell peek={peek}>
+    <WorkspaceShell title={t("nav.library")} peek={peek}>
       <div
         className="grid gap-6 @3xl:grid-cols-[220px_minmax(0,1fr)]"
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes("Files")) {
             e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
             setDragging(true);
           }
         }}
@@ -241,9 +392,9 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
         }}
         onDrop={(e) => {
+          setDragging(false);
           if (!e.dataTransfer.files.length) return;
           e.preventDefault();
-          setDragging(false);
           void upload(e.dataTransfer.files);
         }}
       >
@@ -252,23 +403,43 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
           <Button size="sm" className="@3xl:w-full" onClick={() => fileInput.current?.click()} disabled={!!uploading && !uploading.error} loading={!!uploading && !uploading.error}>
             <UploadIcon /> {t("studio.lib.upload")}
           </Button>
-          <input ref={fileInput} type="file" multiple accept={MEDIA_ACCEPT} className="hidden" onChange={(e) => e.target.files && upload(e.target.files)} />
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            accept={MEDIA_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void upload(e.target.files);
+              e.target.value = "";
+            }}
+          />
 
           {/* Phone: one scrolling row of chips */}
           <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] @3xl:hidden">
-            <Chip active={!album && !starredOnly && !dupView} onClick={showAll}>
+            <Chip active={isScope({ type: "all" })} onClick={() => show({ type: "all" })}>
               {t("studio.lib.everything")}
             </Chip>
-            <Chip active={starredOnly} onClick={showStarred}>
+            <Chip active={isScope({ type: "starred" })} onClick={() => show({ type: "starred" })}>
               <StarIcon className="size-3.5" /> {t("studio.lib.starred")}
             </Chip>
+            {teamCount > 0 && (
+              <Chip active={isScope({ type: "team" })} onClick={() => show({ type: "team" })}>
+                <Bot className="size-3.5" /> {t("library.fromTeam")}
+              </Chip>
+            )}
             {(dupCount > 0 || dupView) && (
-              <Chip active={dupView} onClick={showDupes}>
+              <Chip active={dupView} onClick={() => show({ type: "dupes" })}>
                 <Copy className="size-3.5" /> {t("studio.lib.duplicates")} {dupCount > 0 && <span className="tabular-nums">{dupCount}</span>}
               </Chip>
             )}
+            {views.map((v) => (
+              <Chip key={v.id} active={isScope({ type: "view", id: v.id })} onClick={() => show({ type: "view", id: v.id })}>
+                <Bookmark className="size-3.5" /> {v.name}
+              </Chip>
+            ))}
             {albums.map(([a]) => (
-              <Chip key={a} active={album === a} onClick={() => showAlbum(a)}>
+              <Chip key={a} active={isScope({ type: "album", name: a })} onClick={() => show({ type: "album", name: a })}>
                 <FolderIcon className="size-3.5" /> {a}
               </Chip>
             ))}
@@ -281,13 +452,27 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
 
           {/* Desktop: a Notion-like list */}
           <nav aria-label={t("studio.lib.albums")} className="hidden space-y-0.5 @3xl:block">
-            <SideItem active={!album && !starredOnly && !dupView} onClick={showAll} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
-            <SideItem active={starredOnly} onClick={showStarred} icon={<StarIcon />} label={t("studio.lib.starred")} count={starredCount} />
-            <SideItem active={dupView} onClick={showDupes} icon={<Copy />} label={t("studio.lib.duplicates")} count={dupes ? dupCount : undefined} />
+            <SideItem active={isScope({ type: "all" })} onClick={() => show({ type: "all" })} icon={<LayoutGrid />} label={t("studio.lib.everything")} count={items.length} />
+            <SideItem active={isScope({ type: "starred" })} onClick={() => show({ type: "starred" })} icon={<StarIcon />} label={t("studio.lib.starred")} count={starredCount} />
+            <SideItem active={isScope({ type: "team" })} onClick={() => show({ type: "team" })} icon={<Bot />} label={t("library.fromTeam")} count={teamCount} />
+            <SideItem active={dupView} onClick={() => show({ type: "dupes" })} icon={<Copy />} label={t("studio.lib.duplicates")} count={dupes ? dupCount : undefined} />
+            <div className="px-2 pt-4 pb-1 text-xs font-medium text-tertiary">{t("library.smart")}</div>
+            {views.length === 0 && <p className="px-2 text-xs text-tertiary">{t("library.smartNone")}</p>}
+            {views.map((v) => (
+              <SmartAlbumItem
+                key={v.id}
+                view={v}
+                active={isScope({ type: "view", id: v.id })}
+                count={viewCounts.get(v.id)}
+                onOpen={() => show({ type: "view", id: v.id })}
+                onRename={(name) => renameView(v, name)}
+                onDelete={() => setDeletingView(v)}
+              />
+            ))}
             <div className="px-2 pt-4 pb-1 text-xs font-medium text-tertiary">{t("studio.lib.albums")}</div>
             {albums.length === 0 && <p className="px-2 text-xs text-tertiary">{t("studio.lib.noAlbums")}</p>}
             {albums.map(([a, n]) => (
-              <SideItem key={a} active={album === a} onClick={() => showAlbum(a)} icon={<FolderIcon />} label={a} count={n} />
+              <SideItem key={a} active={isScope({ type: "album", name: a })} onClick={() => show({ type: "album", name: a })} icon={<FolderIcon />} label={a} count={n} />
             ))}
             {tags.length > 0 && (
               <>
@@ -324,84 +509,116 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
             onRemove={setRemoving}
           />
         ) : (
-        <div className="min-w-0">
-          <LineTabs
-            label={t("studio.lib.kinds")}
-            items={KINDS.map((k) => ({ href: kindHref(k.key), label: t(k.label), active: kind === k.key }))}
-            trailing={
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder={t("studio.lib.search")}
-                aria-label={t("studio.lib.search")}
-                className="hidden h-7 w-56 text-[13px] @xl:block"
-              />
-            }
-          />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.lib.search")} aria-label={t("studio.lib.search")} className="mt-3 h-8 @xl:hidden" />
-          {uploading && (
-            <p role="status" className={cn("mt-3 text-xs", uploading.error ? "text-destructive" : "text-muted-foreground")}>
-              {uploading.error ?? t("studio.lib.uploading", { n: uploading.done + 1, total: uploading.total })}
-            </p>
-          )}
-          <div
-            className={cn(
-              "mt-4 rounded-lg outline-2 outline-offset-4 outline-transparent transition-[outline-color] duration-100",
-              dragging && "outline-dashed outline-ring",
-            )}
-          >
-            {items.length === 0 ? (
-              <EmptyState
-                icon={<UploadIcon />}
-                title={t("studio.lib.emptyTitle")}
-                body={t("studio.lib.emptyBody")}
-                action={
-                  <Button size="sm" variant="secondary" onClick={() => fileInput.current?.click()}>
-                    <UploadIcon /> {t("studio.lib.upload")}
+          <div className="min-w-0">
+            <LineTabs
+              label={t("studio.lib.kinds")}
+              items={KINDS.map((k) => ({ href: kindHref(k.key), label: t(k.label), active: kind === k.key }))}
+              trailing={
+                <Input
+                  type="search"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder={t("studio.lib.search")}
+                  aria-label={t("studio.lib.search")}
+                  className="hidden h-7 w-56 text-[13px] @xl:block"
+                />
+              }
+            />
+            <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("studio.lib.search")} aria-label={t("studio.lib.search")} className="mt-3 h-8 @xl:hidden" />
+            {items.length > 0 && (
+              <div className="mt-3 flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-xs text-tertiary tabular-nums">{tn("library.count", shown.length)}</span>
+                {shown.length > 0 && (
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={selectAll}>
+                    <ListChecks /> {t("library.selectAll")}
                   </Button>
-                }
-              />
-            ) : shown.length === 0 ? (
-              <EmptyState compact icon={<LayoutGrid />} title={t("studio.lib.noMatch")} body={t("studio.lib.noMatchBody")} />
-            ) : (
-              <Gallery className="grid-cols-2 gap-3 @xl:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] @xl:gap-4">
-                {visible.map((i, n) => {
-                  const Icon = KIND_ICON[i.kind];
-                  const on = selected.includes(i.path);
-                  return (
-                    <GalleryTile
-                      key={i.path}
-                      selected={on}
-                      onClick={(e) => click(i.path, e)}
-                      caption={<span title={i.title || i.name}>{i.title || i.name}</span>}
-                      meta={
-                        <span className="flex min-w-0 items-center gap-1" title={i.note || undefined}>
-                          <Icon className="size-3 shrink-0" />
-                          <span className="truncate">{[i.album, ...i.tags.map((tg) => `#${tg}`)].filter(Boolean).join(" · ") || size(i.bytes)}</span>
-                        </span>
-                      }
-                      thumb={<Thumb businessId={businessId} item={i} eager={n < 30} />}
-                      topLeft={
-                        <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
-                          <Checkbox checked={on} onCheckedChange={() => toggle(i.path)} aria-label={t("studio.lib.select", { name: i.title || i.name })} />
-                        </span>
-                      }
-                      badge={
-                        i.starred ? (
-                          <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
-                            <StarIcon className="size-3.5 fill-tag-yellow-bg text-warning" />
-                          </span>
-                        ) : undefined
-                      }
-                    />
-                  );
-                })}
-              </Gallery>
+                )}
+                <span className="flex-1" />
+                {canSave && <SaveViewButton activeView={activeView} onSave={saveView} />}
+              </div>
             )}
-            {sentinel}
+            {uploading && (
+              <div role="status" className="mt-3 space-y-1.5">
+                <p className={cn("text-xs", uploading.error ? "text-destructive" : "text-muted-foreground")}>
+                  {uploading.error ?? t("library.uploadingPct", { n: Math.min(uploading.done + 1, uploading.total), total: uploading.total, pct: uploading.pct })}
+                </p>
+                {!uploading.error && (
+                  <div className="h-1 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${uploading.pct}%` }} />
+                  </div>
+                )}
+              </div>
+            )}
+            <div
+              className={cn(
+                "relative mt-4 rounded-lg outline-2 outline-offset-4 outline-transparent transition-[outline-color] duration-100",
+                dragging && "outline-dashed outline-ring",
+              )}
+            >
+              {dragging && (
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center">
+                  <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background shadow-menu">
+                    <UploadIcon className="size-3.5" /> {uploadAlbum ? t("library.dropInto", { album: uploadAlbum }) : t("library.dropHere")}
+                  </span>
+                </div>
+              )}
+              {items.length === 0 ? (
+                <EmptyState
+                  icon={<UploadIcon />}
+                  title={t("studio.lib.emptyTitle")}
+                  body={t("studio.lib.emptyBody")}
+                  action={
+                    <Button size="sm" variant="secondary" onClick={() => fileInput.current?.click()}>
+                      <UploadIcon /> {t("studio.lib.upload")}
+                    </Button>
+                  }
+                />
+              ) : shown.length === 0 ? (
+                <EmptyState compact icon={<LayoutGrid />} title={t("studio.lib.noMatch")} body={t("studio.lib.noMatchBody")} />
+              ) : (
+                <Gallery className="grid-cols-2 gap-3 @xl:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] @xl:gap-4">
+                  {visible.map((i, n) => {
+                    const Icon = KIND_ICON[i.kind];
+                    const on = selected.includes(i.path);
+                    return (
+                      <GalleryTile
+                        key={i.path}
+                        selected={on}
+                        onClick={(e) => pick(i.path, { shift: e.shiftKey, add: e.metaKey || e.ctrlKey })}
+                        caption={<span title={i.title || i.name}>{i.title || i.name}</span>}
+                        meta={
+                          <span className="flex min-w-0 items-center gap-1" title={i.note || undefined}>
+                            {i.source === "team" ? <Bot className="size-3 shrink-0" aria-label={t("library.madeByTeam")} /> : <Icon className="size-3 shrink-0" />}
+                            <span className="truncate">{[i.album, ...i.tags.map((tg) => `#${tg}`)].filter(Boolean).join(" · ") || size(i.bytes)}</span>
+                          </span>
+                        }
+                        thumb={<Thumb businessId={businessId} item={i} eager={n < 30} />}
+                        topLeft={
+                          <span className="flex size-6 items-center justify-center rounded-md bg-background/90 shadow-xs">
+                            <Checkbox
+                              checked={on}
+                              onClick={(e) => pick(i.path, { shift: e.shiftKey, add: true })}
+                              aria-label={t("studio.lib.select", { name: i.title || i.name })}
+                            />
+                          </span>
+                        }
+                        badge={
+                          i.starred || i.source === "team" ? (
+                            <span className="flex h-6 items-center gap-1 rounded-md bg-background/90 px-1.5 text-[11px] font-medium text-muted-foreground shadow-xs">
+                              {i.source === "team" && t("library.teamBadge")}
+                              {i.starred && <StarIcon className="size-3.5 fill-tag-yellow-bg text-warning" />}
+                            </span>
+                          ) : undefined
+                        }
+                      />
+                    );
+                  })}
+                </Gallery>
+              )}
+              {sentinel}
+            </div>
+            {items.length > 0 && <p className="mt-6 text-xs text-tertiary">{t("library.tip")}</p>}
           </div>
-          {items.length > 0 && <p className="mt-6 text-xs text-tertiary">{t("studio.lib.tip")}</p>}
-        </div>
         )}
       </div>
 
@@ -435,7 +652,138 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
         body={t("studio.lib.deleteBody")}
         onConfirm={confirmDelete}
       />
-    </StudioShell>
+
+      <DeleteDialog
+        open={!!deletingView}
+        onOpenChange={(o) => !o && setDeletingView(null)}
+        title={t("library.smartDeleteTitle", { name: deletingView?.name ?? "" })}
+        body={t("library.smartDeleteBody")}
+        onConfirm={confirmDeleteView}
+      />
+    </WorkspaceShell>
+  );
+}
+
+/** "Save view": name the current filters as a smart album, or save them into the open one. */
+function SaveViewButton({ activeView, onSave }: { activeView: SmartAlbum | null; onSave: (name: string | null) => Promise<boolean> }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [pending, start] = useTransition();
+  return (
+    <div className="flex items-center gap-1">
+      {activeView && (
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={pending} onClick={() => start(async () => void (await onSave(null)))}>
+          <Bookmark /> {t("library.smartUpdate", { name: activeView.name })}
+        </Button>
+      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button size="sm" variant="secondary" className="h-7 px-2 text-xs" disabled={pending}>
+            <BookmarkPlus /> {t("library.smartSaveShort")}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-64">
+          <form
+            className="grid gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              start(async () => {
+                if (await onSave(name)) {
+                  setName("");
+                  setOpen(false);
+                }
+              });
+            }}
+          >
+            <span className="text-xs font-medium text-tertiary">{t("library.smartSave")}</span>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t("library.smartNamePlaceholder")}
+              aria-label={t("library.smartNameLabel")}
+              className="h-7 text-[13px]"
+            />
+            <Button size="sm" type="submit" loading={pending} disabled={pending || !name.trim()}>
+              {t("common.save")}
+            </Button>
+          </form>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/** A smart album in the sidebar: opens on click; rename inline or delete from its "…" menu. */
+function SmartAlbumItem({
+  view,
+  active,
+  count,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  view: SmartAlbum;
+  active: boolean;
+  count?: number;
+  onOpen: () => void;
+  onRename: (name: string) => Promise<boolean>;
+  onDelete: () => void;
+}) {
+  const t = useT();
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(view.name);
+  const [pending, start] = useTransition();
+  if (renaming)
+    return (
+      <form
+        className="px-1"
+        onSubmit={(e) => {
+          e.preventDefault();
+          start(async () => {
+            if (name.trim() === view.name || (await onRename(name))) setRenaming(false);
+          });
+        }}
+      >
+        <Input
+          autoFocus
+          value={name}
+          disabled={pending}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={(e) => e.currentTarget.form?.requestSubmit()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setName(view.name);
+              setRenaming(false);
+            }
+          }}
+          aria-label={t("library.smartNameLabel")}
+          className="h-7 text-[13px]"
+        />
+      </form>
+    );
+  return (
+    <div className="group/view relative">
+      <SideItem active={active} onClick={onOpen} icon={<Bookmark />} label={view.name} count={count} />
+      <div className="absolute top-0.5 right-1 opacity-0 transition-opacity duration-100 group-focus-within/view:opacity-100 group-hover/view:opacity-100 has-[[aria-expanded=true]]:opacity-100">
+        <MoreMenu label={t("library.smartActions")} size="icon-xs" className="bg-background">
+          <DropdownMenuItem
+            onSelect={() => {
+              setName(view.name);
+              setRenaming(true);
+            }}
+          >
+            <Pencil /> {t("library.smartRename")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2 /> {t("library.smartDelete")}
+          </DropdownMenuItem>
+        </MoreMenu>
+      </div>
+    </div>
   );
 }
 
@@ -649,6 +997,7 @@ function Inspector({ businessId, item, albums, teammates }: { businessId: string
         </div>
         <div className="text-xs text-tertiary">
           {size(item.bytes)} · {new Date(item.mtime).toLocaleDateString()}
+          {item.source === "team" && <> · {t("library.madeByTeam")}</>}
         </div>
       </div>
       <form
@@ -711,10 +1060,59 @@ function Inspector({ businessId, item, albums, teammates }: { businessId: string
           </Button>
         </div>
       )}
+      <UsedIn businessId={businessId} path={item.path} />
+      <ObjectPanel businessId={businessId} objectRef={{ type: "asset", id: item.path }} />
       <div className="border-t border-border pt-5">
         <PlanTask businessId={businessId} teammates={teammates} attachments={[item.path]} />
       </div>
     </div>
+  );
+}
+
+/** Docs, work and tasks that carry this file, and what links to it; each opens the item. */
+function UsedIn({ businessId, path }: { businessId: string; path: string }) {
+  const t = useT();
+  const [usage, setUsage] = useState<LibraryUsage | null>(null);
+  useEffect(() => {
+    let live = true;
+    void assetUsage(businessId, path).then((u) => live && setUsage(u));
+    return () => {
+      live = false;
+    };
+  }, [businessId, path]);
+  if (!usage) return null;
+  const groups: { label: MessageKey; refs: { type: string; id: string; title: string; href: string }[] }[] = [
+    { label: "library.usedInDocs", refs: usage.deliverables },
+    { label: "library.usedInTasks", refs: usage.tasks },
+    { label: "library.usedInLinks", refs: usage.links },
+  ];
+  const empty = groups.every((g) => !g.refs.length);
+  return (
+    <section className="border-t border-border pt-5" aria-label={t("library.usedIn")}>
+      <h3 className="mb-2 text-[13px] font-medium text-foreground">{t("library.usedIn")}</h3>
+      {empty ? (
+        <p className="text-xs text-tertiary">{t("library.usedInNone")}</p>
+      ) : (
+        <div className="space-y-3">
+          {groups
+            .filter((g) => g.refs.length)
+            .map((g) => (
+              <div key={g.label}>
+                <div className="mb-1 text-xs text-tertiary">{t(g.label)}</div>
+                <ul className="space-y-0.5">
+                  {g.refs.map((r) => (
+                    <li key={`${r.type}:${r.id}`}>
+                      <Link href={r.href} className="block truncate rounded-sm text-[13px] text-muted-foreground hover:text-foreground hover:underline">
+                        {r.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+        </div>
+      )}
+    </section>
   );
 }
 

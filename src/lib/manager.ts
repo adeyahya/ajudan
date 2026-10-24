@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Task } from "@/db/schema";
 import { describeDeliverable } from "@/lib/deliverables";
@@ -196,9 +196,12 @@ function describeResults(tasks: Task[]) {
     .select()
     .from(schema.deliverables)
     .where(
-      revised.length
-        ? or(inArray(schema.deliverables.taskId, tasks.map((c) => c.id)), inArray(schema.deliverables.id, revised))
-        : inArray(schema.deliverables.taskId, tasks.map((c) => c.id)),
+      and(
+        revised.length
+          ? or(inArray(schema.deliverables.taskId, tasks.map((c) => c.id)), inArray(schema.deliverables.id, revised))
+          : inArray(schema.deliverables.taskId, tasks.map((c) => c.id)),
+        isNull(schema.deliverables.deletedAt),
+      ),
     )
     .all();
   let budget = 12_000; // the whole block stays readable on the fast model

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ContextPage, ContextSuggestion } from "@/db/schema";
@@ -161,7 +161,7 @@ export function galleryAssets(businessId: string, library: LibraryItem[] = listL
   for (const d of db
     .select({ a: schema.deliverables.attachments })
     .from(schema.deliverables)
-    .where(and(eq(schema.deliverables.businessId, businessId), sql`json_array_length(${schema.deliverables.attachments}) > 0`))
+    .where(and(eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt), sql`json_array_length(${schema.deliverables.attachments}) > 0`))
     .all()) {
     for (const p of d.a) uses.set(p, (uses.get(p) ?? 0) + 1);
   }

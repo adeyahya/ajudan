@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Teammate } from "@/db/schema";
 import { nextRunOf } from "@/lib/onboarding/schedule";
@@ -83,7 +83,7 @@ export function scheduleContext(teammate: Pick<Teammate, "id" | "businessId">): 
   const deliverables = db
     .select({ title: schema.deliverables.title, kind: schema.deliverables.kind, status: schema.deliverables.status })
     .from(schema.deliverables)
-    .where(and(eq(schema.deliverables.teammateId, teammate.id), since ? gte(schema.deliverables.createdAt, since) : undefined))
+    .where(and(eq(schema.deliverables.teammateId, teammate.id), isNull(schema.deliverables.deletedAt), since ? gte(schema.deliverables.createdAt, since) : undefined))
     .orderBy(desc(schema.deliverables.createdAt))
     .limit(MAX_ITEMS + 1)
     .all();

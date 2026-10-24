@@ -130,7 +130,7 @@ function Card({ c, businessId, hidden, onMove, note }: { c: LensCard; businessId
   const { setNodeRef, listeners, attributes } = useDraggable({ id: c.id });
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} className={cn("group/card relative cursor-grab touch-none active:cursor-grabbing", hidden && "opacity-30")}>
-      <CardBody c={c} note={note} href={c.kind === "database" ? `/b/${businessId}/context/people` : `/b/${businessId}/context?page=${c.id}`} />
+      <CardBody c={c} note={note} href={c.kind === "database" ? `/b/${businessId}/contacts` : `/b/${businessId}/context?page=${c.id}`} />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <IconButton label={t("context.lens.moveTo", { title: c.title })} size="icon-xs" className="absolute top-2 right-2 opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100" onPointerDown={(e) => e.stopPropagation()}>

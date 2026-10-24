@@ -412,10 +412,12 @@ html[data-doc-focus] [data-focus-hide] {
 }
 /* Collapsible sidebar sections (state on <html data-sec-<name>="closed">). */
 html[data-sec-workspace="closed"] [data-sec-body="workspace"],
+html[data-sec-team="closed"] [data-sec-body="team"],
 html[data-sec-settings="closed"] [data-sec-body="settings"] {
   display: none;
 }
 html[data-sec-workspace="closed"] [data-sec-chevron="workspace"],
+html[data-sec-team="closed"] [data-sec-chevron="team"],
 html[data-sec-settings="closed"] [data-sec-chevron="settings"] {
   transform: rotate(-90deg);
   opacity: 1;

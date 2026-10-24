@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
@@ -37,6 +37,12 @@ import { speechAvailable, transcribe } from "@/lib/speech";
 import { renderVideo } from "./video";
 import { fileInside } from "./fs-guard";
 import { isPrivateHost } from "@/lib/net";
+import { canAgent } from "@/lib/agent-access";
+import { NO_LABELS, recordHistory } from "@/lib/object-history";
+import { CONTACT_TOOL_NAMES, contactTools } from "./contact-tools";
+import { canChange, canCreate, teammateBy } from "@/lib/workspace-access";
+import { deliverableCreator } from "@/lib/workspace-search";
+import { contactToChange, workspaceTools } from "./workspace-tools";
 
 export const BIZ_SERVER = "biz";
 
@@ -68,6 +74,15 @@ export const SAFE_BIZ_TOOLS = [
   "search_context",
   "read_page",
   "suggest_page_edit",
+  // Workspace (worker/workspace-tools.ts): each checks the business's agent access itself.
+  "search_workspace",
+  "search_docs",
+  "search_media",
+  "create_doc",
+  "link_objects",
+  "unlink_objects",
+  "tag_objects",
+  ...CONTACT_TOOL_NAMES,
 ].map(
   (t) => `mcp__${BIZ_SERVER}__${t}`,
 );
@@ -121,6 +136,8 @@ export function createBizServer(ctx: BizContext) {
   const { businessId, teammate, taskId } = ctx;
   const ev = (type: string, message: string, data?: Record<string, unknown>) =>
     logEvent({ businessId, teammateId: teammate.id, taskId, type, message, data });
+  /** Provenance for everything this teammate writes (created_by / updated_by, object_history). */
+  const by = teammateBy(teammate.id);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous input shapes
   const tools: SdkMcpToolDefinition<any>[] = [
@@ -159,10 +176,13 @@ export function createBizServer(ctx: BizContext) {
             channel: a.channel ?? null,
             status: "draft",
             attachments,
+            createdBy: by,
+            updatedBy: by,
           })
-          .returning({ id: schema.deliverables.id })
+          .returning()
           .get();
         syncDeliverableFile(d.id);
+        recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: d, action: "create", by });
         ev("deliverable_saved", `${teammate.name} saved "${a.title}"`, { deliverableId: d.id, kind: a.kind });
         return ok(`Saved as draft. deliverable_id: ${d.id}`);
       },
@@ -213,6 +233,7 @@ export function createBizServer(ctx: BizContext) {
         const files = all
           .filter((x) => {
             const o = org.get(x.rel);
+            if (o?.deletedAt) return false; // in Trash
             if (a.starred && !o?.starred) return false;
             if (a.album && o?.album?.toLowerCase() !== a.album.trim().toLowerCase()) return false;
             if (tag && !o?.tags.includes(tag)) return false;
@@ -250,11 +271,26 @@ export function createBizServer(ctx: BizContext) {
       },
       async (a) => {
         if (!canTeamEdit(businessId, "library")) return fail(editOffMessage("library"));
-        const files = a.files.map((f: string) => f.replace(/^\.?\//, ""));
-        const n = organize(businessId, files, { title: a.title, note: a.note, tags: a.tags, album: a.album, starred: a.starred }, a.add_tags ?? []);
-        if (!n) return fail(`None of these are in the media library: ${files.join(", ")}. Use paths from list_media.`);
+        const asked = a.files.map((f: string) => f.replace(/^\.?\//, ""));
+        // Labels on the owner's files need write access to the library (the default); with suggest, only the team's own files.
+        const before = assetRows(businessId, asked);
+        const refused = asked.filter((f: string) => !canChange(businessId, "library", before.get(f)?.createdBy ?? "owner").ok);
+        const files = asked.filter((f: string) => !refused.includes(f) && !before.get(f)?.deletedAt);
+        if (refused.length && !files.length) {
+          const why = canChange(businessId, "library", "owner");
+          return fail(`${why.ok ? "" : why.reason} Tell the owner in your summary how you'd organize ${refused.length === 1 ? "it" : "them"}.`);
+        }
+        const n = files.length ? organize(businessId, files, { title: a.title, note: a.note, tags: a.tags, album: a.album, starred: a.starred }, a.add_tags ?? []) : 0;
+        if (!n) return fail(`None of these are in the media library: ${asked.join(", ")}. Use paths from list_media.`);
+        for (const [p, row] of assetRows(businessId, files)) {
+          db.update(schema.assets).set({ updatedBy: by }).where(eq(schema.assets.path, p)).run();
+          const prev = before.get(p);
+          // A new labels row on the owner's file stays the owner's (created_by), changed by this teammate.
+          // Undo clears the labels again rather than trashing the owner's file.
+          recordHistory({ businessId, type: "asset", id: p, snapshot: row, before: prev ?? NO_LABELS, action: "update", by });
+        }
         ev("media_organized", `${teammate.name} organized ${n} file${n === 1 ? "" : "s"} in the library`, { files });
-        return ok(`Organized ${n} of ${files.length} file(s).`);
+        return ok(`Organized ${n} of ${asked.length} file(s).${refused.length ? ` Not changed (the owner's, and the team may only suggest): ${refused.join(", ")}.` : ""}`);
       },
     ),
 
@@ -274,7 +310,7 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "save_contact",
-      "Add a person to the business's address book, or update someone already in it (matched by id, phone, then exact name). Pass only what you know or what changed: tags are added, notes appended, other fields kept. Use it when you learn a customer's, supplier's or partner's details (name, WhatsApp number, email, company, what they want). Only works when the owner lets the team manage contacts.",
+      "Add a person to the business's address book, or update someone already in it (matched by id, phone, then exact name). Pass only what you know or what changed: tags are added, notes appended, other fields kept. Use it when you learn a customer's, supplier's or partner's details (name, WhatsApp number, email, company, what they want). Only works when the owner lets the team manage contacts; changing someone the owner added also needs the owner's write access to contacts (otherwise tell the owner in your summary).",
       {
         name: z.string().optional().describe("Full name as people know them, e.g. \"Bu Rina\" (needed for someone new)"),
         id: z.string().optional().describe("An existing contact's id, to update that one"),
@@ -288,8 +324,18 @@ export function createBizServer(ctx: BizContext) {
       async (a) => {
         if (!canTeamEdit(ctx.businessId, "contacts")) return fail(editOffMessage("contacts"));
         if (!a.id && !a.name?.trim() && !a.phone?.trim()) return fail("Say who: a name (or a phone number, or the id of someone already there).");
-        const r = upsertContact(ctx.businessId, a, `teammate:${teammate.id}`);
+        const prev = contactToChange(businessId, a);
+        const can = prev ? canChange(businessId, "contacts", prev.createdBy) : canCreate(businessId, "contacts");
+        if (!can.ok) {
+          return fail(
+            can.suggest
+              ? `${prev?.name ?? "That contact"} is in the owner's address book, and the team may only suggest changes to the owner's contacts. Record what you learned with log_interaction if you have it, and tell the owner in your summary what to update.`
+              : can.reason,
+          );
+        }
+        const r = upsertContact(ctx.businessId, a, by);
         if ("error" in r) return fail(r.error ?? "Couldn't save the contact.");
+        recordHistory({ businessId, type: "contact", id: r.contact.id, snapshot: r.contact, before: r.created ? null : prev, action: r.created ? "create" : "update", by });
         ev("contact_saved", `${teammate.name} ${r.created ? "added" : "updated"} the contact ${r.contact.name}`, { contactId: r.contact.id });
         return ok(`${r.created ? "Added" : "Updated"} (id ${r.contact.id}):\n${describeContact(r.contact)}`);
       },
@@ -362,6 +408,9 @@ export function createBizServer(ctx: BizContext) {
         try {
           const { path: rel, asset } = await downloadFreeAsset(a.id, a.type);
           linkIntoWorkspace([rel], ctx.cwd);
+          // The team brought this file in: its library row says so (the owner can filter on it).
+          const row = db.insert(schema.assets).values({ path: rel, businessId, createdBy: by, updatedBy: by }).onConflictDoNothing().returning().get();
+          if (row) recordHistory({ businessId, type: "asset", id: rel, snapshot: row, action: "create", by });
           ev("asset_downloaded", `${teammate.name} downloaded "${asset.title}" by ${asset.creator} (${asset.license})`, { path: rel });
           const info = await mediaInfo(path.join(dataDir(), rel));
           return ok(
@@ -456,7 +505,7 @@ export function createBizServer(ctx: BizContext) {
       "List this business's saved deliverables (newest first), optionally filtered by status.",
       { status: z.enum(["draft", "ready_to_post", "approved", "published", "rejected"]).optional() },
       async (a) => {
-        const filters = [eq(schema.deliverables.businessId, businessId)];
+        const filters = [eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)];
         if (a.status) filters.push(eq(schema.deliverables.status, a.status as DeliverableStatus));
         const rows = db
           .select({
@@ -494,7 +543,7 @@ export function createBizServer(ctx: BizContext) {
         const d = db
           .select()
           .from(schema.deliverables)
-          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
           .get();
         if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business. list_deliverables shows the ids.`);
         const maker = d.teammateId ? db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get() : undefined;
@@ -505,7 +554,7 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "update_deliverable",
-      "Revise a saved deliverable in place: new content, title or attachments. The previous version is kept, the id stays the same (feedback and the Work page stay attached), and it goes back to draft for the owner to look at again. Use this for revisions instead of saving a new deliverable. Pass only what changes.",
+      "Revise a saved deliverable in place: new content, title or attachments. The previous version is kept, the id stays the same (feedback and the Work page stay attached), and it goes back to draft for the owner to look at again. Use this for revisions instead of saving a new deliverable. Pass only what changes. A doc the owner wrote can be revised only with the owner's write access to docs; otherwise save your version as your own doc and link it to theirs.",
       {
         deliverable_id: z.string(),
         content: z.string().optional().describe("The full new content (not a diff)"),
@@ -521,6 +570,21 @@ export function createBizServer(ctx: BizContext) {
         if (missing.length) {
           return fail(`Unknown file(s): ${missing.join(", ")}. Use the paths render_image or render_video returned, or media/… files.`);
         }
+        const prev = db
+          .select()
+          .from(schema.deliverables)
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
+          .get();
+        if (prev) {
+          const can = canChange(businessId, "docs", deliverableCreator(prev));
+          if (!can.ok) {
+            return fail(
+              can.suggest
+                ? `"${prev.title}" is the owner's doc, and the team may only suggest changes to the owner's docs. Save your version as your own doc (create_doc or save_deliverable), link it to the original with link_objects(from "deliverable:<your new id>", to "deliverable:${prev.id}"), and tell the owner in your summary what you changed; they decide.`
+                : can.reason,
+            );
+          }
+        }
         const r = reviseDeliverable({
           businessId,
           deliverableId: a.deliverable_id,
@@ -531,6 +595,8 @@ export function createBizServer(ctx: BizContext) {
           attachments,
         });
         if (!r.ok) return fail(r.error);
+        db.update(schema.deliverables).set({ updatedBy: by }).where(eq(schema.deliverables.id, r.deliverable.id)).run();
+        if (prev) recordHistory({ businessId, type: "deliverable", id: prev.id, snapshot: { ...r.deliverable, updatedBy: by }, before: prev, action: "update", by });
         return ok(
           `Updated "${r.deliverable.title}" (now version ${r.deliverable.versions.length + 1}; the previous one is kept). It's a draft again: mark_ready_to_post when it's ready for the owner.`,
         );
@@ -560,13 +626,14 @@ export function createBizServer(ctx: BizContext) {
         const d = db
           .select()
           .from(schema.deliverables)
-          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
           .get();
         if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business.`);
         db.update(schema.deliverables)
-          .set({ status: "ready_to_post", channel: a.channel })
+          .set({ status: "ready_to_post", channel: a.channel, updatedBy: by })
           .where(eq(schema.deliverables.id, d.id))
           .run();
+        recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: { ...d, status: "ready_to_post", channel: a.channel, updatedBy: by }, before: d, action: "update", by });
         syncDeliverableFile(d.id);
         ev("deliverable_ready", `${teammate.name} finished "${d.title}" for the owner to post on ${a.channel}`, {
           deliverableId: d.id,
@@ -599,9 +666,12 @@ export function createBizServer(ctx: BizContext) {
             content: a.body,
             channel: a.channel,
             status: "ready_to_post",
+            createdBy: by,
+            updatedBy: by,
           })
-          .returning({ id: schema.deliverables.id })
+          .returning()
           .get();
+        recordHistory({ businessId, type: "deliverable", id: d.id, snapshot: d, action: "create", by });
         syncDeliverableFile(d.id);
         ev("message_drafted", `${teammate.name} drafted a ${a.channel} message to ${a.to} for the owner to send`, {
           deliverableId: d.id,
@@ -670,14 +740,19 @@ export function createBizServer(ctx: BizContext) {
       },
       async (a) => {
         if (!a.markdown.trim()) return fail("Nothing to suggest: markdown is empty.");
-        // Supervised: even a team that may edit pages proposes, and the owner accepts.
-        const direct = canTeamEdit(businessId, "context") && !isSupervised(businessId);
+        if (!canAgent(businessId, "docs", "suggest")) return fail("The owner lets the team only read pages, not propose changes. Mention it in your summary instead.");
+        // Direct when the owner lets the team edit pages (Team permissions, or docs access "write"),
+        // and on a page this teammate wrote itself. Supervised: it always proposes, and the owner accepts.
+        const supervised = isSupervised(businessId);
+        const mayEdit = canTeamEdit(businessId, "context") || canAgent(businessId, "docs", "write");
+        const direct = mayEdit && !supervised;
         if (a.mode === "new_page") {
           if (!a.title?.trim()) return fail("A new page needs a title.");
           const same = findPage(businessId, a.title);
           if (same && same.title.toLowerCase() === a.title.trim().toLowerCase()) return fail(`"${same.title}" already exists: suggest an append to it instead.`);
           if (direct) {
             const page = applyPageEdit({ businessId, teammate, taskId, kind: "new_page", body: a.markdown, title: a.title.trim(), section: a.section ?? "team_written", reason: a.reason, source: a.source });
+            if (page) recordHistory({ businessId, type: "doc", id: page.id, snapshot: page, action: "create", by });
             return ok(`Added the page "${page?.title}" (the owner lets the team edit pages directly).`);
           }
           const s = createSuggestion({ businessId, teammate, taskId, kind: "new_page", body: a.markdown, title: a.title.trim(), section: a.section ?? "team_written", reason: a.reason, source: a.source });
@@ -689,14 +764,19 @@ export function createBizServer(ctx: BizContext) {
         if (page.kind === "database") return fail(`"${page.title}" is the address book, not a text page. Mention the change in your summary for the owner instead.`);
         const dup = pendingSuggestions(businessId, page.id).find((s) => s.kind === a.mode && s.body.trim() === a.markdown.trim());
         if (dup) return ok(`Already suggested (suggestion ${dup.id}); the owner hasn't decided yet.`);
-        if (direct) {
+        const own = page.createdBy === by;
+        if (direct || (own && !supervised)) {
           applyPageEdit({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
-          return ok(`${a.mode === "append" ? "Added to" : "Rewrote"} "${page.title}" (the owner lets the team edit pages directly; it's in the page's history).`);
+          recordHistory({ businessId, type: "doc", id: page.id, snapshot: findPage(businessId, page.id) ?? page, before: page, action: "update", by });
+          return ok(`${a.mode === "append" ? "Added to" : "Rewrote"} "${page.title}" (${direct ? "the owner lets the team edit pages directly" : "your own page"}; it's in the page's history).`);
         }
         const s = createSuggestion({ businessId, teammate, taskId, page, kind: a.mode, body: a.markdown, reason: a.reason, source: a.source });
         return ok(`Suggested ${a.mode === "append" ? "an addition to" : "a new version of"} "${page.title}" (suggestion ${s.id}). It isn't on the page until the owner accepts it${ctx.isManager ? "; they see it as a card under your reply in this chat: say in one line what you proposed to save" : ""}.`);
       },
     ),
+    // Workspace: search everything, docs, links, tags (worker/workspace-tools.ts).
+    ...workspaceTools(ctx),
+    ...contactTools({ businessId, teammate, taskId }),
   ];
 
   tools.push(
@@ -1092,7 +1172,7 @@ export function createBizServer(ctx: BizContext) {
           const d = db
             .select()
             .from(schema.deliverables)
-            .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+            .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
             .get();
           if (!d) return fail(`No deliverable with id ${a.deliverable_id}.`);
           if (d.status === "published") return fail("The owner already posted it; mention the problem in your report instead.");
