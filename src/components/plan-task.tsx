@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import { useT, useTn } from "@/components/i18n";
 import { Button, Textarea } from "@/components/kit";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { planTask } from "../actions";
-import { localizeError } from "./studio-shell";
+import { planTask } from "@/app/b/[id]/actions";
+import { localizeError } from "@/components/workspace-ui";
 
 export type MateOption = { id: string; name: string; title: string };
 

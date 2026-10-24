@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { LiveRefresh } from "@/components/live";
-import { StudioSkeleton } from "../_components/studio-skeleton";
+import { WorkspaceSkeleton } from "@/components/workspace-skeleton";
 import { StudioShell } from "../_components/studio-shell";
 import { getBusiness } from "@/lib/data";
 import { editorSources, listEdits } from "@/lib/studio-data";
@@ -9,7 +9,7 @@ import { VideoEditor } from "./video-editor";
 
 export default function VideoEditorPage(props: PageProps<"/b/[id]/studio/video">) {
   return (
-    <Suspense fallback={<StudioSkeleton shape="editor" />}>
+    <Suspense fallback={<WorkspaceSkeleton shape="editor" tabs />}>
       <Content {...props} />
     </Suspense>
   );

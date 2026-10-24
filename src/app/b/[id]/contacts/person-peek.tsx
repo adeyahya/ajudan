@@ -12,8 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import type { ContactKind } from "@/db/schema";
 import { dateLocale, type MessageKey } from "@/lib/i18n";
 import { statusTone } from "@/lib/status-tones";
-import { deleteContactAction, followUpAction, saveContactAction } from "../actions";
-import type { Mate } from "../types";
+import { deleteContactAction, followUpAction, saveContactAction } from "./actions";
+import type { Mate } from "@/app/b/[id]/context/types";
 import { FOLLOW_UP, KIND_TONE, KINDS, type HistoryItem, type PersonRow } from "./shared";
 
 type Form = { name: string; phone: string; email: string; company: string; kind: ContactKind; tags: string; notes: string };

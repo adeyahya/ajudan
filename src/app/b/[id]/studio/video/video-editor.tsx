@@ -13,7 +13,7 @@ import { ASPECTS, formatTime, videoLength, type Aspect, type VideoSpec } from "@
 import type { EditorSource } from "@/lib/studio-data";
 import { renderEditNow, saveEdit } from "../actions";
 import { EditsList, fileUrl, RenderResult } from "../_components/edits-list";
-import { localizeError, PropRow, Segmented } from "../_components/studio-shell";
+import { localizeError, PropRow, Segmented } from "@/components/workspace-ui";
 
 type Clip = VideoSpec["clips"][number] & { key: string };
 let nextKey = 0;

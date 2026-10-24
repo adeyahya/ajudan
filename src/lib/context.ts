@@ -10,6 +10,7 @@ import { teammatesRoot } from "@/lib/paths";
 import { renderProfileMarkdown } from "@/lib/profile-markdown";
 import { isSupervised } from "@/lib/supervision";
 import { canTeamEdit } from "@/lib/team-edits";
+import { softDelete } from "@/lib/trash";
 import type { BusinessProfile } from "@/lib/types";
 
 /**
@@ -31,8 +32,11 @@ export * from "@/lib/context-text";
 
 const now = () => new Date();
 
+/** Live pages (not in Trash), in tree order. */
+const live = (businessId: string) => and(eq(schema.contextPages.businessId, businessId), isNull(schema.contextPages.deletedAt));
+
 export function listPages(businessId: string) {
-  return db.select().from(schema.contextPages).where(eq(schema.contextPages.businessId, businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
+  return db.select().from(schema.contextPages).where(live(businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
 }
 
 // Every column but the page's content (body, editor blocks): for trees, titles and lookups.
@@ -44,11 +48,12 @@ export type PageHead = Omit<ContextPage, "body" | "blocks">;
 
 /** listPages without the content, which can be large: for trees, title lookups and counts. */
 export function listPageHeads(businessId: string): PageHead[] {
-  return db.select(headColumns).from(schema.contextPages).where(eq(schema.contextPages.businessId, businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
+  return db.select(headColumns).from(schema.contextPages).where(live(businessId)).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
 }
 
+/** A live page (one in Trash reads as missing; src/lib/trash.ts reads those). */
 export function getPage(businessId: string, id: string) {
-  return db.select().from(schema.contextPages).where(and(eq(schema.contextPages.id, id), eq(schema.contextPages.businessId, businessId))).get();
+  return db.select().from(schema.contextPages).where(and(eq(schema.contextPages.id, id), live(businessId))).get();
 }
 
 export function pageByKey(businessId: string, key: string) {
@@ -172,8 +177,8 @@ export function appendLearned(businessId: string, line: string) {
 /** Pages under the same parent (or at the top of a section), in tree order. */
 function siblings(businessId: string, parentId: string | null, section: ContextSection) {
   const where = parentId
-    ? and(eq(schema.contextPages.businessId, businessId), eq(schema.contextPages.parentId, parentId))
-    : and(eq(schema.contextPages.businessId, businessId), isNull(schema.contextPages.parentId), eq(schema.contextPages.section, section));
+    ? and(live(businessId), eq(schema.contextPages.parentId, parentId))
+    : and(live(businessId), isNull(schema.contextPages.parentId), eq(schema.contextPages.section, section));
   return db.select().from(schema.contextPages).where(where).orderBy(asc(schema.contextPages.sortOrder), asc(schema.contextPages.createdAt)).all();
 }
 
@@ -272,13 +277,15 @@ export function movePage(businessId: string, id: string, to: { parentId: string 
   return true;
 }
 
-/** Delete a page the owner made (Ajudan's own pages stay; their sub-pages move up). */
-export function deletePage(businessId: string, id: string) {
+/**
+ * Move a page the owner made to Trash (src/lib/trash.ts; Ajudan's own pages stay). Its
+ * sub-pages move up, as before; restoring puts the page back under its old parent.
+ */
+export function deletePage(businessId: string, id: string, by = "owner") {
   const page = getPage(businessId, id);
   if (!page || page.key) return false;
-  db.update(schema.contextPages).set({ parentId: page.parentId }).where(and(eq(schema.contextPages.businessId, businessId), eq(schema.contextPages.parentId, id))).run();
-  db.delete(schema.contextPages).where(eq(schema.contextPages.id, id)).run();
-  return true;
+  db.update(schema.contextPages).set({ parentId: page.parentId }).where(and(live(businessId), eq(schema.contextPages.parentId, id))).run();
+  return softDelete(businessId, "doc", id, by);
 }
 
 // ---- readers ----
@@ -330,7 +337,7 @@ export function pagesById(businessId: string, ids: string[]): ContextPage[] {
     db
       .select()
       .from(schema.contextPages)
-      .where(and(eq(schema.contextPages.businessId, businessId), inArray(schema.contextPages.id, ids)))
+      .where(and(live(businessId), inArray(schema.contextPages.id, ids)))
       .all()
       .map((p) => [p.id, p]),
   );

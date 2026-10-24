@@ -187,7 +187,7 @@ function RestBanner({
         <Link href={`/b/${businessId}/desk`} className={cn(link, "bg-amber-400 text-[#2a1d22]")}>
           🎧 Answer customers yourself
         </Link>
-        <Link href={`/b/${businessId}/studio`} className={cn(link, "bg-secondary text-foreground")}>
+        <Link href={`/b/${businessId}/library`} className={cn(link, "bg-secondary text-foreground")}>
           ✦ Studio: organize, edit, plan
         </Link>
         <Link href={`/b/${businessId}/approvals`} className={cn(link, "bg-secondary text-foreground")}>

@@ -67,6 +67,13 @@ export const businesses = sqliteTable("businesses", {
   aiBackend: text("ai_backend", { mode: "json" }).$type<import("@/lib/backend").BackendSettings>(),
   /** Voice-note replies on WhatsApp (src/lib/voice-settings.ts). Null: the default (on, mirroring). */
   voiceReplies: text("voice_replies", { mode: "json" }).$type<import("@/lib/voice-settings").VoiceSettings>(),
+  /**
+   * What teammates may do in each workspace collection (src/lib/agent-access.ts):
+   * "read" (look only), "suggest" (changes to the owner's objects become suggestions),
+   * "write" (change directly). Null or missing keys take DEFAULT_AGENT_ACCESS:
+   * docs "suggest", library "write", contacts "suggest".
+   */
+  agentAccess: text("agent_access", { mode: "json" }).$type<Partial<import("@/lib/agent-access").AgentAccess>>(),
   createdAt: createdAt(),
 });
 
@@ -233,9 +240,17 @@ export const deliverables = sqliteTable("deliverables", {
    * (a teammate's revision after the owner's or the manager's feedback). See src/lib/deliverables.ts.
    */
   versions: text("versions", { mode: "json" }).$type<DeliverableVersion[]>().notNull().default([]),
+  /** A "/"-separated folder path in Docs ("Marketing/Q3"), or null for the top level. */
+  folder: text("folder"),
+  /** "owner" or "teammate:<id>". Null on rows made before this column: read teammateId instead. */
+  createdBy: text("created_by"),
+  updatedBy: text("updated_by"),
+  /** In Trash since then (src/lib/trash.ts); null when live. */
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
 }, (t) => [
   index("deliverables_business_created_idx").on(t.businessId, t.createdAt),
+  index("deliverables_business_deleted_idx").on(t.businessId, t.deletedAt),
   index("deliverables_business_status_idx").on(t.businessId, t.status),
   index("deliverables_teammate_idx").on(t.teammateId),
   index("deliverables_task_idx").on(t.taskId),
@@ -379,8 +394,16 @@ export const assets = sqliteTable("assets", {
   tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
   album: text("album"),
   starred: integer("starred", { mode: "boolean" }).notNull().default(false),
+  /** "owner" or "teammate:<id>". */
+  createdBy: text("created_by").notNull().default("owner"),
+  updatedBy: text("updated_by").notNull().default("owner"),
+  /**
+   * In Trash since then (src/lib/trash.ts): the file stays where it is but the library and
+   * list_media hide it; purging deletes the file. Null when live.
+   */
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
-}, (t) => [index("assets_business_idx").on(t.businessId)]);
+}, (t) => [index("assets_business_idx").on(t.businessId), index("assets_business_deleted_idx").on(t.businessId, t.deletedAt)]);
 
 
 /**
@@ -436,8 +459,20 @@ export const contacts = sqliteTable("contacts", {
   notes: text("notes").notNull().default(""),
   /** "owner", or "teammate:<id>" for a contact a teammate added (save_contact). */
   createdBy: text("created_by").notNull().default("owner"),
+  updatedBy: text("updated_by").notNull().default("owner"),
+  /** When to get back to this person (Home lists the ones due), with what for. */
+  followUpAt: integer("follow_up_at", { mode: "timestamp_ms" }),
+  followUpNote: text("follow_up_note").notNull().default(""),
+  /** The owner's own fields ("Birthday" → "12 May"). */
+  fields: text("fields", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+  /** In Trash since then (src/lib/trash.ts); null when live. */
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
-}, (t) => [index("contacts_business_name_idx").on(t.businessId, t.name)]);
+}, (t) => [
+  index("contacts_business_name_idx").on(t.businessId, t.name),
+  index("contacts_business_deleted_idx").on(t.businessId, t.deletedAt),
+  index("contacts_business_follow_up_idx").on(t.businessId, t.followUpAt),
+]);
 
 export type EditKind = "video" | "audio";
 export type EditStatus = "draft" | "queued" | "rendering" | "done" | "failed";
@@ -503,9 +538,15 @@ export const contextPages = sqliteTable("context_pages", {
   updatedBy: text("updated_by").notNull().default("owner"),
   /** When the owner last confirmed the page is still true. */
   lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
+  /** In Trash since then (src/lib/trash.ts; its sub-pages moved up when it went); null when live. */
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
-}, (t) => [index("context_pages_business_idx").on(t.businessId, t.section), uniqueIndex("context_pages_key_idx").on(t.businessId, t.key)]);
+}, (t) => [
+  index("context_pages_business_idx").on(t.businessId, t.section),
+  uniqueIndex("context_pages_key_idx").on(t.businessId, t.key),
+  index("context_pages_business_deleted_idx").on(t.businessId, t.deletedAt),
+]);
 
 /** Per teammate, how a page reaches them. No row: the default (defaultReaderMode in src/lib/context.ts). */
 export const contextReaders = sqliteTable("context_readers", {
@@ -620,3 +661,49 @@ export type ContextSuggestion = typeof contextSuggestions.$inferSelect;
 export type ContextLoad = typeof contextLoads.$inferSelect;
 export type ContextAsk = typeof contextAsks.$inferSelect;
 export type FileMeta = typeof fileMeta.$inferSelect;
+
+/**
+ * Workspace objects links and history refer to. "doc" is a Context page, "deliverable" a
+ * deliverables row (Work / Docs), "asset" a library file (id = its "media/…" path),
+ * "contact" and "task" their rows.
+ */
+export type ObjectType = "doc" | "deliverable" | "asset" | "contact" | "task";
+
+/** Any object ↔ any object (src/lib/links.ts). Stored once, from → to; backlinks read `to`. */
+export const links = sqliteTable("links", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  fromType: text("from_type").$type<ObjectType>().notNull(),
+  fromId: text("from_id").notNull(),
+  toType: text("to_type").$type<ObjectType>().notNull(),
+  toId: text("to_id").notNull(),
+  /** "owner" or "teammate:<id>". */
+  createdBy: text("created_by").notNull().default("owner"),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex("links_unique_idx").on(t.businessId, t.fromType, t.fromId, t.toType, t.toId),
+  index("links_to_idx").on(t.businessId, t.toType, t.toId),
+]);
+
+export type HistoryAction = "create" | "update" | "delete" | "restore";
+
+/** A snapshot of an object per change, with who made it (src/lib/object-history.ts). */
+export const objectHistory = sqliteTable("object_history", {
+  id: id(),
+  businessId: text("business_id")
+    .notNull()
+    .references(() => businesses.id, { onDelete: "cascade" }),
+  objectType: text("object_type").$type<ObjectType>().notNull(),
+  objectId: text("object_id").notNull(),
+  /** The object's row as it was after this change (before it, for "delete"). */
+  snapshot: text("snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  action: text("action").$type<HistoryAction>().notNull(),
+  /** "owner", "system" or "teammate:<id>". */
+  by: text("by").notNull().default("owner"),
+  createdAt: createdAt(),
+}, (t) => [
+  index("object_history_object_idx").on(t.businessId, t.objectType, t.objectId, t.createdAt),
+  index("object_history_business_idx").on(t.businessId, t.createdAt),
+]);

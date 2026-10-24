@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, tool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { DeliverableStatus, Teammate } from "@/db/schema";
@@ -213,6 +213,7 @@ export function createBizServer(ctx: BizContext) {
         const files = all
           .filter((x) => {
             const o = org.get(x.rel);
+            if (o?.deletedAt) return false; // in Trash
             if (a.starred && !o?.starred) return false;
             if (a.album && o?.album?.toLowerCase() !== a.album.trim().toLowerCase()) return false;
             if (tag && !o?.tags.includes(tag)) return false;
@@ -456,7 +457,7 @@ export function createBizServer(ctx: BizContext) {
       "List this business's saved deliverables (newest first), optionally filtered by status.",
       { status: z.enum(["draft", "ready_to_post", "approved", "published", "rejected"]).optional() },
       async (a) => {
-        const filters = [eq(schema.deliverables.businessId, businessId)];
+        const filters = [eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)];
         if (a.status) filters.push(eq(schema.deliverables.status, a.status as DeliverableStatus));
         const rows = db
           .select({
@@ -494,7 +495,7 @@ export function createBizServer(ctx: BizContext) {
         const d = db
           .select()
           .from(schema.deliverables)
-          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
           .get();
         if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business. list_deliverables shows the ids.`);
         const maker = d.teammateId ? db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get() : undefined;
@@ -560,7 +561,7 @@ export function createBizServer(ctx: BizContext) {
         const d = db
           .select()
           .from(schema.deliverables)
-          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+          .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
           .get();
         if (!d) return fail(`No deliverable with id ${a.deliverable_id} in this business.`);
         db.update(schema.deliverables)
@@ -1092,7 +1093,7 @@ export function createBizServer(ctx: BizContext) {
           const d = db
             .select()
             .from(schema.deliverables)
-            .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId)))
+            .where(and(eq(schema.deliverables.id, a.deliverable_id), eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt)))
             .get();
           if (!d) return fail(`No deliverable with id ${a.deliverable_id}.`);
           if (d.status === "published") return fail("The owner already posted it; mention the problem in your report instead.");

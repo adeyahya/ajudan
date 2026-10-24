@@ -12,7 +12,7 @@ import { workDir } from "@/lib/paths";
  */
 export function syncDeliverableFile(deliverableId: string) {
   const d = db.select().from(schema.deliverables).where(eq(schema.deliverables.id, deliverableId)).get();
-  if (!d) return;
+  if (!d || d.deletedAt) return; // in Trash: no mirror until it's restored
   const who = d.teammateId
     ? db.select({ name: schema.teammates.name }).from(schema.teammates).where(eq(schema.teammates.id, d.teammateId)).get()
         ?.name

@@ -30,7 +30,7 @@ export const metadata: Metadata = {
  * from localStorage (src/app/b/[id]/nav.tsx), and documents' full width
  * (src/components/doc-layout.tsx), so the layout never jumps on hydration.
  */
-const SIDEBAR_SCRIPT = `try{var d=document.documentElement,w=parseInt(localStorage.getItem("ajudan:sidebar:w")||"",10);if(w>=200&&w<=360)d.style.setProperty("--sidebar-w-open",w+"px");if(localStorage.getItem("ajudan:sidebar:collapsed")==="1")d.setAttribute("data-sidebar","collapsed");["workspace","settings"].forEach(function(n){if(localStorage.getItem("ajudan:sidebar:sec:"+n)==="0")d.setAttribute("data-sec-"+n,"closed")});if(localStorage.getItem("ajudan:doc:wide")==="1")d.setAttribute("data-doc-wide","")}catch(e){}`;
+const SIDEBAR_SCRIPT = `try{var d=document.documentElement,w=parseInt(localStorage.getItem("ajudan:sidebar:w")||"",10);if(w>=200&&w<=360)d.style.setProperty("--sidebar-w-open",w+"px");if(localStorage.getItem("ajudan:sidebar:collapsed")==="1")d.setAttribute("data-sidebar","collapsed");["workspace","team","settings"].forEach(function(n){if(localStorage.getItem("ajudan:sidebar:sec:"+n)==="0")d.setAttribute("data-sec-"+n,"closed")});if(localStorage.getItem("ajudan:doc:wide")==="1")d.setAttribute("data-doc-wide","")}catch(e){}`;
 
 // <html lang> stays static: the root layout renders outside any <Suspense>, so reading the
 // request (Accept-Language) or the business here would block prerendering under Cache

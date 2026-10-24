@@ -1,4 +1,4 @@
-/** Studio (src/app/b/[id]/studio/**): library, docs, video and audio editors. */
+/** Studio (src/app/b/[id]/studio/**: video and audio editors) and, for now, the Library (src/app/b/[id]/library) and Docs (src/app/b/[id]/docs). */
 export const en = {
   "studio.noUsage": "No Claude usage here: the Studio works while the team rests",
   "studio.more": "More",
@@ -91,7 +91,7 @@ export const en = {
   "studio.lib.deleteOne": "Delete {name}?",
   "studio.lib.deleteMany_one": "Delete 1 file?",
   "studio.lib.deleteMany_other": "Delete {count} files?",
-  "studio.lib.deleteBody": "The files are removed from the business folder for good.",
+  "studio.lib.deleteBody": "They move to Trash, where you can put them back.",
   "studio.lib.deleted_one": "File deleted",
   "studio.lib.deleted_other": "{count} files deleted",
 
@@ -145,7 +145,7 @@ export const en = {
   "studio.docs.handHelp": "It waits in the queue until the team has usage again.",
   "studio.docs.prepareHelp": "Prepare for later: write the brief now and hand it to a teammate; it waits in the queue until the team has usage again. Saved docs are also in Work and in work/.",
   "studio.docs.deleteTitle": "Delete “{title}”?",
-  "studio.docs.deleteBody": "The doc is removed from Work and from work/.",
+  "studio.docs.deleteBody": "The doc moves to Trash (and leaves Work and work/) until you put it back.",
   "studio.docs.deleted": "Doc deleted",
   "studio.docs.kind.note": "Note",
   "studio.docs.kind.brief": "Brief",
@@ -354,7 +354,7 @@ export const id: Record<keyof typeof en, string> = {
   "studio.lib.deleteOne": "Hapus {name}?",
   "studio.lib.deleteMany_one": "Hapus 1 file?",
   "studio.lib.deleteMany_other": "Hapus {count} file?",
-  "studio.lib.deleteBody": "File akan dihapus permanen dari folder bisnis.",
+  "studio.lib.deleteBody": "File dipindah ke Sampah, dan bisa dikembalikan dari sana.",
   "studio.lib.deleted_one": "File dihapus",
   "studio.lib.deleted_other": "{count} file dihapus",
 
@@ -406,7 +406,7 @@ export const id: Record<keyof typeof en, string> = {
   "studio.docs.handHelp": "Tugas menunggu di antrean sampai tim punya kuota pemakaian lagi.",
   "studio.docs.prepareHelp": "Siapkan untuk nanti: tulis brief sekarang lalu serahkan ke rekan tim; tugas menunggu di antrean sampai tim punya kuota lagi. Dokumen yang disimpan juga ada di Hasil Kerja dan di work/.",
   "studio.docs.deleteTitle": "Hapus “{title}”?",
-  "studio.docs.deleteBody": "Dokumen akan dihapus dari Hasil Kerja dan dari work/.",
+  "studio.docs.deleteBody": "Dokumen dipindah ke Sampah (dan keluar dari Hasil Kerja dan work/) sampai kamu mengembalikannya.",
   "studio.docs.deleted": "Dokumen dihapus",
   "studio.docs.kind.note": "Catatan",
   "studio.docs.kind.brief": "Brief",

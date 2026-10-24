@@ -18,10 +18,10 @@ import type { Deliverable, DeliverableStatus } from "@/db/schema";
 import type { MessageKey } from "@/lib/i18n";
 import type { MediaKind } from "@/lib/media-types";
 import { statusTone } from "@/lib/status-tones";
-import { deleteDoc, saveDoc } from "../actions";
-import { fileUrl } from "../_components/edits-list";
-import { PlanTask } from "../_components/plan-task";
-import { DeleteDialog, localizeError, MoreMenu, PropRow, Segmented, StudioShell } from "../_components/studio-shell";
+import { fileUrl } from "@/components/image-strip";
+import { PlanTask } from "@/components/plan-task";
+import { DeleteDialog, localizeError, MoreMenu, PropRow, Segmented, WorkspaceShell } from "@/components/workspace-ui";
+import { deleteDoc, saveDoc } from "./actions";
 
 const KINDS = ["note", "brief", "plan", "script", "social_post", "blog_post", "email", "ad_copy", "report", "faq", "price_list"];
 const STATUS: DeliverableStatus[] = ["draft", "approved", "published", "rejected"];
@@ -72,7 +72,7 @@ export function Docs({
     const s = q.trim().toLowerCase();
     return !s || `${d.title} ${d.kind} ${d.excerpt}`.toLowerCase().includes(s);
   });
-  const base = `/b/${businessId}/studio/docs`;
+  const base = `/b/${businessId}/docs`;
   const href = (f: DocsFilter, id?: string) => {
     const p = new URLSearchParams();
     if (f !== "all") p.set("who", f);
@@ -99,7 +99,7 @@ export function Docs({
   );
 
   return (
-    <StudioShell peek={peek}>
+    <WorkspaceShell title={t("nav.docs")} peek={peek}>
       <TopBarActions>
         <DocLayoutButtons />
       </TopBarActions>
@@ -170,7 +170,7 @@ export function Docs({
           />
         </div>
       </div>
-    </StudioShell>
+    </WorkspaceShell>
   );
 }
 
@@ -218,7 +218,7 @@ function Editor({
       const r = await saveDoc(businessId, { id: doc?.id, title, kind, channel, content, status, attachments });
       if ("error" in r) return setMsg({ error: localizeError(t, r.error) });
       setMsg({ ok: t("common.saved") });
-      if (!doc) router.replace(`/b/${businessId}/studio/docs?doc=${r.id}`);
+      if (!doc) router.replace(`/b/${businessId}/docs?doc=${r.id}`);
     });
 
   const words = content.trim() ? content.trim().split(/\s+/).length : 0;
@@ -412,7 +412,7 @@ function Editor({
             start(async () => {
               await deleteDoc(businessId, doc.id);
               toast(t("studio.docs.deleted"));
-              router.replace(`/b/${businessId}/studio/docs`);
+              router.replace(`/b/${businessId}/docs`);
             });
           }}
         />

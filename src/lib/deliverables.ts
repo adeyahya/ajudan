@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Deliverable, DeliverableVersion } from "@/db/schema";
 import { logEvent } from "@/lib/events";
@@ -43,7 +43,7 @@ export function reviseDeliverable(p: { businessId: string; deliverableId: string
   const d = db
     .select()
     .from(schema.deliverables)
-    .where(and(eq(schema.deliverables.id, p.deliverableId), eq(schema.deliverables.businessId, p.businessId)))
+    .where(and(eq(schema.deliverables.id, p.deliverableId), eq(schema.deliverables.businessId, p.businessId), isNull(schema.deliverables.deletedAt)))
     .get();
   if (!d) return { ok: false as const, error: `No deliverable with id ${p.deliverableId} in this business.` };
   const why = rejectRevision(d, p.by);

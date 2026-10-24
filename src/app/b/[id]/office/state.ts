@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { connection } from "next/server";
 import { db, schema } from "@/db";
 import type { ActivityEvent, TeammateState } from "@/db/schema";
@@ -64,7 +64,7 @@ export function queryOfficeState(businessId: string): OfficeState {
     .groupBy(schema.tasks.status)
     .all();
 
-  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(eq(schema.deliverables.businessId, businessId)).get()?.n ?? 0;
+  const deliverableCount = db.select({ n: count() }).from(schema.deliverables).where(and(eq(schema.deliverables.businessId, businessId), isNull(schema.deliverables.deletedAt))).get()?.n ?? 0;
 
   return {
     teammates,

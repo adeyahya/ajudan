@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Asset } from "@/db/schema";
 import { mediaKind, type MediaKind } from "@/lib/media-types";
 import { dataDir } from "@/lib/paths";
+import { softDelete } from "@/lib/trash";
 
 /**
  * The owner's asset library: the files in media/ plus how the owner organized them
@@ -35,7 +36,19 @@ export function cleanTags(tags: string[]) {
   return [...new Set(tags.map((t) => t.trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-")).filter(Boolean))].slice(0, 20);
 }
 
-/** Every file in the media library with its organization, newest first. */
+/** Library paths in Trash (an assets row with deleted_at): their files stay on disk but are hidden. */
+export function trashedPaths(businessId?: string) {
+  return new Set(
+    db
+      .select({ path: schema.assets.path })
+      .from(schema.assets)
+      .where(and(isNotNull(schema.assets.deletedAt), businessId ? eq(schema.assets.businessId, businessId) : undefined))
+      .all()
+      .map((r) => r.path),
+  );
+}
+
+/** Every file in the media library with its organization, newest first. Files in Trash are left out. */
 export function listLibrary(businessId: string): LibraryItem[] {
   const dir = path.join(dataDir(), "media");
   if (!fs.existsSync(dir)) return [];
@@ -49,7 +62,7 @@ export function listLibrary(businessId: string): LibraryItem[] {
   );
   return fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isFile() && !d.name.startsWith("."))
+    .filter((d) => d.isFile() && !d.name.startsWith(".") && !rows.get(`media/${d.name}`)?.deletedAt)
     .map((d) => {
       const rel = `media/${d.name}`;
       const st = fs.statSync(path.join(dir, d.name));
@@ -101,8 +114,22 @@ export function organize(businessId: string, paths: string[], patch: AssetPatch,
   return valid.length;
 }
 
-/** Delete files from the library for good (and their organization). */
-export function deleteFromLibrary(businessId: string, paths: string[]) {
+/**
+ * Move files to Trash (src/lib/trash.ts): they stay on disk, hidden from the library and
+ * list_media, until restored or purged. Returns how many were moved.
+ */
+export function deleteFromLibrary(businessId: string, paths: string[], by = "owner") {
+  let n = 0;
+  for (const p of paths) {
+    if (!isLibraryPath(p) || !fs.existsSync(path.join(dataDir(), p))) continue;
+    softDelete(businessId, "asset", p, by);
+    n++;
+  }
+  return n;
+}
+
+/** Delete files from the library for good (and their organization). Trash's purge uses this. */
+export function purgeFromLibrary(businessId: string, paths: string[]) {
   const dir = dataDir();
   let n = 0;
   for (const p of paths) {
@@ -130,9 +157,10 @@ export async function findSameFile(abs: string, except?: string) {
   const bytes = fs.statSync(abs).size;
   const dir = path.join(dataDir(), "media");
   if (!bytes || !fs.existsSync(dir)) return null;
+  const trashed = trashedPaths();
   const same = fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isFile() && !d.name.startsWith(".") && `media/${d.name}` !== except)
+    .filter((d) => d.isFile() && !d.name.startsWith(".") && `media/${d.name}` !== except && !trashed.has(`media/${d.name}`))
     .filter((d) => fs.statSync(path.join(dir, d.name)).size === bytes);
   if (!same.length) return null;
   const hash = await hashFile(abs);
@@ -240,7 +268,7 @@ export async function mergeDuplicates(businessId: string, keep: string, copies: 
       for (const pg of pages) tx.update(schema.contextPages).set({ blocks: swapPath(pg.blocks, from, keep) }).where(eq(schema.contextPages.id, pg.id)).run();
     }
   });
-  return deleteFromLibrary(businessId, gone);
+  return purgeFromLibrary(businessId, gone);
 }
 
 /** Organization for some files, for teammates' list_media. */

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { currentDataDir } from "@/lib/paths";
 import { matchIds } from "@/lib/search";
@@ -30,7 +30,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/search">)
   const pages = db
     .select({ id: schema.contextPages.id, title: schema.contextPages.title, section: schema.contextPages.section })
     .from(schema.contextPages)
-    .where(and(eq(schema.contextPages.businessId, businessId), q ? match(schema.contextPages.title) : undefined))
+    .where(and(eq(schema.contextPages.businessId, businessId), isNull(schema.contextPages.deletedAt), q ? match(schema.contextPages.title) : undefined))
     .orderBy(desc(sql`coalesce(${schema.contextPages.updatedAt}, ${schema.contextPages.createdAt})`))
     .limit(LIMIT)
     .all();
@@ -42,6 +42,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/search">)
     .where(
       and(
         eq(schema.deliverables.businessId, businessId),
+        isNull(schema.deliverables.deletedAt),
         workIds ? inArray(schema.deliverables.id, workIds) : q ? match(schema.deliverables.title) : undefined,
       ),
     )
@@ -53,7 +54,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/search">)
     ? db
         .select({ id: schema.contacts.id, name: schema.contacts.name, company: schema.contacts.company })
         .from(schema.contacts)
-        .where(and(eq(schema.contacts.businessId, businessId), or(match(schema.contacts.name), match(schema.contacts.company))))
+        .where(and(eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt), or(match(schema.contacts.name), match(schema.contacts.company))))
         .limit(LIMIT)
         .all()
     : [];
@@ -76,7 +77,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/b/[id]/search">)
   const results: SearchResult[] = [
     ...teammates.map((t) => ({ group: "teammates" as const, id: t.id, title: t.name, subtitle: t.title, href: `${base}/teammates/${t.id}` })),
     ...pages.map((p) => ({ group: "pages" as const, id: p.id, title: p.title, href: `${base}/context?page=${p.id}` })),
-    ...people.map((c) => ({ group: "people" as const, id: c.id, title: c.name, subtitle: c.company ?? undefined, href: `${base}/context/people?c=${c.id}` })),
+    ...people.map((c) => ({ group: "people" as const, id: c.id, title: c.name, subtitle: c.company ?? undefined, href: `${base}/contacts?c=${c.id}` })),
     ...work.map((d) => ({ group: "work" as const, id: d.id, title: d.title, subtitle: d.kind.replace(/_/g, " "), href: `${base}/deliverables?d=${d.id}` })),
   ];
   return Response.json({ results });

@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Contact, ContactKind } from "@/db/schema";
 import { cleanTags } from "@/lib/assets";
 import { normalizePhone } from "@/lib/humans";
 import { matchIds } from "@/lib/search";
+import { softDelete } from "@/lib/trash";
 
 /**
  * The business's address book: customers, suppliers and partners the owner keeps.
@@ -26,7 +27,10 @@ function businessLanguage(businessId: string) {
 }
 
 /** Clean one contact's fields; an error when something can't be saved. */
-export function cleanContact(input: ContactInput, language: string): { value: Omit<Contact, "id" | "businessId" | "createdAt" | "createdBy"> } | { error: string } {
+export function cleanContact(
+  input: ContactInput,
+  language: string,
+): { value: Pick<Contact, "name" | "phone" | "email" | "company" | "kind" | "tags" | "notes"> } | { error: string } {
   const name = input.name.trim().slice(0, 120);
   if (!name) return { error: "A contact needs a name." };
   let phone: string | null = null;
@@ -41,8 +45,14 @@ export function cleanContact(input: ContactInput, language: string): { value: Om
   return { value: { name, phone, email, company: input.company?.trim().slice(0, 120) || null, kind, tags, notes: (input.notes ?? "").trim().slice(0, 4000) } };
 }
 
+/** The address book, without contacts in Trash. */
 export function listContacts(businessId: string) {
-  return db.select().from(schema.contacts).where(eq(schema.contacts.businessId, businessId)).orderBy(asc(schema.contacts.name)).all();
+  return db
+    .select()
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.businessId, businessId), isNull(schema.contacts.deletedAt)))
+    .orderBy(asc(schema.contacts.name))
+    .all();
 }
 
 export function saveContact(businessId: string, input: ContactInput & { id?: string }) {
@@ -51,7 +61,7 @@ export function saveContact(businessId: string, input: ContactInput & { id?: str
   if (input.id) {
     const row = db
       .update(schema.contacts)
-      .set(c.value)
+      .set({ ...c.value, updatedBy: "owner" })
       .where(and(eq(schema.contacts.id, input.id), eq(schema.contacts.businessId, businessId)))
       .returning()
       .get();
@@ -60,8 +70,9 @@ export function saveContact(businessId: string, input: ContactInput & { id?: str
   return { contact: db.insert(schema.contacts).values({ businessId, ...c.value }).returning().get() };
 }
 
-export function deleteContact(businessId: string, id: string) {
-  db.delete(schema.contacts).where(and(eq(schema.contacts.id, id), eq(schema.contacts.businessId, businessId))).run();
+/** Move a contact to Trash (src/lib/trash.ts); purging it from there deletes it for good. */
+export function deleteContact(businessId: string, id: string, by = "owner") {
+  softDelete(businessId, "contact", id, by);
 }
 
 // ---- CSV ----
@@ -167,7 +178,12 @@ export function searchAddressBook(businessId: string, query: string, kind?: Cont
   const ids = matchIds("contacts", businessId, words.map((w) => w.replace(/^#/, "")), { all: true, limit: 2000 });
   const candidates = ids
     ? ids.length
-      ? db.select().from(schema.contacts).where(and(eq(schema.contacts.businessId, businessId), inArray(schema.contacts.id, ids))).orderBy(asc(schema.contacts.name)).all()
+      ? db
+          .select()
+          .from(schema.contacts)
+          .where(and(eq(schema.contacts.businessId, businessId), inArray(schema.contacts.id, ids), isNull(schema.contacts.deletedAt)))
+          .orderBy(asc(schema.contacts.name))
+          .all()
       : []
     : listContacts(businessId);
   return candidates
@@ -217,10 +233,10 @@ export function upsertContact(businessId: string, input: Partial<ContactInput> &
   const c = cleanContact(merged, language);
   if ("error" in c) return c;
   if (cur) {
-    const row = db.update(schema.contacts).set(c.value).where(eq(schema.contacts.id, cur.id)).returning().get();
+    const row = db.update(schema.contacts).set({ ...c.value, updatedBy: by }).where(eq(schema.contacts.id, cur.id)).returning().get();
     return { contact: row, created: false };
   }
-  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value, createdBy: by }).returning().get(), created: true };
+  return { contact: db.insert(schema.contacts).values({ businessId, ...c.value, createdBy: by, updatedBy: by }).returning().get(), created: true };
 }
 
 /** An address-book entry whose name matches exactly (for WhatsApp targets). */

@@ -11,9 +11,9 @@ import { useBreadcrumb } from "@/components/breadcrumb";
 import { SidePeek, SidePeekLayout, useUrlPeek } from "@/components/side-peek";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { importContactsAction } from "@/app/b/[id]/studio/actions";
 import { dateLocale, type MessageKey } from "@/lib/i18n";
-import type { Mate } from "../types";
+import type { Mate } from "@/app/b/[id]/context/types";
+import { importContactsAction } from "./actions";
 import { PersonPeek } from "./person-peek";
 import { FOLLOW_UP, KIND_TONE, KINDS, type HistoryItem, type PersonRow, type View } from "./shared";
 
@@ -52,7 +52,7 @@ export function People({
   const peek = useUrlPeek("c");
   const [q, setQ] = useState("");
   const [importing, setImporting] = useState(false);
-  const base = `/b/${businessId}/context/people`;
+  const base = `/b/${businessId}/contacts`;
   const views: { key: View; label: string }[] = [
     { key: "all", label: t("context.view.all") },
     { key: "follow_up", label: t("context.view.followUp") },

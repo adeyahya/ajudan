@@ -38,8 +38,8 @@ import type { DuplicateGroup, LibraryItem } from "@/lib/assets";
 import type { MessageKey } from "@/lib/i18n";
 import { MEDIA_ACCEPT, type MediaKind } from "@/lib/media-types";
 import { deleteAssets, findDuplicateAssets, organizeAssets, removeDuplicateAssets } from "./actions";
-import { PlanTask, type MateOption } from "./_components/plan-task";
-import { DeleteDialog, MoreMenu, PropRow, StudioShell } from "./_components/studio-shell";
+import { PlanTask, type MateOption } from "@/components/plan-task";
+import { DeleteDialog, MoreMenu, PropRow, WorkspaceShell } from "@/components/workspace-ui";
 
 const KINDS: { key: MediaKind | "all"; label: MessageKey }[] = [
   { key: "all", label: "studio.lib.kind.all" },
@@ -228,7 +228,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
   );
 
   return (
-    <StudioShell peek={peek}>
+    <WorkspaceShell title={t("nav.library")} peek={peek}>
       <div
         className="grid gap-6 @3xl:grid-cols-[220px_minmax(0,1fr)]"
         onDragOver={(e) => {
@@ -435,7 +435,7 @@ export function Library({ businessId, items, teammates }: { businessId: string; 
         body={t("studio.lib.deleteBody")}
         onConfirm={confirmDelete}
       />
-    </StudioShell>
+    </WorkspaceShell>
   );
 }
 

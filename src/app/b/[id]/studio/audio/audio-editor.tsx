@@ -12,7 +12,7 @@ import { AUDIO_FORMATS, formatTime, type AudioSpec } from "@/lib/edits";
 import type { EditorSource } from "@/lib/studio-data";
 import { renderEditNow, saveEdit } from "../actions";
 import { EditsList, fileUrl, RenderResult } from "../_components/edits-list";
-import { localizeError, PropRow } from "../_components/studio-shell";
+import { localizeError, PropRow } from "@/components/workspace-ui";
 
 const BINS = 900;
 

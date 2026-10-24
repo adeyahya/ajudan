@@ -15,7 +15,7 @@ import type { MessageKey } from "@/lib/i18n";
  *   useShortcut("escape", close, { allowInInputs: true });
  *
  * Global keys (mounted once by the business shell through useGlobalShortcuts):
- *   ⌘K search · ⌘\ sidebar · ⌘/ this list · g then c/o/i/w/k/t → Chat/Office/Inbox/Work/Konteks/Team.
+ *   ⌘K search · ⌘\ sidebar · ⌘/ this list · g then c/o/i/w/k/t → Chat/Office/Inbox/Work/Konteks/Team, h/d/l/p → Home/Docs/Library/Contacts.
  */
 
 /** True when the key event comes from a text field or rich-text editor. */
@@ -78,7 +78,7 @@ export function useShortcut(
   }, [combos, enabled, allowInInputs]);
 }
 
-/** g-then-letter navigation targets (Chat/Office/Inbox/Work/Konteks/Team). */
+/** g-then-letter navigation targets (Chat/Office/Inbox/Work/Konteks/Team, Home/Docs/Library/Contacts). */
 export const GO_KEYS: { key: string; href: string; label: MessageKey }[] = [
   { key: "c", href: "", label: "nav.chat" },
   { key: "o", href: "/office", label: "nav.office" },
@@ -86,6 +86,10 @@ export const GO_KEYS: { key: string; href: string; label: MessageKey }[] = [
   { key: "w", href: "/deliverables", label: "nav.work" },
   { key: "k", href: "/context", label: "nav.context" },
   { key: "t", href: "/team", label: "nav.team" },
+  { key: "h", href: "/home", label: "nav.home" },
+  { key: "d", href: "/docs", label: "nav.docs" },
+  { key: "l", href: "/library", label: "nav.library" },
+  { key: "p", href: "/contacts", label: "nav.contacts" },
 ];
 
 /** The shell's global keys. `go` receives a GO_KEYS href (relative to /b/[id]). */

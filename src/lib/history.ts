@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Task } from "@/db/schema";
 import { HUMAN } from "@/lib/humans";
@@ -26,9 +26,12 @@ export function taskHistory(teammateId: string, beforeTask: Pick<Task, "id" | "c
     .select({ id: schema.deliverables.id, taskId: schema.deliverables.taskId, title: schema.deliverables.title })
     .from(schema.deliverables)
     .where(
-      inArray(
-        schema.deliverables.taskId,
-        rows.map((t) => t.id),
+      and(
+        inArray(
+          schema.deliverables.taskId,
+          rows.map((t) => t.id),
+        ),
+        isNull(schema.deliverables.deletedAt),
       ),
     )
     .all()) {

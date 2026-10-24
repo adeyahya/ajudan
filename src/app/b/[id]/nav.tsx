@@ -8,10 +8,14 @@ import {
   Check,
   ChevronDown,
   Clapperboard,
+  Contact,
+  FileText,
   Folder,
   FolderCheck,
   Headset,
   Home,
+  House,
+  Images,
   Inbox,
   Menu,
   MessageSquare,
@@ -20,6 +24,7 @@ import {
   Plus,
   Search,
   Store,
+  Trash2,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -54,7 +59,7 @@ import { TopBar } from "./top-bar";
  * The business shell (UI-PLAN §2.5): one Notion-style left sidebar (workspace switcher,
  * search, pages, collapsible sections, worker + spend footer), a 44px top bar with
  * breadcrumbs, the ⌘K palette, toasts and global shortcuts. Phone: a bottom bar
- * (Chat, Inbox, Work, Menu) and the same sidebar in a left sheet.
+ * (Home, Chat, Inbox, Work, Menu) and the same sidebar in a left sheet.
  *
  * Sidebar width (200–360, default 240) and collapsed state persist in localStorage
  * (`ajudan:sidebar:w`, `ajudan:sidebar:collapsed`, sections `ajudan:sidebar:sec:<name>`)
@@ -62,22 +67,30 @@ import { TopBar } from "./top-bar";
  * ⌘\ toggles it; `useSidebar()` exposes the same from any client component below.
  */
 
-type Item = { href: string; label: MessageKey; icon: LucideIcon; title?: MessageKey };
+/** `match`: the path prefix that marks the item active, when it differs from `href`. */
+type Item = { href: string; label: MessageKey; icon: LucideIcon; title?: MessageKey; match?: string };
 
-/** Where the owner spends the day. Chat is home: the manager, with the office above it. */
-const PRIMARY: Item[] = [
+/** The owner's own things (docs/HYBRID-PLAN.md): the same objects teammates reach through tools. */
+const WORKSPACE: Item[] = [
+  { href: "/home", label: "nav.home", icon: House },
+  { href: "/docs", label: "nav.docs", icon: FileText },
+  { href: "/library", label: "nav.library", icon: Images },
+  { href: "/contacts", label: "nav.contacts", icon: Contact },
+  { href: "/files", label: "nav.files", icon: Folder },
+];
+/** The AI team. Chat is the manager, with the office above it. */
+const TEAM: Item[] = [
   { href: "", label: "nav.chat", icon: MessageSquare },
   { href: "/office", label: "nav.office", icon: Building2 },
   { href: "/approvals", label: "nav.inbox", icon: Inbox },
   { href: "/deliverables", label: "nav.work", icon: FolderCheck },
   { href: "/context", label: "nav.context", icon: BookOpen },
   { href: "/team", label: "nav.team", icon: Users },
-];
-const WORKSPACE: Item[] = [
   { href: "/desk", label: "nav.desk", icon: Headset },
-  { href: "/studio", label: "nav.studio", icon: Clapperboard },
-  { href: "/files", label: "nav.files", icon: Folder },
+  { href: "/studio/video", label: "nav.studio", icon: Clapperboard, match: "/studio" },
 ];
+/** Reachable from the palette (and the pages that link to them), not listed in the sidebar. */
+const OTHER: Item[] = [{ href: "/trash", label: "nav.trash", icon: Trash2 }];
 const SETTINGS: Item[] = [
   { href: "/profile", label: "nav.business", icon: Store },
   { href: "/health", label: "nav.health", icon: Activity, title: "nav.healthTitle" },
@@ -85,7 +98,7 @@ const SETTINGS: Item[] = [
 ];
 
 /** All destinations with their labels (breadcrumbs, palette). */
-export const NAV_ITEMS: Item[] = [...PRIMARY, ...WORKSPACE, ...SETTINGS];
+export const NAV_ITEMS: Item[] = [...WORKSPACE, ...TEAM, ...SETTINGS, ...OTHER];
 
 export function isActive(pathname: string, base: string, href: string) {
   if (href === "") return pathname === base || pathname === `${base}/manager` || pathname.startsWith(`${base}/teammates/`);
@@ -319,7 +332,7 @@ function SidebarContent({
       icon={item.icon}
       label={t(item.label)}
       title={item.title ? t(item.title) : undefined}
-      active={isActive(pathname, base, item.href)}
+      active={isActive(pathname, base, item.match ?? item.href)}
       trailing={item.href === "/approvals" ? <CountPill count={pendingApprovals} /> : undefined}
       action={
         item.href === "/context" ? (
@@ -358,10 +371,11 @@ function SidebarContent({
           <Kbd className="hidden bg-transparent lg:inline-flex">{mod}K</Kbd>
         </button>
 
-        <div className="mt-2 space-y-px">{PRIMARY.map(row)}</div>
-
         <NavSection name="workspace" label={t("nav.workspace")}>
           {WORKSPACE.map(row)}
+        </NavSection>
+        <NavSection name="team" label={t("nav.teamGroup")}>
+          {TEAM.map(row)}
         </NavSection>
         <NavSection name="settings" label={t("nav.settings")}>
           {settings.map(row)}
@@ -603,6 +617,7 @@ function BottomBar({ base, pending, onMenu }: { base: string; pending: number; o
   const t = useT();
   const pathname = usePathname();
   const items: { href: string; label: MessageKey; icon: LucideIcon }[] = [
+    { href: "/home", label: "nav.home", icon: House },
     { href: "", label: "nav.chat", icon: MessageSquare },
     { href: "/approvals", label: "nav.inbox", icon: Inbox },
     { href: "/deliverables", label: "nav.work", icon: FolderCheck },

@@ -19,6 +19,11 @@ import { cn } from "@/lib/utils";
  */
 
 const SECTIONS: Record<string, MessageKey> = {
+  home: "nav.home",
+  docs: "nav.docs",
+  library: "nav.library",
+  contacts: "nav.contacts",
+  trash: "nav.trash",
   office: "nav.office",
   approvals: "nav.inbox",
   deliverables: "nav.work",
@@ -66,7 +71,8 @@ export function TopBar({
     if (section === "teammates" && sub) crumbs.push({ label: teammates.find((m) => m.id === sub)?.name ?? "…" });
     if (section === "manager") crumbs.push({ label: t("nav.manager") });
   } else if (SECTIONS[section]) {
-    crumbs.push({ label: t(SECTIONS[section]), href: `${base}/${section}` });
+    // The Studio's own index only redirects to the library: its crumb opens the video editor.
+    crumbs.push({ label: t(SECTIONS[section]), href: section === "studio" ? `${base}/studio/video` : `${base}/${section}` });
   }
   crumbs.push(...pageCrumbs);
 

@@ -148,7 +148,7 @@ export function PageView(p: {
   const editorData: EditorData = {
     ...p.editor,
     openPage: (id) => router.push(`${base}?page=${id}`),
-    openContact: (id) => router.push(`${base}/people?c=${id}`),
+    openContact: (id) => router.push(`/b/${businessId}/contacts?c=${id}`),
   };
 
   const always = p.mates.filter((m) => p.readers.find((r) => r.teammateId === m.id)?.mode === "always");
@@ -498,7 +498,7 @@ function CoverPicker({ covers, businessId, onPick, children }: { covers: CoverIm
           <div className="px-4 py-6 text-center">
             <p className="text-[13px] text-muted-foreground">{t("context.noCovers")}</p>
             <Button asChild size="sm" variant="secondary" className="mt-3">
-              <Link href={`/b/${businessId}/studio`}>{t("context.openLibrary")}</Link>
+              <Link href={`/b/${businessId}/library`}>{t("context.openLibrary")}</Link>
             </Button>
           </div>
         )}
@@ -513,7 +513,7 @@ function DatabaseBlock({ businessId, count }: { businessId: string; count: numbe
   const tn = useTn();
   return (
     <Link
-      href={`/b/${businessId}/context/people`}
+      href={`/b/${businessId}/contacts`}
       className="group flex items-center gap-3 rounded-lg border border-border p-3 transition-colors duration-100 hover:bg-hover"
     >
       <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">

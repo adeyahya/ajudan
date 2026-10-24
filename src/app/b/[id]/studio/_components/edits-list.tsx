@@ -10,7 +10,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { Edit } from "@/db/schema";
 import type { MessageKey } from "@/lib/i18n";
 import { deleteEdit } from "../actions";
-import { DeleteDialog, MoreMenu } from "./studio-shell";
+import { DeleteDialog, MoreMenu } from "@/components/workspace-ui";
 
 const TONE = { draft: "gray", queued: "blue", rendering: "yellow", done: "green", failed: "red" } as const;
 const LABEL: Record<Edit["status"], MessageKey> = {
@@ -109,7 +109,7 @@ export function RenderResult({ businessId, edit }: { businessId: string; edit?: 
             {edit.output.replace(/^media\//, "")}
           </a>{" "}
           ·{" "}
-          <Link href={`/b/${businessId}/studio`} className="text-primary hover:underline">
+          <Link href={`/b/${businessId}/library`} className="text-primary hover:underline">
             {t("studio.render.inLibrary")}
           </Link>
         </p>

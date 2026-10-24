@@ -1,18 +1,19 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { TableSkeleton } from "@/components/kit";
+import { withQuery } from "@/lib/url-query";
 
-/** The address book lives in Konteks → People now (with import and export in its "…" menu). */
-export default function ContactsPage(props: PageProps<"/b/[id]/studio/contacts">) {
+/** The address book lives in /b/[id]/contacts now. */
+export default function StudioContactsPage(props: PageProps<"/b/[id]/studio/contacts">) {
   return (
     <Suspense fallback={<TableSkeleton />}>
-      <Redirect params={props.params} />
+      <Redirect {...props} />
     </Suspense>
   );
 }
 
-async function Redirect({ params }: { params: PageProps<"/b/[id]/studio/contacts">["params"] }) {
+async function Redirect({ params, searchParams }: PageProps<"/b/[id]/studio/contacts">) {
   const { id } = await params;
-  redirect(`/b/${id}/context/people`);
+  redirect(withQuery(`/b/${id}/contacts`, await searchParams));
   return null;
 }
