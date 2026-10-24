@@ -13,7 +13,7 @@ fs.writeFileSync(path.join(voiceDir, ".ready"), "");
 process.env.AJUDAN_VOICE_DIR = voiceDir;
 
 const { db, schema } = await import("@/db");
-const { speakable, voiceAvailable } = await import("@/lib/voice");
+const { soundsLike, speakable, voiceAvailable } = await import("@/lib/voice");
 const { voiceSettings } = await import("@/lib/voice-settings");
 const { addressedTeammate, voiceBlocked, wantsVoice } = await import("../worker/humans");
 
@@ -25,6 +25,10 @@ describe("speakable", () => {
       "Siap Pak! Laporan hari ini: 3 pesanan baru. 1 pertanyaan ongkir.",
     );
     expect(speakable("Lihat [katalog](https://x.id/k) ya 🙏")).toBe("Lihat katalog ya");
+  });
+
+  it("reads brackets and quotes as pauses", () => {
+    expect(speakable('ganti dengan carousel DANIS (jam 18.30) dan Reel "3 hal" 👍')).toBe("ganti dengan carousel DANIS, jam 18.30, dan Reel 3 hal");
   });
 
   it("cuts a long message at a sentence", () => {
@@ -86,5 +90,15 @@ describe("a message that opens with a teammate's name", () => {
     expect(addressedTeammate(["Ri, cek"], biz.id)).toBeNull(); // too short to tell
     expect(addressedTeammate(["ini laporannya ya"], biz.id)).toBeNull(); // not "Rini"
     expect(addressedTeammate(["Jeng tolong"], biz.id)).toBeNull(); // a short form needs the comma
+  });
+});
+
+describe("checking a take before it's sent", () => {
+  const asked = "siap mas, Reel mie dibatalkan dan fotonya nggak dipakai dulu. Sinta aku minta ganti slot malam ini dengan carousel DANIS";
+  it("passes speech that says the text, misheard words and all", () => {
+    expect(soundsLike(asked, "Siap mas, Realme dibatalkan dan fotonya gak dipakai dulu. Sinta aku minta ganti slot malam ini dengan karusel danis")).toBe(true);
+  });
+  it("fails noise that whisper fills in with stock phrases", () => {
+    for (const junk of ["Terima kasih telah menonton!", "Jangan lupa like, share, dan subscribe ya", "Intro"]) expect(soundsLike(asked, junk)).toBe(false);
   });
 });

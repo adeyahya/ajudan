@@ -51,14 +51,33 @@ def spell_numbers(text, lang):
         return text
     lang = lang.split("-")[0].lower()
     group = "." if lang in ("id", "ms", "de", "nl", "es", "it", "pt", "tr", "vi") else ","
-    # 150.000 / 150,000 -> 150000 (thousands separators of this language)
-    text = re.sub(r"(?<=\d)" + re.escape(group) + r"(?=\d{3}\b)", "", text)
+    decimal = "," if group == "." else "."
+    point = {"id": "koma", "ms": "perpuluhan", "en": "point"}.get(lang, "")
 
     def words(n):
         try:
             return num2words(int(n), lang=lang)
         except (NotImplementedError, OverflowError, ValueError):
             return n
+
+    # Times first: "jam 18.30" / "18:30" -> "delapan belas tiga puluh" (a stray "." in the
+    # middle of the words makes OmniVoice produce noise), "19.00" -> "sembilan belas".
+    def clock(m):
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 24 or mi > 59:
+            return m.group()
+        return words(h) if mi == 0 else f"{words(h)} {words(mi)}"
+
+    sep = r"[.:]" if group == "." else r":"
+    text = re.sub(r"\b(\d{1,2})" + sep + r"(\d{2})\b(?!" + re.escape(group) + r"\d)", clock, text)
+    # 150.000 / 150,000 -> 150000 (thousands separators of this language)
+    text = re.sub(r"(?<=\d)" + re.escape(group) + r"(?=\d{3}\b)", "", text)
+    # 2,5 -> "dua koma lima" (digits after the point one by one)
+    text = re.sub(
+        r"(\d+)" + re.escape(decimal) + r"(\d+)",
+        lambda m: f"{words(m.group(1))} {point} {' '.join(words(d) for d in m.group(2))}".replace("  ", " "),
+        text,
+    )
 
     if lang in CURRENCY:
         sym, name = CURRENCY[lang]

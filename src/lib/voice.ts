@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { CONFIG_DIR } from "@/lib/folders";
 import { dataDir } from "@/lib/paths";
+import { speechAvailable, transcribe } from "@/lib/speech";
 import type { VoiceSettings } from "@/lib/voice-settings";
 
 /**
@@ -92,9 +93,14 @@ async function startServer(): Promise<number> {
   }
 }
 
+/** Tries per voice note: OmniVoice now and then makes noise instead of speech. */
+const ATTEMPTS = 3;
+
 /**
  * Say `text` in the business's voice and save it as a WhatsApp voice note (OGG/Opus)
- * under work/voice/. Returns the folder-relative path.
+ * under work/voice/. Returns the folder-relative path. Each take is listened to with
+ * whisper.cpp (src/lib/speech.ts) and made again when it doesn't say the text; after
+ * ATTEMPTS bad takes it throws, so the person gets the text only, never noise.
  */
 export async function speak(text: string, settings: VoiceSettings, language: string, signal?: AbortSignal): Promise<string> {
   const port = await serverPort();
@@ -103,14 +109,25 @@ export async function speak(text: string, settings: VoiceSettings, language: str
   fs.mkdirSync(path.dirname(ogg), { recursive: true });
   const wav = ogg.replace(/\.ogg$/, ".wav");
   const clone = settings.refAudio && settings.refText ? { ref_audio: path.join(dataDir(), settings.refAudio), ref_text: settings.refText } : { instruct: settings.instruct };
-  const res = await fetch(`http://127.0.0.1:${port}/speak`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, out: wav, language, ...clone }),
-    signal: AbortSignal.any([AbortSignal.timeout(180_000), ...(signal ? [signal] : [])]),
-  });
-  const out = (await res.json()) as { seconds?: number; error?: string };
-  if (!res.ok) throw new Error(`The voice failed: ${out.error ?? res.status}`);
+  const check = speechAvailable();
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`http://127.0.0.1:${port}/speak`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, out: wav, language, ...clone }),
+      signal: AbortSignal.any([AbortSignal.timeout(180_000), ...(signal ? [signal] : [])]),
+    });
+    const out = (await res.json()) as { seconds?: number; error?: string };
+    if (!res.ok) throw new Error(`The voice failed: ${out.error ?? res.status}`);
+    if (!check) break;
+    const heard = await transcribe(wav, { language, signal }).catch(() => null);
+    if (!heard || soundsLike(text, heard.text)) break;
+    console.warn(`[voice] take ${attempt} didn't say the text (heard "${heard.text.slice(0, 60)}")`);
+    if (attempt === ATTEMPTS) {
+      fs.rmSync(wav, { force: true });
+      throw new Error(`the voice made ${ATTEMPTS} unclear takes`);
+    }
+  }
   try {
     // WhatsApp voice notes: Opus in Ogg, mono, 48 kHz.
     await run(FFMPEG, ["-hide_banner", "-loglevel", "error", "-y", "-i", wav, "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", "-application", "voip", ogg]);
@@ -118,6 +135,22 @@ export async function speak(text: string, settings: VoiceSettings, language: str
     fs.rmSync(wav, { force: true });
   }
   return rel;
+}
+
+/**
+ * Does what whisper heard match the text we asked for? Enough of the text's words
+ * (three letters or more; numbers are spelled out by the server, so they're skipped)
+ * must be heard, allowing for spelling: "Reel" heard as "Realme", "Orucraft" as
+ * "orukraf". A bad take ("Terima kasih telah menonton!") shares almost none.
+ */
+export function soundsLike(expected: string, heard: string) {
+  const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^\p{L}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3);
+  const want = [...new Set(words(expected))];
+  if (want.length < 3) return true; // too short to judge
+  const got = words(heard);
+  const close = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
+  const found = want.filter((w) => got.some((g) => close(w, g))).length;
+  return found / want.length >= 0.4;
 }
 
 /**
@@ -132,6 +165,9 @@ export function speakable(text: string) {
     .replace(/[*_`#>~|]/g, "")
     .replace(/^\s*(?:[-•]|\d+[.)])\s+/gm, "")
     .replace(/\p{Extended_Pictographic}️?/gu, "")
+    // Brackets and quotes read as pauses; OmniVoice can derail on them.
+    .replace(/\s*[()[\]{}]\s*/g, ", ")
+    .replace(/["“”]/g, "")
     .replace(/\s*\n+\s*/g, ". ")
     // "Laporan:. 3 pesanan" → "Laporan: 3 pesanan"; a label left without its link goes.
     .replace(/([:;,])\s*\.\s*/g, "$1 ")
