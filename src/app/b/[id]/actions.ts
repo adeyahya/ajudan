@@ -5,6 +5,8 @@ import { refresh } from "next/cache";
 import { db, schema } from "@/db";
 import { logEvent } from "@/lib/events";
 import { createTask } from "@/lib/tasks";
+import { describeRef, linksFor, type ObjectRef, type RefInfo } from "@/lib/links";
+import { historyFor } from "@/lib/object-history";
 
 /** Server Functions shared by several areas of a business (workspace pages, Studio). */
 
@@ -31,4 +33,23 @@ export async function planTask(businessId: string, teammateId: string, instructi
   logEvent({ businessId, teammateId, taskId: task.id, type: "studio_planned", message: `You planned "${task.title}" for ${mate.name} from the Studio` });
   refresh();
   return { ok: `Queued for ${mate.name}: "${task.title}"` };
+}
+
+export type ObjectPanelData = {
+  links: (RefInfo & { direction: "out" | "in"; createdBy: string })[];
+  history: { id: string; action: string; by: string; createdAt: number }[];
+};
+
+/**
+ * What the shared object panel shows for one doc, deliverable, asset or contact
+ * (src/components/object-panel.tsx): its links in both directions and its history.
+ */
+export async function loadObjectPanel(businessId: string, ref: ObjectRef): Promise<ObjectPanelData> {
+  ownBusiness(businessId);
+  const links = linksFor(businessId, ref).flatMap((l) => {
+    const info = describeRef(businessId, l);
+    return info ? [{ ...info, direction: l.direction, createdBy: l.createdBy }] : [];
+  });
+  const history = historyFor(businessId, ref.type, ref.id, 50).map((h) => ({ id: h.id, action: h.action, by: h.by, createdAt: h.createdAt.getTime() }));
+  return { links, history };
 }
