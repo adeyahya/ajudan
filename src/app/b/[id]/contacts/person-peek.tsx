@@ -1,24 +1,51 @@
 "use client";
 
-import { Building2, ClipboardList, Flag, Hash, Mail, MessageCircle, Phone, Tag, Trash2 } from "lucide-react";
+import {
+  Building2,
+  CalendarCheck,
+  CalendarClock,
+  CalendarX,
+  Check,
+  ClipboardList,
+  FileText,
+  GitMerge,
+  Hash,
+  History as HistoryIcon,
+  Link2,
+  ListPlus,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Plus,
+  StickyNote,
+  Tag,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useLang, useT } from "@/components/i18n";
-import { Avatar, Badge, Button, cn, ConfirmDialog, IconButton, PropertyList, Textarea } from "@/components/kit";
+import { Avatar, Badge, Button, cn, ConfirmDialog, IconButton, PropertyList, Textarea, type BadgeTone } from "@/components/kit";
+import { ObjectPanel } from "@/components/object-panel";
+import { Segmented } from "@/components/workspace-ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import type { ContactKind } from "@/db/schema";
+import { isDue } from "@/lib/contact-filters";
+import type { TimelineItem } from "@/lib/contact-timeline";
+import type { InteractionKind } from "@/lib/contacts";
 import { dateLocale, type MessageKey } from "@/lib/i18n";
 import { statusTone } from "@/lib/status-tones";
-import { deleteContactAction, followUpAction, saveContactAction } from "./actions";
+import { completeFollowUpAction, deleteContactAction, followUpAction, logInteractionAction, saveContactAction, setFollowUpAction } from "./actions";
 import type { Mate } from "@/app/b/[id]/context/types";
-import { FOLLOW_UP, KIND_TONE, KINDS, type HistoryItem, type PersonRow } from "./shared";
+import { INTERACTIONS, KIND_TONE, KINDS, type PersonRow } from "./shared";
 
-type Form = { name: string; phone: string; email: string; company: string; kind: ContactKind; tags: string; notes: string };
+type Form = { name: string; phone: string; email: string; company: string; kind: ContactKind; tags: string; notes: string; fields: [string, string][] };
 
-const WATCH_TONE: Record<string, "yellow" | "green" | "gray" | "red"> = { waiting: "yellow", replied: "green", no_reply: "red", closed: "gray" };
+const WATCH_TONE: Record<string, BadgeTone> = { waiting: "yellow", replied: "green", no_reply: "red", closed: "gray" };
 
 /** A borderless property input (Notion: looks like text until hovered or focused). */
 function PropInput(props: React.ComponentProps<"input">) {
@@ -34,16 +61,26 @@ function PropInput(props: React.ComponentProps<"input">) {
   );
 }
 
+/** "2026-11-02" in local time, for a date input. */
+const localDay = (iso: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const toFields = (pairs: [string, string][]) => Object.fromEntries(pairs.map(([k, v]) => [k.trim(), v.trim()]).filter(([k, v]) => k && v));
+
 /**
  * One person in the side peek: name, properties (kind, phone with WhatsApp, email,
- * company, tags, follow-up), the summary the team reads, where they're mentioned, and
- * "ask a teammate to follow up". Edits save on blur; a new person (no `contact`) is
- * created with "Add person".
+ * company, tags, follow-up, custom fields), the summary the team reads, a box to log a
+ * call/meeting/note, their timeline, links and history (ObjectPanel), and "ask a
+ * teammate to follow up". Edits save on blur; a new person (no `contact`) is created
+ * with "Add person".
  */
 export function PersonPeek({
   businessId,
   contact,
-  history,
+  timeline,
   mates,
   managerId,
   onCreated,
@@ -51,7 +88,7 @@ export function PersonPeek({
 }: {
   businessId: string;
   contact?: PersonRow;
-  history: HistoryItem[] | null;
+  timeline: TimelineItem[] | null;
   mates: Mate[];
   managerId: string | null;
   onCreated: (id: string) => void;
@@ -67,25 +104,25 @@ export function PersonPeek({
     kind: contact?.kind ?? "customer",
     tags: contact?.tags.join(", ") ?? "",
     notes: contact?.notes ?? "",
+    fields: Object.entries(contact?.fields ?? {}),
   };
   const [f, setF] = useState<Form>(initial);
   const [saved, setSaved] = useState<Form>(initial);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const tags = f.tags.split(",").map((x) => x.trim()).filter(Boolean);
-  const followUp = tags.includes(FOLLOW_UP);
 
+  const payload = (next: Form) => ({ ...next, fields: toFields(next.fields) });
   const save = (next: Form = f) => {
     if (!contact) return;
-    if (JSON.stringify(next) === JSON.stringify(saved) || !next.name.trim()) return;
+    if (JSON.stringify(payload(next)) === JSON.stringify(payload(saved)) || !next.name.trim()) return;
     start(async () => {
-      const r = await saveContactAction(businessId, { id: contact.id, ...next });
+      const r = await saveContactAction(businessId, { id: contact.id, ...payload(next) });
       if ("error" in r) return void toast.error(t("context.peek.saveFailed"), { description: r.error });
       setSaved(next);
       setSavedAt(new Date().toLocaleTimeString(dateLocale(lang), { hour: "2-digit", minute: "2-digit" }));
     });
   };
-  const set = (k: keyof Form, v: string, now = false) => {
+  const set = <K extends keyof Form>(k: K, v: Form[K], now = false) => {
     const next = { ...f, [k]: v };
     setF(next);
     if (now) save(next);
@@ -94,6 +131,7 @@ export function PersonPeek({
     <PropInput value={f[k]} placeholder={placeholder} aria-label={placeholder} onChange={(e) => set(k, e.target.value)} onBlur={() => save()} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} {...extra} />
   );
   const phoneDigits = f.phone.replace(/\D/g, "");
+  const setPair = (i: number, pair: [string, string]) => set("fields", f.fields.map((p, j) => (j === i ? pair : p)));
 
   return (
     <div className="space-y-6">
@@ -142,7 +180,7 @@ export function PersonPeek({
             icon: <Tag />,
             label: t("context.col.kind"),
             value: (
-              <Select value={f.kind} onValueChange={(v) => set("kind", v, true)}>
+              <Select value={f.kind} onValueChange={(v) => set("kind", v as ContactKind, true)}>
                 <SelectTrigger size="sm" className="-mx-2 border-transparent bg-transparent shadow-none" aria-label={t("context.col.kind")}>
                   <SelectValue>
                     <Badge tone={KIND_TONE[f.kind]}>{t(`context.kind.${f.kind}` as MessageKey)}</Badge>
@@ -177,19 +215,51 @@ export function PersonPeek({
           { icon: <Mail />, label: t("context.people.email"), value: field("email", t("context.people.emailPlaceholder"), { type: "email" }) },
           { icon: <Building2 />, label: t("context.col.company"), value: field("company", t("context.people.companyPlaceholder")) },
           { icon: <Hash />, label: t("context.col.tags"), value: field("tags", t("context.people.tagsPlaceholder")) },
-          {
-            icon: <Flag />,
-            label: t("context.peek.tagFollowUp"),
-            value: (
-              <Switch
-                checked={followUp}
-                aria-label={t("context.peek.tagFollowUp")}
-                onCheckedChange={(on) => set("tags", (on ? [...tags, FOLLOW_UP] : tags.filter((x) => x !== FOLLOW_UP)).join(", "), true)}
+          ...(contact ? [{ icon: <CalendarClock />, label: t("contacts.followUp.label"), value: <FollowUpProp key={`${contact.followUpAt}|${contact.followUpNote}`} businessId={businessId} contact={contact} /> }] : []),
+          ...f.fields.map(([k, v], i) => ({
+            icon: <ListPlus />,
+            label: (
+              <PropInput
+                value={k}
+                placeholder={t("contacts.fields.key")}
+                aria-label={t("contacts.fields.key")}
+                onChange={(e) => setPair(i, [e.target.value, v])}
+                onBlur={() => save()}
+                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                className="text-muted-foreground"
               />
             ),
-          },
+            value: (
+              <span className="flex w-full min-w-0 items-center gap-1">
+                <PropInput
+                  value={v}
+                  placeholder={t("contacts.fields.value")}
+                  aria-label={k || t("contacts.fields.value")}
+                  onChange={(e) => setPair(i, [k, e.target.value])}
+                  onBlur={() => save()}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                />
+                <IconButton
+                  label={t("contacts.fields.remove")}
+                  onClick={() =>
+                    set(
+                      "fields",
+                      f.fields.filter((_, j) => j !== i),
+                      true,
+                    )
+                  }
+                >
+                  <X />
+                </IconButton>
+              </span>
+            ),
+          })),
         ]}
       />
+      <Button size="sm" variant="ghost" className="-mt-4 text-muted-foreground" onClick={() => set("fields", [...f.fields, ["", ""]])}>
+        <Plus />
+        {t("contacts.fields.add")}
+      </Button>
 
       <section>
         <h3 className="text-[13px] leading-[18px] font-semibold">{t("context.peek.summary")}</h3>
@@ -205,7 +275,7 @@ export function PersonPeek({
             disabled={!f.name.trim()}
             onClick={() =>
               start(async () => {
-                const r = await saveContactAction(businessId, f);
+                const r = await saveContactAction(businessId, payload(f));
                 if ("error" in r) return void toast.error(t("context.peek.saveFailed"), { description: r.error });
                 toast(t("context.people.added", { name: f.name.trim() }));
                 onCreated(r.id);
@@ -217,44 +287,207 @@ export function PersonPeek({
         </div>
       ) : (
         <>
-          <History items={history} lang={lang} />
-          {mates.length > 0 && <FollowUp businessId={businessId} contactId={contact.id} mates={mates} managerId={managerId} />}
+          <LogInteraction businessId={businessId} contactId={contact.id} />
+          <Timeline items={timeline} name={contact.name} />
+          <ObjectPanel businessId={businessId} objectRef={{ type: "contact", id: contact.id }} />
+          {mates.length > 0 && <AskTeammate businessId={businessId} contactId={contact.id} mates={mates} managerId={managerId} />}
         </>
       )}
     </div>
   );
 }
 
-function History({ items, lang }: { items: HistoryItem[] | null; lang: "en" | "id" }) {
+/** The follow-up property: a date (saved on change), what for (saved on blur), and Done. */
+function FollowUpProp({ businessId, contact }: { businessId: string; contact: PersonRow }) {
   const t = useT();
+  const [day, setDay] = useState(localDay(contact.followUpAt));
+  const [note, setNote] = useState(contact.followUpNote);
+  const [pending, start] = useTransition();
+  const due = isDue(contact.followUpAt);
+  const send = (d: string, n: string) =>
+    start(async () => {
+      const r = await setFollowUpAction(businessId, contact.id, d || null, n);
+      if ("error" in r) toast.error(t("context.peek.saveFailed"), { description: r.error });
+    });
+  return (
+    <div className="w-full min-w-0">
+      <span className="flex min-w-0 items-center gap-1">
+        <PropInput
+          type="date"
+          value={day}
+          aria-label={t("contacts.followUp.date")}
+          onChange={(e) => {
+            setDay(e.target.value);
+            send(e.target.value, note);
+          }}
+          className={cn("w-auto", due && "text-destructive")}
+        />
+        {due && <Badge tone="red">{t("contacts.followUp.due")}</Badge>}
+        {contact.followUpAt && (
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={pending}
+            className="ml-auto h-7"
+            onClick={() =>
+              start(async () => {
+                const r = await completeFollowUpAction(businessId, contact.id);
+                if ("error" in r) return void toast.error(t("context.peek.saveFailed"), { description: r.error });
+                toast(t("contacts.followUp.doneToast", { name: contact.name }));
+              })
+            }
+          >
+            <Check />
+            {t("contacts.followUp.markDone")}
+          </Button>
+        )}
+      </span>
+      {day && (
+        <PropInput
+          value={note}
+          placeholder={t("contacts.followUp.notePlaceholder")}
+          aria-label={t("contacts.followUp.notePlaceholder")}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={() => note !== contact.followUpNote && send(day, note)}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+      )}
+    </div>
+  );
+}
+
+function LogInteraction({ businessId, contactId }: { businessId: string; contactId: string }) {
+  const t = useT();
+  const [kind, setKind] = useState<InteractionKind>("call");
+  const [text, setText] = useState("");
+  const [pending, start] = useTransition();
+  const submit = () =>
+    text.trim() &&
+    start(async () => {
+      const r = await logInteractionAction(businessId, contactId, kind, text);
+      if ("error" in r) return void toast.error(t("context.peek.saveFailed"), { description: r.error });
+      setText("");
+    });
   return (
     <section>
-      <h3 className="mb-2 text-[13px] leading-[18px] font-semibold">{t("context.peek.history")}</h3>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[13px] leading-[18px] font-semibold">{t("contacts.log.title")}</h3>
+        <Segmented value={kind} onChange={setKind} label={t("contacts.log.kind")} options={INTERACTIONS.map((k) => ({ value: k, label: t(`contacts.interaction.${k}` as MessageKey) }))} />
+      </div>
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        placeholder={t(`contacts.log.placeholder.${kind}` as MessageKey)}
+        aria-label={t("contacts.log.title")}
+        className="text-sm"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+        }}
+      />
+      <Button size="sm" variant="secondary" className="mt-2" loading={pending} disabled={!text.trim()} onClick={submit}>
+        {t("contacts.log.button")}
+      </Button>
+    </section>
+  );
+}
+
+const INTERACTION_ICON: Record<InteractionKind, React.ReactNode> = {
+  call: <Phone />,
+  meeting: <Users />,
+  note: <StickyNote />,
+  message: <MessageSquare />,
+};
+
+function itemIcon(i: TimelineItem) {
+  switch (i.kind) {
+    case "whatsapp":
+    case "watch":
+      return <MessageCircle />;
+    case "task":
+      return <ClipboardList />;
+    case "deliverable":
+      return <FileText />;
+    case "link":
+      return <Link2 />;
+    case "interaction":
+      return INTERACTION_ICON[i.interaction ?? "note"];
+    case "follow_up":
+      return i.followUp === "done" ? <CalendarCheck /> : i.followUp === "clear" ? <CalendarX /> : <CalendarClock />;
+    case "change":
+      return i.change === "merge" ? <GitMerge /> : <HistoryIcon />;
+  }
+}
+
+/** Everything with this person, newest first (src/lib/contact-timeline.ts). */
+function Timeline({ items, name }: { items: TimelineItem[] | null; name: string }) {
+  const t = useT();
+  const lang = useLang();
+  const when = (iso: string) => new Date(iso).toLocaleString(dateLocale(lang), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const day = (iso: string) => new Date(iso).toLocaleDateString(dateLocale(lang), { day: "numeric", month: "short", year: "numeric" });
+  const who = (i: TimelineItem) => i.who ?? (i.by === "owner" ? t("contacts.timeline.you") : undefined);
+
+  const describe = (i: TimelineItem): { title: string; label: string; badge?: { tone: BadgeTone; label: string } } => {
+    switch (i.kind) {
+      case "whatsapp":
+        return { title: i.title || t("contacts.timeline.media"), label: i.direction === "in" ? t("contacts.timeline.waFrom", { name }) : t("contacts.timeline.waTo", { name }) };
+      case "watch":
+        return {
+          title: i.title,
+          label: i.direction === "in" ? t("contacts.timeline.watchReply", { name }) : t("contacts.timeline.watchSent"),
+          badge: i.status && i.direction === "out" ? { tone: WATCH_TONE[i.status] ?? "gray", label: t(`context.watch.${i.status}` as MessageKey) } : undefined,
+        };
+      case "task": {
+        const s = statusTone("task", i.status ?? "");
+        return { title: i.title, label: t("contacts.timeline.task"), badge: { tone: s.tone, label: t(s.label) } };
+      }
+      case "deliverable": {
+        const s = statusTone("deliverable", i.status ?? "");
+        return { title: i.title, label: t("contacts.timeline.deliverable"), badge: { tone: s.tone, label: t(s.label) } };
+      }
+      case "link":
+        return { title: i.title, label: t(i.direction === "out" ? "contacts.timeline.linkOut" : "contacts.timeline.linkIn") };
+      case "interaction":
+        return { title: i.title, label: t(`contacts.interaction.${i.interaction ?? "note"}` as MessageKey) };
+      case "follow_up":
+        return {
+          title: i.title || (i.followUpAt ? day(i.followUpAt) : ""),
+          label: t(`contacts.timeline.followUp.${i.followUp ?? "set"}` as MessageKey, { date: i.followUpAt ? day(i.followUpAt) : "" }),
+        };
+      case "change":
+        return { title: i.change === "merge" ? t("contacts.timeline.merged", { count: i.detail ?? "" }) : t(`contacts.timeline.change.${i.change ?? "create"}` as MessageKey), label: t("contacts.timeline.contact") };
+    }
+  };
+
+  return (
+    <section>
+      <h3 className="mb-2 text-[13px] leading-[18px] font-semibold">{t("contacts.timeline.title")}</h3>
       {items === null ? (
         <p className="text-xs text-tertiary">{t("common.loading")}</p>
       ) : items.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">{t("context.peek.noHistory")}</p>
+        <p className="text-[13px] text-muted-foreground">{t("contacts.timeline.empty")}</p>
       ) : (
-        <ul className="-mx-2">
-          {items.map((h) => {
-            const tone = h.kind === "task" ? statusTone("task", h.status) : { tone: WATCH_TONE[h.status] ?? "gray", label: `context.watch.${h.status}` as MessageKey };
+        <ol className="-mx-2">
+          {items.map((i) => {
+            const d = describe(i);
+            const by = who(i);
             const body = (
               <>
-                {h.kind === "whatsapp" ? <MessageCircle className="mt-0.5 size-3.5 shrink-0 text-tertiary" aria-hidden /> : <ClipboardList className="mt-0.5 size-3.5 shrink-0 text-tertiary" aria-hidden />}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] leading-[18px]">{h.title}</span>
-                  <span className="block truncate text-xs text-tertiary">
-                    {h.who} · {new Date(h.at).toLocaleDateString(dateLocale(lang), { day: "numeric", month: "short" })}
-                  </span>
+                <span className="mt-0.5 shrink-0 text-tertiary [&>svg]:size-3.5" aria-hidden>
+                  {itemIcon(i)}
                 </span>
-                <Badge tone={tone.tone}>{t(tone.label)}</Badge>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-[13px] leading-[18px]", i.kind === "interaction" ? "break-words whitespace-pre-wrap" : "truncate")}>{d.title}</span>
+                  <span className="block truncate text-xs text-tertiary">{[d.label, by, when(i.at)].filter(Boolean).join(" · ")}</span>
+                </span>
+                {d.badge && <Badge tone={d.badge.tone}>{d.badge.label}</Badge>}
               </>
             );
             const cls = "flex items-start gap-2 rounded-md px-2 py-1.5";
             return (
-              <li key={h.id}>
-                {h.href ? (
-                  <Link href={h.href} className={cn(cls, "transition-colors duration-100 hover:bg-hover")}>
+              <li key={i.id}>
+                {i.href ? (
+                  <Link href={i.href} className={cn(cls, "transition-colors duration-100 hover:bg-hover")}>
                     {body}
                   </Link>
                 ) : (
@@ -263,13 +496,13 @@ function History({ items, lang }: { items: HistoryItem[] | null; lang: "en" | "i
               </li>
             );
           })}
-        </ul>
+        </ol>
       )}
     </section>
   );
 }
 
-function FollowUp({ businessId, contactId, mates, managerId }: { businessId: string; contactId: string; mates: Mate[]; managerId: string | null }) {
+function AskTeammate({ businessId, contactId, mates, managerId }: { businessId: string; contactId: string; mates: Mate[]; managerId: string | null }) {
   const t = useT();
   const router = useRouter();
   const [mate, setMate] = useState(mates.find((m) => m.id !== managerId)?.id ?? mates[0]?.id ?? "");
