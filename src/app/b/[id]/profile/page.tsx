@@ -1,4 +1,4 @@
-import { Cpu, FolderGit2, Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, ShieldCheck, Store, UserRound } from "lucide-react";
+import { Blocks, Cpu, FolderGit2, Globe, KeyRound, Languages, MessageCircle, MonitorSmartphone, Gauge, ShieldCheck, Store, UserRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
@@ -20,6 +20,8 @@ import { EditProfileDialog } from "./profile-form";
 import { AgentAccessPanel } from "./agent-access-panel";
 import { PermissionsPanel } from "./permissions-panel";
 import { ReposPanel } from "./repos-panel";
+import { McpPanel } from "./mcp-panel";
+import { listMcpServers, specSecrets } from "@/lib/mcp-servers";
 import { SecretsPanel } from "./secrets-panel";
 import { SpendPanel } from "./spend-panel";
 import { VoicePanel } from "./voice-panel";
@@ -47,7 +49,7 @@ export default function ProfilePage(props: PageProps<"/b/[id]/profile">) {
   );
 }
 
-const TABS = ["profile", "permissions", "backend", "whatsapp", "browser", "repos", "credentials", "budget"] as const;
+const TABS = ["profile", "permissions", "backend", "whatsapp", "browser", "repos", "tools", "credentials", "budget"] as const;
 type Tab = (typeof TABS)[number];
 
 function List({ items, lang }: { items: string[]; lang: UiLang }) {
@@ -79,6 +81,7 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
     { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle /> },
     { key: "browser", label: t(lang, "profile.tab.browser"), icon: <MonitorSmartphone /> },
     { key: "repos", label: t(lang, "profile.tab.repos"), icon: <FolderGit2 /> },
+    { key: "tools", label: t(lang, "profile.tab.tools"), icon: <Blocks /> },
     { key: "credentials", label: t(lang, "profile.tab.credentials"), icon: <KeyRound /> },
     { key: "budget", label: t(lang, "profile.tab.budget"), icon: <Gauge /> },
   ];
@@ -218,6 +221,24 @@ async function Content({ params, searchParams }: PageProps<"/b/[id]/profile">) {
       {tab === "backend" && <BackendPanel key={JSON.stringify(biz.aiBackend)} businessId={id} stored={biz.aiBackend} hasKey={Boolean(await backendKey(id))} />}
       {tab === "browser" && <BrowserPanel businessId={id} sites={biz.browserSites} teammatesWithAccess={names((m) => m.browserAccess)} lang={lang} />}
       {tab === "repos" && <ReposPanel businessId={id} teammatesWithAccess={names((m) => m.repoAccess)} lang={lang} />}
+      {tab === "tools" && (
+        <McpPanel
+          businessId={id}
+          servers={listMcpServers(id).map((s) => {
+            const spec = { name: s.name, transport: s.transport, command: s.command ?? undefined, args: s.args, url: s.url ?? undefined, env: s.env, headers: s.headers };
+            return {
+              id: s.id,
+              name: s.name,
+              transport: s.transport,
+              where: s.transport === "stdio" ? [s.command, ...s.args].join(" ") : (s.url ?? ""),
+              note: s.note,
+              secrets: specSecrets(spec),
+              trusted: s.trusted,
+            };
+          })}
+          mates={mates.map((m) => ({ id: m.id, name: m.name, access: m.mcpAccess }))}
+        />
+      )}
       {tab === "credentials" && <SecretsPanel businessId={id} domains={biz.networkDomains} shellMates={names((m) => m.shellAccess)} lang={lang} />}
       {tab === "budget" && <SpendPanel businessId={id} spend={await getSpendRollup(id)} language={biz.language} lang={lang} />}
     </PageBody>

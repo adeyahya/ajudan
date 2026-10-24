@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CanUseTool, McpServerConfig, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { Approval, Business, Repository, Task, Teammate } from "@/db/schema";
+import type { Approval, Business, McpServer, Repository, Task, Teammate } from "@/db/schema";
 import { sameAction } from "@/lib/approvals";
 import { claudeConfigDir, describeToolUse, MODELS, runAgent } from "@/lib/claude";
 import { taskHistory } from "@/lib/history";
@@ -37,6 +37,7 @@ import { BIZ_SERVER, EDIT_BIZ_TOOLS, HTTP_TOOL, HUMAN_TOOLS, OUTWARD_BIZ_TOOLS, 
 import { effectiveAutonomy, editGate, isSupervised } from "@/lib/supervision";
 import { canTeamEdit } from "@/lib/team-edits";
 import { describeCron } from "@/lib/onboarding/schedule";
+import { listMcpServers, teammateMcpConfigs } from "@/lib/mcp-servers";
 import { voiceSettings, type VoiceMode } from "@/lib/voice-settings";
 
 const BUILTIN_TOOLS = ["WebSearch", "WebFetch", "Read", "Write", "Edit", "Glob", "Grep", "Skill"];
@@ -157,6 +158,10 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
     // Connected code repositories: read-only for the file tools, issues through the worker's gh.
     const repos = teammate.repoAccess ? listRepos(business.id) : null;
     const repoDirs = repos?.map((r) => r.path) ?? [];
+    // Tool servers the owner approved for this teammate (request_capability kind "mcp").
+    const extra = teammate.mcpAccess.length ? await teammateMcpConfigs(business.id, teammate) : null;
+    for (const why of extra?.skipped ?? []) ev("text", `Left out the ${why}.`);
+    const extraServer = (toolName: string) => extra?.servers.find((s) => toolName.startsWith(`mcp__${s.name}__`));
     const outward = [...OUTWARD_BIZ_TOOLS, ...(useWhatsapp ? OUTWARD_WA_TOOLS : []), ...(repos ? OUTWARD_GH_TOOLS : [])];
     const biz = createBizServer({
       businessId: business.id,
@@ -245,6 +250,14 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
       if (humans.length && HUMAN_TOOLS.includes(toolName)) {
         return supervised && HUMAN_SEND_TOOLS.has(toolName) ? requestApproval(toolName, input) : { behavior: "allow", updatedInput: input };
       }
+      // Owner-approved tool servers: trusted ones run freely (unless supervised); the
+      // others follow the teammate's freedom, like any outward action.
+      const server = extraServer(toolName);
+      if (server) {
+        if ((server.trusted && !supervised) || freedom === "auto") return { behavior: "allow", updatedInput: input };
+        if (freedom === "ask" || server.trusted) return requestApproval(toolName, input);
+        return { behavior: "deny", message: `You're draft-only: the ${server.name} tools need the owner's OK, so describe what you'd do instead.` };
+      }
       if (outward.includes(toolName)) {
         if (freedom === "auto") return { behavior: "allow", updatedInput: input };
         if (freedom === "ask") return requestApproval(toolName, input);
@@ -322,6 +335,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
         mcpServers[GH_SERVER] = createGithubServer({ business, teammate, taskId: task.id });
         allowedTools.push(...SAFE_GH_TOOLS);
       }
+      if (extra) Object.assign(mcpServers, extra.configs);
       if (useBrowser) {
         setMate({ currentActivity: "Opening the business browser" });
         const cdpEndpoint = await ensureBrowser(business.id, business.name);
@@ -348,7 +362,7 @@ export async function runTask({ taskId, approvalId }: JobPayloads["run_task"]) {
           businessId: business.id,
           cwd,
           model: quickWork ? MODELS.fast : undefined,
-          systemPrompt: buildSystemPrompt(promptMate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt, repos),
+          systemPrompt: buildSystemPrompt(promptMate, business, roster, canDelegate, useBrowser, useWhatsapp, humans, videoWork, context.prompt, repos, extra?.servers ?? []),
           prompt: resume ? (decided ? decisionPrompt(decided) : buildPrompt(task, "", files, true)) : fresh,
           tools: teammate.shellAccess ? [...BUILTIN_TOOLS, "Bash"] : BUILTIN_TOOLS,
           sandbox: teammate.shellAccess ? sandboxFor(cwd, business, repoDirs) : undefined,
@@ -605,6 +619,12 @@ export function isSecretPath(rel: string) {
   );
 }
 
+/** Servers the business has that this teammate doesn't: it can ask for them by name. */
+function mcpOffer(businessId: string, teammate: Teammate) {
+  const others = listMcpServers(businessId).filter((s) => !teammate.mcpAccess.includes(s.name));
+  return others.length ? `; the business already has ${others.map((s) => `${s.name}${s.note ? ` (${s.note.slice(0, 80)})` : ""}`).join(", ")}: ask with just the server name` : "";
+}
+
 function summarizeOutward(toolName: string, input: Record<string, unknown>, who: string) {
   const s = (v: unknown, n = 80) => String(v ?? "").replace(/\s+/g, " ").slice(0, n);
   if (toolName === "mcp__whatsapp__send_message") {
@@ -661,6 +681,9 @@ function summarizeOutward(toolName: string, input: Record<string, unknown>, who:
   if (toolName === `mcp__${BIZ_SERVER}__ask_human` || toolName === `mcp__${BIZ_SERVER}__message_human`) {
     return `${who} wants to WhatsApp ${s(input.name, 40)}: "${s(input.message, 100)}"`;
   }
+  // An owner-approved tool server: name the tool and show what it gets.
+  const m = /^mcp__([a-z0-9_]+?)__(.+)$/.exec(toolName);
+  if (m) return `${who} wants to use ${m[2].replace(/_/g, " ")} (${m[1]}): ${s(JSON.stringify(input), 160)}`;
   return `${who} wants to use ${toolName}`;
 }
 
@@ -745,6 +768,7 @@ function buildSystemPrompt(
   videoWork = false,
   context = "",
   repos: Repository[] | null = null,
+  extraServers: McpServer[] = [],
 ) {
   const role = getRole(teammate.roleKey);
   const list = (items: string[]) => (items.length ? items.map((i) => `- ${i}`).join("\n") : "- (none)");
@@ -817,10 +841,11 @@ ${[
   useBrowser ? "- another site in the business browser (kind \"browser_site\")" : "- the business browser, the owner's logged-in Chrome for Shopee, TikTok and so on (kind \"browser\")",
   useWhatsapp ? null : "- WhatsApp (kind \"whatsapp\"); the owner also chooses which chats on Business → WhatsApp",
   repos ? null : "- the connected code repositories and their GitHub issues (kind \"repos\"), for analysing code or filing a backlog",
+  `- new tools from an MCP server (kind "mcp", server "<name>", with command + args for a local stdio server such as npx -y <package>, or url for a streamable-HTTP one; credentials only as {{secret.NAME}} in env or headers)${mcpOffer(business.id, teammate)}`,
 ]
   .filter(Boolean)
   .join("\n")}
-- A permission given in chat ("I give you access") doesn't change your tools; only an approved request or the owner's switches on the Team page do.
+${extraServers.length ? `\n## Extra tools\nThe owner gave you these tool servers: ${extraServers.map((x) => `${x.name} (mcp__${x.name}__*${x.note ? `: ${x.note}` : ""})`).join("; ")}. ${teammate.autonomy === "auto" ? "Use them when they help." : "Calls to them wait for the owner's OK unless the owner trusts the server, so plan them and batch what you can."}\n` : ""}- A permission given in chat ("I give you access") doesn't change your tools; only an approved request or the owner's switches on the Team page do.
 ${humans.length ? `\n${humanRules(humans, voiceSettings(business.voiceReplies).mode)}\n` : ""}${waitingFor(business, teammate)}${teammate.roleKey === MANAGER_ROLE.key ? `\n${managerRules()}\n` : ""}${useBrowser ? `\n${browserRules(business, teammate.autonomy)}\n` : ""}${useWhatsapp ? `\n${whatsappRules(business, teammate.autonomy)}\n` : ""}${repos ? `\n${githubRules(repos, teammate.autonomy)}\n` : ""}
 ${languageInstruction(business.language)}`;
 }

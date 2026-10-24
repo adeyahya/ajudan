@@ -16,6 +16,8 @@ import type { EngineTool, ToolOut } from "./builtin-tools";
 
 /** Rendering a video or waiting on a page can take long; progress keeps a call alive. */
 const CALL_TIMEOUT_MS = 30 * 60_000;
+/** Starting an outside server (npx may download it first). */
+const CONNECT_TIMEOUT_MS = 2 * 60_000;
 
 export async function connectMcp(servers: Record<string, McpServerConfig>) {
   const clients: Client[] = [];
@@ -35,9 +37,25 @@ export async function connectMcp(servers: Record<string, McpServerConfig>) {
       } else {
         transport = new StdioClientTransport({ command: config.command, args: config.args, env: { ...(process.env as Record<string, string>), ...config.env }, stderr: "ignore" });
       }
-      await client.connect(transport);
-      clients.push(client);
-      for (const t of (await client.listTools()).tools) {
+      let listed: Awaited<ReturnType<Client["listTools"]>>["tools"];
+      if (config.type === "sdk") {
+        await client.connect(transport);
+        clients.push(client);
+        listed = (await client.listTools()).tools;
+      } else {
+        // Outside servers (the browser, ones the owner added) may fail to start: like
+        // Claude Code, the run goes on without that server's tools.
+        try {
+          await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+          clients.push(client);
+          listed = (await client.listTools(undefined, { timeout: CONNECT_TIMEOUT_MS })).tools;
+        } catch (err) {
+          console.warn(`[mcp] ${name} didn't start: ${(err as Error).message}`);
+          await client.close().catch(() => {});
+          continue;
+        }
+      }
+      for (const t of listed) {
         tools.push({
           name: `mcp__${name}__${t.name}`,
           description: t.description ?? t.name,

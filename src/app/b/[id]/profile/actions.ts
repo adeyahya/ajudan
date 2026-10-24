@@ -14,6 +14,7 @@ import { lines, textToGoals } from "@/lib/onboarding/profile-form";
 import { BusinessProfileSchema } from "@/lib/types";
 import { refreshWorkspaces } from "@/lib/workspace";
 import { connectRepo, disconnectRepo, type RepoError } from "@/lib/repos";
+import { findMcpServer, grantMcpAccess, removeMcpServer, revokeMcpAccess, setMcpTrusted } from "@/lib/mcp-servers";
 import { EDIT_AREAS, setTeamEdit, type EditArea } from "@/lib/team-edits";
 import { setSupervised } from "@/lib/supervision";
 import { ACCESS_LEVELS, AGENT_COLLECTIONS, setAgentAccess, type AccessLevel, type AgentCollection } from "@/lib/agent-access";
@@ -193,6 +194,27 @@ export async function connectRepository(businessId: string, dir: string): Promis
 
 export async function disconnectRepository(businessId: string, repoId: string) {
   disconnectRepo(businessId, repoId);
+  refresh();
+}
+
+/** Business → Tools: let a server's tools run without asking each time, or not. */
+export async function setMcpTrustedAction(businessId: string, serverId: string, on: boolean) {
+  setMcpTrusted(businessId, serverId, on === true);
+  refresh();
+}
+
+/** Business → Tools: give a teammate a server's tools, or take them away (from its next run). */
+export async function setMcpAccessAction(businessId: string, teammateId: string, name: string, on: boolean) {
+  if (!findMcpServer(businessId, name)) throw new Error("That server was removed.");
+  const mate = db.select().from(schema.teammates).where(eq(schema.teammates.id, teammateId)).get();
+  if (!mate || mate.businessId !== businessId) throw new Error("Teammate not found");
+  if (on) grantMcpAccess(mate, name);
+  else revokeMcpAccess(businessId, teammateId, name);
+  refresh();
+}
+
+export async function removeMcpServerAction(businessId: string, serverId: string) {
+  removeMcpServer(businessId, serverId);
   refresh();
 }
 

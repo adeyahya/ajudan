@@ -26,6 +26,7 @@ import { syncDeliverableFile } from "@/lib/workfiles";
 import { humanThread, openRequest } from "@/lib/humans";
 import { activeWatches, describeWatch } from "@/lib/watches";
 import { requestCapability, type CapabilityRequest } from "@/lib/capabilities";
+import { checkMcpSpec, findMcpServer, missingMcpSecrets } from "@/lib/mcp-servers";
 import { canTeamEdit, EDIT_AREAS, editOffMessage, type EditArea } from "@/lib/team-edits";
 import { isSupervised } from "@/lib/supervision";
 import { matchIds } from "@/lib/search";
@@ -876,15 +877,21 @@ export function createBizServer(ctx: BizContext) {
 
     tool(
       "request_capability",
-      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, the connected code repositories and their GitHub issues, or letting the team change something itself (edit: contacts, Context pages, the media library, or their own schedules). The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
+      "Ask the owner for an ability you're missing instead of giving up: a credential (API key, token) for an API, running commands in a sandboxed shell, letting your shell reach a domain, the business browser or a site in it, WhatsApp, the connected code repositories and their GitHub issues, letting the team change something itself (edit: contacts, Context pages, the media library, or their own schedules), or new tools from an MCP server (mcp: a stdio command such as npx -y <package>, or a streamable-HTTP URL; or just the name of a server the business already has). The owner sees it on the Approvals page; if they approve, you get a new task to carry on. Never ask the owner to paste credentials into the chat: request a secret instead.",
       {
-        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos", "edit"]),
+        kind: z.enum(["secret", "shell", "domain", "browser", "browser_site", "whatsapp", "repos", "edit", "mcp"]),
         why: z.string().describe("One sentence for the owner: what you'll do with it"),
         name: z.string().optional().describe('secret: a name like "ORUCRAFT_API"'),
         hosts: z.array(z.string()).optional().describe('secret: the hosts it may be sent to, e.g. ["orucraft.com"]'),
         domain: z.string().optional().describe('domain: e.g. "api.orucraft.com"'),
         site: z.string().optional().describe('browser_site: e.g. "seller.shopee.co.id"'),
         area: z.enum(EDIT_AREAS).optional().describe("edit: contacts, context, library or schedule"),
+        server: z.string().optional().describe('mcp: a short lowercase name for the server, e.g. "notion"; its tools become mcp__<server>__<tool>'),
+        command: z.string().optional().describe('mcp (stdio): the program that starts the server, e.g. "npx"'),
+        args: z.array(z.string()).optional().describe('mcp (stdio): its arguments, e.g. ["-y", "@notionhq/notion-mcp-server"]'),
+        url: z.string().optional().describe("mcp (http): the server's streamable-HTTP URL"),
+        env: z.record(z.string(), z.string()).optional().describe('mcp (stdio): environment variables; credentials only as {{secret.NAME}}, e.g. {"NOTION_TOKEN": "{{secret.NOTION}}"}'),
+        headers: z.record(z.string(), z.string()).optional().describe('mcp (http): request headers; credentials only as {{secret.NAME}}, e.g. {"Authorization": "Bearer {{secret.NOTION}}"}'),
       },
       async (a) => {
         let request: CapabilityRequest;
@@ -910,6 +917,30 @@ export function createBizServer(ctx: BizContext) {
             if (canTeamEdit(businessId, a.area)) return ok("The team already has that: go ahead.");
             request = { kind: "edit", area: a.area, why: a.why };
             break;
+          case "mcp": {
+            const name = (a.server ?? "").trim().toLowerCase();
+            const mine = db.select({ mcpAccess: schema.teammates.mcpAccess }).from(schema.teammates).where(eq(schema.teammates.id, teammate.id)).get();
+            const known = findMcpServer(businessId, name);
+            if (known && !a.command && !a.url) {
+              if (mine?.mcpAccess.includes(name)) return ok(`You already have the ${name} tools (mcp__${name}__*). They load when a run starts.`);
+              request = { kind: "mcp", existing: true, name, transport: known.transport, why: a.why };
+              break;
+            }
+            const spec = { name, transport: a.url ? "http" : "stdio", command: a.command?.trim(), args: a.args, url: a.url?.trim(), env: a.env, headers: a.headers } as const;
+            const wrong = checkMcpSpec(spec);
+            if (wrong) return fail(wrong);
+            const missing = missingMcpSecrets(businessId, spec);
+            request = { kind: "mcp", ...spec, why: a.why };
+            const { approval, duplicate } = requestCapability({ businessId, teammate, taskId, request });
+            if (!duplicate) void notifyOwner(approval.id);
+            return ok(
+              `${duplicate ? "That request is already waiting" : "Asked the owner"} on the Approvals page${known ? ` (it replaces the current ${name} server)` : ""}.${
+                missing.length
+                  ? ` It needs the credential${missing.length > 1 ? "s" : ""} ${missing.join(", ")}, which ${missing.length > 1 ? "aren't" : "isn't"} stored for it yet: ask for ${missing.length > 1 ? "them" : "it"} now with request_capability(kind "secret"${spec.transport === "http" ? `, hosts ["${normalizeHost(spec.url ?? "")}"]` : ", hosts: the API the server talks to"}).`
+                  : ""
+              } Don't wait: finish what you can now, tell the owner what you asked for and why. If they approve, you'll get a new task to carry on with the new tools.`,
+            );
+          }
           default:
             request = { kind: a.kind, why: a.why };
         }

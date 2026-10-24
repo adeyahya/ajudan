@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Approval, Teammate } from "@/db/schema";
 import { logEvent } from "@/lib/events";
+import { describeMcpSpec, findMcpServer, grantMcpAccess, missingMcpSecrets, saveMcpServer, type McpSpec } from "@/lib/mcp-servers";
 import { normalizeHost, setSecret } from "@/lib/secrets";
 import { createTask } from "@/lib/tasks";
 import { EDIT_LABELS, setTeamEdit, type EditArea } from "@/lib/team-edits";
@@ -23,7 +24,9 @@ export type CapabilityRequest =
   | { kind: "browser_site"; site: string; why: string }
   | { kind: "whatsapp"; why: string }
   | { kind: "repos"; why: string }
-  | { kind: "edit"; area: EditArea; why: string };
+  | { kind: "edit"; area: EditArea; why: string }
+  /** A tool server: a new one (spec), or one the business already has (no command or url). */
+  | ({ kind: "mcp"; why: string; existing?: boolean } & McpSpec);
 
 export function describeCapability(who: string, r: CapabilityRequest) {
   switch (r.kind) {
@@ -43,6 +46,8 @@ export function describeCapability(who: string, r: CapabilityRequest) {
       return `${who} wants to read the connected code repositories and use their GitHub issues`;
     case "edit":
       return `${who} wants the team to ${EDIT_LABELS[r.area]} by itself`;
+    case "mcp":
+      return r.existing ? `${who} wants to use the ${r.name} tools` : `${who} wants new tools, ${r.name}: ${describeMcpSpec(r)}`;
   }
 }
 
@@ -123,6 +128,17 @@ export async function grantCapability(approval: Approval, opts: { secretValue?: 
       setTeamEdit(business.id, r.area, true);
       granted = `permission for the whole team to ${EDIT_LABELS[r.area]}`;
       break;
+    case "mcp": {
+      if (r.existing && !findMcpServer(business.id, r.name)) throw new Error(`The ${r.name} server was removed meanwhile.`);
+      if (!r.existing) {
+        const missing = missingMcpSecrets(business.id, r);
+        if (missing.length) throw new Error(`Store the credential ${missing.join(", ")} first (approve its request, or add it on Business → Credentials), then approve this.`);
+        saveMcpServer(business.id, r, r.why);
+      }
+      grantMcpAccess(teammate, r.name);
+      granted = `the ${r.name} tools (mcp__${r.name}__*), from your next run on`;
+      break;
+    }
   }
 
   const original = approval.taskId ? db.select().from(schema.tasks).where(eq(schema.tasks.id, approval.taskId)).get() : undefined;

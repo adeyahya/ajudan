@@ -169,6 +169,13 @@
       "when": 1792839921801,
       "tag": "0023_icy_barracuda",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792856045941,
+      "tag": "0024_handy_monster_badoon",
+      "breakpoints": true
     }
   ]
 }

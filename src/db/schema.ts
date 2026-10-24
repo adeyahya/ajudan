@@ -130,6 +130,8 @@ export const teammates = sqliteTable("teammates", {
   shellAccess: integer("shell_access", { mode: "boolean" }).notNull().default(false),
   /** May read the connected code repositories and use GitHub issues through the owner's gh login. Off by default. */
   repoAccess: integer("repo_access", { mode: "boolean" }).notNull().default(false),
+  /** Names of the business's MCP servers (mcp_servers) this teammate may use. */
+  mcpAccess: text("mcp_access", { mode: "json" }).$type<string[]>().notNull().default([]),
   kind: text("kind").$type<TeammateKind>().notNull().default("ai"),
   /** Human teammates: WhatsApp number in international format, digits only ("6281234567890"). */
   phone: text("phone"),
@@ -440,6 +442,38 @@ export const repositories = sqliteTable("repositories", {
   githubRepo: text("github_repo"),
   createdAt: createdAt(),
 });
+
+/**
+ * Extra tool servers (MCP) the owner approved, usually because a teammate asked for one
+ * (request_capability kind "mcp", src/lib/mcp-servers.ts). Env and header values are
+ * plain text or {{secret.NAME}}, filled in from the Keychain when a run starts.
+ */
+export const mcpServers = sqliteTable(
+  "mcp_servers",
+  {
+    id: id(),
+    businessId: text("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    /** Slug the tools are named after: mcp__<name>__<tool>. Unique per business. */
+    name: text("name").notNull(),
+    transport: text("transport").$type<"stdio" | "http">().notNull(),
+    /** stdio: the command and its arguments, run on this computer. */
+    command: text("command"),
+    args: text("args", { mode: "json" }).$type<string[]>().notNull().default([]),
+    /** http: the streamable-HTTP endpoint. */
+    url: text("url"),
+    env: text("env", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+    headers: text("headers", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+    /** Why it was added (the teammate's reason). */
+    note: text("note").notNull().default(""),
+    /** Its tools run without asking; otherwise they follow each teammate's freedom setting. */
+    trusted: integer("trusted", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("mcp_servers_name_idx").on(t.businessId, t.name)],
+);
+export type McpServer = typeof mcpServers.$inferSelect;
 
 export type ContactKind = "customer" | "supplier" | "partner" | "team" | "other";
 

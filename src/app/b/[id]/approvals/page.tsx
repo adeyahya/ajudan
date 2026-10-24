@@ -305,6 +305,20 @@ function ApprovalPreview({
           {r.why}
         </p>
         {r.kind === "shell" && <p className="text-xs text-muted-foreground">{t(lang, "approvals.shellSandbox")}</p>}
+        {r.kind === "mcp" && !r.existing && (
+          <>
+            <BoxLabel>{t(lang, r.transport === "stdio" ? "approvals.mcp.runs" : "approvals.mcp.connects")}</BoxLabel>
+            <code className="block rounded-md border border-border bg-background p-2 font-mono text-xs break-all">
+              {r.transport === "stdio" ? [r.command, ...(r.args ?? [])].join(" ") : r.url}
+              {Object.entries({ ...r.env, ...r.headers }).map(([k, v]) => (
+                <span key={k} className="block text-muted-foreground">
+                  {k}: {v}
+                </span>
+              ))}
+            </code>
+            <p className="text-xs text-muted-foreground">{t(lang, r.transport === "stdio" ? "approvals.mcp.stdioWarn" : "approvals.mcp.httpNote")}</p>
+          </>
+        )}
       </Box>
     );
   }
